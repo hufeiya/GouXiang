@@ -1,0 +1,639 @@
+package com.neethu.gouxiang.ui.chat
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowBackIosNew
+import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.Call
+import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import com.neethu.gouxiang.ui.BubbleItem
+import com.neethu.gouxiang.ui.ChatBubble
+import com.neethu.gouxiang.ui.ChatUiState
+
+/**
+ * 陪伴聊天主页 03(基准 03-chat-main.png / 03-chat-main.xml):
+ *
+ * 全屏角色照片底 + 最新消息白气泡(最近一轮贴底)+ 状态条胶囊
+ * (emoji + 在做什么,点击占位)+ 左下角「名字 >」+ @来源 + 右侧互动列
+ * + 输入条(电话 / 按住说话 / 键盘 / + / 发送)。
+ * 消息列表 LazyColumn reverseLayout:新消息自然贴底,历史向上滚。
+ */
+@Composable
+fun ChatMainScreen(
+    state: ChatUiState,
+    avatarFile: String?,
+    onBack: () -> Unit,
+    onSend: (String) -> Unit,
+    /** 回合进行中的流式草稿(逐字累积;空串=无草稿)。 */
+    streamDraft: String = "",
+    /** 顶栏「记忆」入口(F3,临时入口;角色主页宫格后续功能再接)。 */
+    onOpenMemory: () -> Unit = {},
+    /** 左下角「名字 >」入口(F5:角色主页 04)。 */
+    onOpenCharacterHome: () -> Unit = {},
+    /** 输入条电话图标(F6:进入语音通话页 12)。 */
+    onOpenVoiceCall: () -> Unit = {},
+    /** 右侧互动列末位「历史」(F7:聊天历史页 11,对照 11-history.xml tv_im)。 */
+    onOpenHistory: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    BackHandler { onBack() }
+    Box(modifier = modifier.fillMaxSize()) {
+        // ── 全屏角色照片底(生成缓存命中显示真图,未生成显示渐变占位)──
+        if (avatarFile != null) {
+            AsyncImage(
+                model = java.io.File(avatarFile),
+                contentDescription = state.character?.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color(0xFF565866), Color(0xFF2C2C34), Color(0xFF1A1A20)),
+                        ),
+                    ),
+            )
+        }
+        // 底部渐变遮罩(气泡/信息区可读性,对齐参考图的压暗)
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.55f to Color.Transparent,
+                        1f to Color.Black.copy(alpha = 0.45f),
+                    ),
+                ),
+        )
+        // 左侧竖排「由 AI 生成」(与首页同款)
+        Column(
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .padding(start = 12.dp),
+        ) {
+            "由 AI 生成".forEach { ch ->
+                Text(ch.toString(), color = Color.White.copy(alpha = 0.55f), fontSize = 11.sp)
+            }
+        }
+
+        Column(Modifier.fillMaxSize()) {
+            TopBar(onBack = onBack, onOpenMemory = onOpenMemory)
+            // 消息区占满中部:reverseLayout 使最新一轮贴在信息区之上
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                reverseLayout = true,
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                    start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp,
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (state.sending) {
+                    item(key = "typing") { TypingHint(streamDraft) }
+                }
+                items(state.bubbleItems.asReversed()) { group ->
+                    BubbleGroup(group)
+                }
+                if (state.loadFailed) {
+                    item(key = "failed") {
+                        Text(
+                            "会话不存在",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 14.sp,
+                        )
+                    }
+                }
+            }
+            // ⚡ 灵感圆钮(气泡右侧,对齐参考图右缘)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Box(
+                    Modifier
+                        .size(34.dp)
+                        .background(Color(0xFF3A3A3A).copy(alpha = 0.85f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("⚡", fontSize = 15.sp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            StatusPill(state.status)
+            Spacer(Modifier.height(10.dp))
+            NameAndActionsRow(
+                name = state.character?.name.orEmpty(),
+                source = state.character?.source.orEmpty(),
+                onNameClick = onOpenCharacterHome,
+                onOpenHistory = onOpenHistory,
+            )
+            Spacer(Modifier.height(12.dp))
+            InputBar(onSend = onSend, onOpenVoiceCall = onOpenVoiceCall)
+        }
+    }
+}
+
+/** 顶部:返回 + V 盾 + 右侧搜索/喇叭(沉浸式叠在图上)。 */
+@Composable
+private fun TopBar(onBack: () -> Unit, onOpenMemory: () -> Unit = {}) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+            .height(44.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Filled.ArrowBackIosNew,
+            contentDescription = "返回",
+            tint = Color.White,
+            modifier = Modifier
+                .size(22.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onBack() },
+        )
+        Spacer(Modifier.width(18.dp))
+        Icon(
+            Icons.Filled.Favorite,
+            contentDescription = "会员",
+            tint = Color(0xFFFFC94D),
+            modifier = Modifier.size(24.dp),
+        )
+        Spacer(Modifier.weight(1f))
+        // 记忆入口(F3,临时入口:角色主页宫格后续功能再接)
+        Icon(
+            Icons.Outlined.Psychology,
+            contentDescription = "记忆",
+            tint = Color.White,
+            modifier = Modifier
+                .size(24.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onOpenMemory() },
+        )
+        Spacer(Modifier.width(16.dp))
+        Icon(
+            Icons.Outlined.Search,
+            contentDescription = "搜索",
+            tint = Color.White,
+            modifier = Modifier.size(24.dp),
+        )
+        Spacer(Modifier.width(16.dp))
+        Icon(
+            Icons.Outlined.VolumeUp,
+            contentDescription = "音量",
+            tint = Color.White,
+            modifier = Modifier.size(24.dp),
+        )
+    }
+}
+
+/**
+ * 状态条胶囊:「emoji + 在做什么 ›」(点击占位)。
+ * emoji/text 分字段渲染,绝不按 UTF-16 位切串 —— 实机 F2 验收证据:
+ * take(1) 把 🍔(U+1F354) 切成未配对代理 U+D83C,uiautomator dump 的
+ * KXmlSerializer 抛 IllegalArgumentException(U+d83c) 且渲染成「?◆」。
+ */
+@Composable
+private fun StatusPill(status: com.neethu.gouxiang.chat.StatusLine) {
+    if (status.emoji.isEmpty() && status.text.isEmpty()) return
+    Row(
+        modifier = Modifier
+            .padding(start = 14.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { /* 占位:状态面板后续功能 */ }
+            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (status.emoji.isNotEmpty()) {
+            Text(status.emoji, fontSize = 15.sp)
+            Spacer(Modifier.width(4.dp))
+        }
+        Text(
+            status.text,
+            color = Color(0xFFF2C94C),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.width(4.dp))
+        Text("›", color = Color(0xFFF2C94C), fontSize = 14.sp)
+    }
+}
+
+/**
+ * 左下角「名字 >」+ @来源 + 右侧互动列(点赞/分享/评论/历史)。
+ * dump 11-history:互动列最后一项 message_im_view 内 tv_im=「历史」,
+ * 点击进聊天历史页(参考页里该项文案为「返回」,本地版按 03 的「历史」进页)。
+ */
+@Composable
+private fun NameAndActionsRow(
+    name: String,
+    source: String,
+    onNameClick: () -> Unit,
+    onOpenHistory: () -> Unit = {},
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        Column(
+            Modifier
+                .weight(1f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onNameClick() },
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    name,
+                    color = Color.White,
+                    fontSize = 23.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("›", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "@$source",
+                color = Color.White.copy(alpha = 0.75f),
+                fontSize = 13.sp,
+            )
+        }
+        ActionItem(Icons.Filled.Favorite, "4.7w")
+        ActionItem(Icons.Filled.Share, "727")
+        ActionItem(Icons.Filled.ChatBubble, "2791")
+        ActionItem(Icons.Filled.History, "历史", onClick = onOpenHistory)
+    }
+}
+
+@Composable
+private fun ActionItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit = {},
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .padding(start = 16.dp)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onClick() },
+    ) {
+        Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(26.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(label, color = Color.White, fontSize = 12.sp)
+    }
+}
+
+// ── 消息气泡 ────────────────────────────────────────────────────────
+
+/** 一组连发气泡:assistant 白泡靠左,用户粉泡靠右。 */
+@Composable
+private fun BubbleGroup(group: BubbleItem) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = if (group.fromUser) Alignment.End else Alignment.Start,
+    ) {
+        group.bubbles.forEachIndexed { index, bubble ->
+            Spacer(Modifier.height(if (index == 0) 0.dp else 6.dp))
+            SingleBubble(bubble, fromUser = group.fromUser)
+        }
+    }
+}
+
+@Composable
+private fun SingleBubble(bubble: ChatBubble, fromUser: Boolean) {
+    val shape = RoundedCornerShape(
+        topStart = 4.dp,
+        topEnd = 18.dp,
+        bottomStart = 18.dp,
+        bottomEnd = 18.dp,
+    )
+    val bg = if (fromUser) Color(0xFFE84D8A) else Color.White
+    Box(
+        Modifier
+            .widthIn(max = 280.dp)
+            .background(bg, shape)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        when {
+            bubble.kind == "sticker" -> StickerContent(bubble.content)
+            bubble.kind == "img" -> ImageContent(bubble.content)
+            bubble.kind == "voice" -> VoiceContent(bubble.content, fromUser)
+            else -> TextContent(bubble, fromUser)
+        }
+    }
+}
+
+/** 文本泡:() 动作以淡色斜体内联(对齐参考图「(靠在你肩头…)」的观感)。 */
+@Composable
+private fun TextContent(bubble: ChatBubble, fromUser: Boolean) {
+    val actionStyle = SpanStyle(
+        fontStyle = FontStyle.Italic,
+        color = if (fromUser) Color.White.copy(alpha = 0.75f) else Color(0xFF9A9A9A),
+    )
+    val bodyColor = if (fromUser) Color.White else Color(0xFF1A1A1A)
+    val annotated = buildAnnotatedString {
+        bubble.actions.forEach { action ->
+            withStyle(actionStyle) { append("($action)") }
+        }
+        append(bubble.content)
+    }
+    Text(
+        annotated,
+        color = bodyColor,
+        fontSize = 17.sp,
+        lineHeight = 26.sp,
+    )
+}
+
+/** 表情包占位卡:大 emoji + 描述小字。 */
+@Composable
+private fun StickerContent(desc: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("😄", fontSize = 40.sp)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            desc,
+            color = Color(0xFF9A9A9A),
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 图片占位卡:🖼 + 描述(生图接入为后续功能)。 */
+@Composable
+private fun ImageContent(desc: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("🖼️", fontSize = 34.sp)
+        Spacer(Modifier.height(2.dp))
+        Text(
+            desc,
+            color = Color(0xFF9A9A9A),
+            fontSize = 11.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** 语音条占位:麦克风 + 转写文本(语音合成/播放为后续功能)。 */
+@Composable
+private fun VoiceContent(text: String, fromUser: Boolean) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("🎤", fontSize = 20.sp)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text,
+            color = if (fromUser) Color.White else Color(0xFF1A1A1A),
+            fontSize = 16.sp,
+            fontStyle = FontStyle.Italic,
+        )
+    }
+}
+
+// ── 输入条 ──────────────────────────────────────────────────────────
+
+/**
+ * 输入条:电话图标 / 按住说话(语音态,点击切文字态) / 键盘 / + / 发送。
+ * 键盘图标切换 语音 ↔ 文字 两种形态;文字态尾部出粉色发送圆钮。
+ */
+@Composable
+private fun InputBar(onSend: (String) -> Unit, onOpenVoiceCall: () -> Unit = {}) {
+    var textMode by remember { mutableStateOf(false) }
+    var draft by remember { mutableStateOf("") }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .imePadding()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .background(Color(0xFFF3F4F6).copy(alpha = 0.94f), RoundedCornerShape(26.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .height(40.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Outlined.Call,
+            contentDescription = "语音通话",
+            tint = Color(0xFF3A3A3A),
+            modifier = Modifier
+                .size(24.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onOpenVoiceCall() },
+        )
+        if (textMode) {
+            Spacer(Modifier.width(10.dp))
+            BasicTextField(
+                value = draft,
+                onValueChange = { draft = it },
+                singleLine = true,
+                textStyle = TextStyle(
+                    color = Color(0xFF1A1A1A),
+                    fontSize = 16.sp,
+                ),
+                cursorBrush = SolidColor(Color(0xFFE84D8A)),
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (draft.isEmpty()) {
+                            Text("说点什么…", color = Color(0xFF9A9A9A), fontSize = 16.sp)
+                        }
+                        inner()
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            Spacer(Modifier.width(10.dp))
+            // 「按住说话」占位(语音输入为后续功能):点击切到文字输入
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(40.dp)
+                    .clickable { textMode = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("按住说话", color = Color(0xFF3A3A3A), fontSize = 17.sp)
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Icon(
+            Icons.Outlined.Keyboard,
+            contentDescription = if (textMode) "语音输入" else "文字输入",
+            tint = Color(0xFF3A3A3A),
+            modifier = Modifier
+                .size(26.dp)
+                .clickable { textMode = !textMode },
+        )
+        Spacer(Modifier.width(12.dp))
+        Box {
+            Box(
+                Modifier
+                    .size(30.dp)
+                    .background(Color(0xFF2A2A2A), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Add,
+                    contentDescription = "更多",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            // 红点角标(参考图)
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .size(8.dp)
+                    .background(Color(0xFFFF3B30), CircleShape),
+            )
+        }
+        if (textMode) {
+            Spacer(Modifier.width(10.dp))
+            Box(
+                Modifier
+                    .size(36.dp)
+                    .background(
+                        if (draft.isNotBlank()) Color(0xFFE84D8A) else Color(0xFFD9D9D9),
+                        CircleShape,
+                    )
+                    .clickable {
+                        if (draft.isNotBlank()) {
+                            onSend(draft)
+                            draft = ""
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "发送",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 回合进行中:流式打字泡。草稿非空时展示实时累积的回复内容(可见逐字流式),
+ * 末尾带闪烁光标;首字到达前退化为「正在输入…」。渲染在列表底部=reverseLayout 首项。
+ */
+@Composable
+private fun TypingHint(streamDraft: String) {
+    // 尾部预览按码点截(防把代理对劈成未配对高位代理 → dump 必崩,F2 实锤)
+    val draft = streamDraft.takeLastCodePoints(120)
+    Row(
+        modifier = Modifier.padding(start = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier
+                .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(18.dp))
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+        ) {
+            if (draft.isEmpty()) {
+                Text("正在输入…", color = Color(0xFF9A9A9A), fontSize = 14.sp)
+            } else {
+                Text(
+                    buildAnnotatedString {
+                        append(draft)
+                        withStyle(SpanStyle(color = Color(0xFFE84D8A))) { append("▌") }
+                    },
+                    color = Color(0xFF1A1A1A),
+                    fontSize = 15.sp,
+                    lineHeight = 22.sp,
+                )
+            }
+        }
+    }
+}
+
+/** 按 Unicode 码点取尾部(不劈代理对)。 */
+private fun String.takeLastCodePoints(n: Int): String {
+    if (length <= n) return this
+    val pts = codePoints().toArray()
+    return String(pts, (pts.size - n).coerceAtLeast(0), n)
+}
