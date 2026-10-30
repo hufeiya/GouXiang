@@ -194,7 +194,19 @@ internal class DerivativeExecutor(private val app: Context) {
             }
         }
         postDerivativeNotification(savedResult, DerivativeKind.MOMENT, character.name)
+        runMomentInteractions(repo, savedResult.resultIds.toLongOrNull())
         return true
+    }
+
+    /**
+     * 角色帖的一轮互评(H3):动态落库后由其他授权角色各评一条;互评失败
+     * 只释放认领(引擎内兜底),不影响动态任务本身的成功(帖子已真实落库,
+     * 不能因互动失败回拨任务态)。
+     */
+    private suspend fun runMomentInteractions(repo: com.neethu.gouxiang.data.GouXiangRepo, postId: Long?) {
+        val post = postId?.let { repo.db.momentDao().byId(it) } ?: return
+        runCatching { com.neethu.gouxiang.chat.MomentInteractionEngine(repo.db, momentsChannel).runRound(post) }
+            .onFailure { Log.w(TAG, "moment interactions failed post=$postId", it) }
     }
 
     private suspend fun postDerivativeNotification(result: DerivativeResultEntity, kind: DerivativeKind, name: String) {

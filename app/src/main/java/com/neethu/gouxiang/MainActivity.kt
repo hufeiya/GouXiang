@@ -32,8 +32,6 @@ import com.neethu.gouxiang.debug.executeAiCommand
 import com.neethu.gouxiang.debug.parseAiDebugCommand
 import com.neethu.gouxiang.ui.GouXiangBottomBar
 import com.neethu.gouxiang.ui.MainViewModel
-import com.neethu.gouxiang.ui.PlaceholderIcons
-import com.neethu.gouxiang.ui.PlaceholderPage
 import com.neethu.gouxiang.ui.character.CharacterHomeScreen
 import com.neethu.gouxiang.ui.home.HomeFeedScreen
 import com.neethu.gouxiang.ui.chat.ChatMainScreen
@@ -347,7 +345,13 @@ class MainActivity : ComponentActivity() {
                         onOpenCharacterHome = { vm.openCharacterHome(it) },
                         onOpenHistory = { vm.openHistory(it) },
                     )
-                    BottomTab.DISCOVER -> PlaceholderPage("发现", PlaceholderIcons.Discover)
+                    BottomTab.DISCOVER -> com.neethu.gouxiang.ui.discover.DiscoverScreen(
+                        characters = allCharacters,
+                        conversations = conversations,
+                        avatarFiles = avatarFiles,
+                        onOpenMoments = { vm.openMomentsGlobal() },
+                        onOpenCharacterHome = { vm.openCharacterHome(it) },
+                    )
                     BottomTab.CREATE -> com.neethu.gouxiang.ui.character.CharacterStudioScreen(
                         characters = allCharacters,
                         conversations = conversations,
@@ -550,18 +554,28 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // 朋友圈页 06(F9):角色主页「Ta 的朋友圈」进入的全屏覆盖层;
-        // 渲染序在角色主页/心声弹层之后(同层后声明者在上,保证从主页
-        // 进入时盖回主页)。返回/‹ = closeMoments()。
+        // 朋友圈页 06(H1 多角色时间线):角色主页「Ta 的朋友圈」/发现页入口
+        // 进入的全屏覆盖层;渲染序在角色主页/心声弹层之后(同层后声明者在上,
+        // 保证从主页进入时盖回主页)。返回/‹ = closeMoments()。
         if (momentsId != null) {
             Box(Modifier.fillMaxSize()) {
                 com.neethu.gouxiang.ui.moments.MomentsScreen(
                     state = momentsUi,
-                    avatarFile = avatarFiles[momentsUi.characterId],
+                    avatarFiles = avatarFiles,
                     onBack = { vm.closeMoments() },
-                    onGenerate = { momentsId?.let { vm.generateMoment(it) } },
+                    onGenerate = {
+                        // 全局入口(characterId=0)没有当前角色,按钮也不展示;双保险
+                        if (momentsId != null && momentsId!! > 0) vm.generateMoment(momentsId!!)
+                    },
+                    onPublish = { vm.publishUserMoment(it) },
+                    onDeletePost = { vm.deleteUserMoment(it.id) },
+                    onDeleteComment = { _, comment -> vm.deleteUserComment(comment.id) },
                     onLike = { post -> vm.toggleMomentLike(post) },
                     onSendComment = { post, text -> vm.sendMomentComment(post, text) },
+                    onOpenPermissions = { vm.refreshMomentPermissions() },
+                    onTogglePermission = { characterId, field, enabled ->
+                        vm.setMomentPermission(characterId, field, enabled)
+                    },
                     onRetryImage = { vm.retryDerivativeImage(com.neethu.gouxiang.chat.DerivativeKind.MOMENT, it) },
                 )
             }

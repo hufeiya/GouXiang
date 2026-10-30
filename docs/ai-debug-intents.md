@@ -238,6 +238,16 @@ adb shell am start -n $PKG/.MainActivity --es ai_cmd msgs
 | `moments` | `ai_arg`=gen \| like `<postId>` \| comment `<postId> <文本>` | P1 | 对应 `generateMoment:1027` / `toggleMomentLike:1097` / `sendMomentComment:1108` |
 | `moments_list` | — | P1 | 朋友圈帖子清单:`id 点赞数 评论数 文本前40字` |
 
+### 5.6c 朋友圈扩展与发现(H 工作包,2026-10-31 增补)
+
+| 命令 | 参数 | 作用 |
+|---|---|---|
+| `moments_list` | — | **多角色合并时间线**(用户帖 + 参与角色动态,查询层权限过滤后):`id 作者(avatar/user) 赞0/1 评N 「文本前40字」`;真实计数,无伪造社交数据 |
+| `moments` | `ai_arg`=gen \| post `<文本>` \| like `<postId>` \| comment `<postId> <文本>` \| del_post `<postId>` \| del_comment `<commentId>` | gen=对当前打开聊天生成一条角色动态(入队即 OK);post=用户发帖(落库即上屏,互评轮异步跑,授权角色各评一条、一轮为止);like/comment/del_* 与 UI 同一数据路径(只删用户自己的帖/评论) |
+| `moments_perm` | `ai_arg`=`<角色名\|id> <joined\|see\|interact\|daily> <on\|off>` | H2 逐角色权限:参与/看用户动态/评论互动/角色级自动日更(写 `characters` 对应列;自动任务在入队+执行双重拦截,合并时间线与互评候选即时重过滤;手动「生成动态」不受限) |
+
+H 工作包验收 SOP:`open_chat <角色>` → `moments post 今天去了海边` → 轮询 `moments_list`(用户帖出现且授权角色各新增一条 avatar 评论,一轮为止,重发 `moments post` 不会无限互评)→ `moments_perm <角色> interact off` 后再 `moments post`(该角色不再评论)→ `moments_perm <角色> daily off`(自动日更跳过该角色)→ `del_post`/`del_comment` 清场对拍;`open_tab discover`(需 open_tab 支持 discover,或 UI 点击「发现」)看本地角色浏览/搜索/历史。
+
 ### 5.6a 番外剧场与心动事件(F 工作包,2026-10-31 增补)
 
 | 命令 | 参数 | 作用 |

@@ -125,6 +125,62 @@ object MomentsGenerator {
     }
 
     /**
+     * 组角色互评 system prompt(H3,10-moments.md §1.4「Ta们会互相评论」的
+     * 本地化):评论者按可见角色人设 + 相关动态生成一条评论。
+     * 复读抑制是硬约束(防互评退化成互捧/复读):评论区已有内容时必须换角度。
+     */
+    fun interactSystemPrompt(
+        commenter: CharacterEntity,
+        memories: List<com.neethu.gouxiang.data.MemoryEntity>,
+    ): String {
+        val s = StringBuilder()
+        s.appendLine("你是「${commenter.name}」,在朋友圈看到一条动态,写一条自己的评论。")
+        s.appendLine("[人设] ${commenter.profile}")
+        MemoryInjection.block(commenter.name, memories, "")?.let { s.appendLine(it) }
+        s.appendLine("[输出协议] 只输出一行 JSON,不要输出任何其他内容:")
+        s.appendLine("{\"text\":\"评论内容\"}")
+        s.appendLine("规则:")
+        s.appendLine("1. text 是你说给动态作者看的一句话,$TEXT_MAX_CHARS 字以内;第一人称," +
+            "语气贴合你的人设,像在评论区随手留的一句话,不用客套开头。")
+        s.appendLine("2. 评论区已有内容时,换一个角度说,不要附和或重复别人说过的话," +
+            "也不要逐条点评别人的评论。")
+        s.appendLine("3. 只输出 JSON 本身:不写分析、旁白,不出现「JSON」「字段」「输出」这类字眼," +
+            "绝不提自己是 AI、模型或任何程序。")
+        return s.toString().trim()
+    }
+
+    /** 组互评 user prompt:动态原文(含作者) + 已有评论线程(评论者名)。 */
+    fun interactUserPrompt(
+        commenter: CharacterEntity,
+        postAuthorName: String,
+        post: MomentEntity,
+        thread: List<MomentCommentEntity>,
+        namesById: Map<Long, String>,
+    ): String {
+        val s = StringBuilder()
+        s.appendLine("[${postAuthorName}的动态] ${post.text}")
+        if (thread.isNotEmpty()) {
+            s.appendLine("[评论区]")
+            thread.forEach { c ->
+                val who = commentAuthorName(c, commenter.name, namesById)
+                s.appendLine("$who: ${c.text}")
+            }
+        }
+        s.appendLine("[要发的评论](以「${commenter.name}」的身份):")
+        return s.toString()
+    }
+
+    /** 评论作者展示名(user=用户;avatar=按 id 查名,查不到回退评论者名)。 */
+    fun commentAuthorName(
+        comment: com.neethu.gouxiang.data.MomentCommentEntity,
+        fallbackAvatarName: String,
+        namesById: Map<Long, String>,
+    ): String = when (comment.authorKind) {
+        "user" -> "用户"
+        else -> namesById[comment.authorId] ?: fallbackAvatarName
+    }
+
+    /**
      * 宽松解析(动态/回复共用):截首个平衡 `{...}` → 取 text/imagePrompt
      * → 清洗(空白丢弃、截断)。@return null = 无法解析或正文为空。
      */

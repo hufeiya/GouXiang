@@ -22,13 +22,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         InnerVoiceEntity::class,
         MomentEntity::class,
         MomentCommentEntity::class,
+        MomentInteractionEntity::class,
         ProactiveOutboxEntity::class,
         ProactiveConversationStateEntity::class,
         CharacterStatusEntity::class,
         SidestoryRecordEntity::class,
         ChatDerivativeEntity::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -42,6 +43,7 @@ abstract class GouXiangDatabase : RoomDatabase() {
     abstract fun innerVoiceDao(): InnerVoiceDao
     abstract fun momentDao(): MomentDao
     abstract fun momentCommentDao(): MomentCommentDao
+    abstract fun momentInteractionDao(): MomentInteractionDao
     abstract fun proactiveDao(): ProactiveDao
     abstract fun characterStatusDao(): CharacterStatusDao
     abstract fun sidestoryRecordDao(): SidestoryRecordDao
@@ -50,6 +52,48 @@ abstract class GouXiangDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        /**
+         * H 工作包迁移(v12→v13,纯增量:6 列 + 1 表):
+         * - `moments` 加 `authorKind`(H1 作者模型,回填 "avatar" = 旧动态
+         *   全部是角色帖);用户帖以 `characterId=0` + `authorKind='user'` 表达;
+         * - `moment_comments` 加 `authorId`(H1 评论者模型);旧库单角色模型下
+         *   avatar 评论都出自动态作者本人,按所属动态的 characterId 回填;
+         * - `characters` 加 H2 朋友圈权限四列(参与/看用户动态/评论互动/
+         *   角色级自动日更),回填 1 = 既有行为不变(默认全参与);
+         * - 新建 `moment_interactions` 互评认领表(H3 防循环/防重复的幂等
+         *   账本,(postId, characterId) 唯一)。
+         * 既有动态/评论/点赞/图片列一律不动(H1「点赞/图片保持可读」)。
+         */
+        val MIGRATION_12_13: Migration = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE moments ADD COLUMN authorKind TEXT NOT NULL DEFAULT 'avatar'")
+                db.execSQL("ALTER TABLE moment_comments ADD COLUMN authorId INTEGER NOT NULL DEFAULT 0")
+                // 旧单角色模型:avatar 评论的作者 = 所属动态的作者角色(回填可读)
+                db.execSQL(
+                    "UPDATE moment_comments SET authorId = " +
+                        "(SELECT moments.characterId FROM moments WHERE moments.id = moment_comments.postId) " +
+                        "WHERE authorKind = 'avatar'",
+                )
+                db.execSQL("ALTER TABLE characters ADD COLUMN momentsJoined INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE characters ADD COLUMN momentsSeeUserPosts INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE characters ADD COLUMN momentsInteract INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE characters ADD COLUMN momentsDailyAuto INTEGER NOT NULL DEFAULT 1")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `moment_interactions` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`postId` INTEGER NOT NULL, " +
+                        "`characterId` INTEGER NOT NULL, " +
+                        "`requestId` TEXT NOT NULL, " +
+                        "`state` TEXT NOT NULL, " +
+                        "`at` INTEGER NOT NULL)",
+                )
+                db.execSQL(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_moment_interactions_postId_characterId` " +
+                        "ON `moment_interactions` (`postId`, `characterId`)",
+                )
+            }
+        }
 
         /**
          * G 工作包迁移(v11→v12,单表纯增量 + 角色开关列):

@@ -20,18 +20,28 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.ArrowBackIosNew
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.AddCircleOutline
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.ManageAccounts
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,36 +54,40 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.neethu.gouxiang.data.MomentAuthorKind
 import com.neethu.gouxiang.data.MomentCommentEntity
 import com.neethu.gouxiang.data.MomentEntity
+import com.neethu.gouxiang.data.MomentFeed
 import com.neethu.gouxiang.ui.messages.formatRelativeTime
 
 /**
- * 朋友圈页 06(基准 06-moments.png;dump 06-moments.xml 较薄,以截图还原):
+ * 朋友圈页 06(F9 → H 工作包 H1/H2/H3,基准 06-moments.png):
  *
- * - 沉浸式头部:淡紫黄渐变封面(AI 星球风格)+ 左上返回 + 右上「邀请角色」
- *   黄胶囊(本地版范围 5:不实现邀约,按钮改为「生成动态」——原版
- *   锁卡/邀约入口隐藏,不出现待解锁字样);
- * - 封面右下:角色名 + 圆形头像,叠在圆角内容区上方(参考截图构图);
- * - 动态卡(dump 每卡):圆形头像 + 名字(tv_author_name)+ 正文 + 配图 +
- *   时间「刚刚」(相对时间,对齐 02 消息列表同款规则)+ 点赞/评论两枚图标
- *   (dump [836,1581]/[958,1581] 两 ImageView);
- * - 评论区:用户评论与角色回复列在卡下方(角色回复行首带名字);
- * - 底部评论输入条:「发表评论:」占位(10 §2.1 reply_to_default 语义,
- *   本地化「说点什么…」),发送 = 用户评论落库 → 角色 LLM 回复(楼中楼)。
+ * - 多角色合并时间线(H1):用户帖 + 参与角色的动态混排,每卡显示真实作者
+ *  (头像/名;user 帖 = 「我」),查询层权限过滤在 [MomentFeed.assemble];
+ * - 右上「发动态」(H3 用户发帖:弹层输入 → 落库 → 授权角色互评一轮)+
+ *   「生成动态」(角色手动请求,仅带角色上下文进入时展示)+
+ *   「角色管理」(H2 权限面板:逐角色 参与/看用户动态/评论互动/自动日更);
+ * - 用户可删除自己的动态(H3:删帖连带清空其评论区)与自己的评论;
+ * - 评论区:用户评论(「我」)与角色评论/回复(按 authorId 归名)分色;
+ * - 底部评论输入条:发送 = 用户评论落库 → 作者角色回复(权限闸内)。
  */
 @Composable
 fun MomentsScreen(
     state: MomentsUiState,
-    avatarFile: String?,
+    avatarFiles: Map<Long, String?>,
     onBack: () -> Unit,
     onGenerate: () -> Unit,
+    onPublish: (String) -> Unit,
+    onDeletePost: (MomentEntity) -> Unit,
+    onDeleteComment: (MomentEntity, MomentCommentEntity) -> Unit,
     onLike: (MomentEntity) -> Unit,
     onSendComment: (MomentEntity, String) -> Unit,
+    onOpenPermissions: () -> Unit,
+    onTogglePermission: (Long, MomentPermissionField, Boolean) -> Unit,
     onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -81,6 +95,9 @@ fun MomentsScreen(
     var draft by remember { mutableStateOf("") }
     // 评论目标:点击评论图标切当前输入条挂靠的动态(空 = 最新一条)
     var commentTargetId by remember { mutableStateOf<Long?>(null) }
+    // H2 权限面板 / H3 发布弹层(局部导航态)
+    var showPermissions by remember { mutableStateOf(false) }
+    var showPublish by remember { mutableStateOf(false) }
 
     Column(modifier.fillMaxSize()) {
         // ── 沉浸式头部(封面渐变延伸到状态栏下)────────────────────────
@@ -150,31 +167,42 @@ fun MomentsScreen(
                     )
                 }
             }
-            // 右上黄胶囊:本地版 =「生成动态」(原版「邀请角色」按范围 5 隐藏)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            // 右上操作列:发动态 / 生成动态(带角色上下文时)/ 角色管理
+            Column(
+                horizontalAlignment = Alignment.End,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .statusBarsPadding()
-                    .padding(end = 14.dp, top = 12.dp)
-                    .background(Color(0xFFF6E749), RoundedCornerShape(999.dp))
-                    .clickable(enabled = !state.generating) { onGenerate() }
-                    .padding(horizontal = 16.dp, vertical = 9.dp),
+                    .padding(end = 14.dp, top = 10.dp),
             ) {
-                if (state.generating) {
-                    Text("生成中…", color = Color(0xFF1A1A1A), fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                } else {
-                    Icon(
-                        Icons.Outlined.AddCircleOutline,
-                        contentDescription = null,
-                        tint = Color(0xFF1A1A1A),
-                        modifier = Modifier.size(16.dp),
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    HeaderPill(
+                        text = if (state.publishing) "发布中…" else "发动态",
+                        enabled = !state.publishing,
+                        icon = { Icon(Icons.Outlined.Edit, contentDescription = null, tint = Color(0xFF1A1A1A), modifier = Modifier.size(15.dp)) },
+                        onClick = { showPublish = true },
                     )
-                    Spacer(Modifier.width(5.dp))
-                    Text("生成动态", color = Color(0xFF1A1A1A), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    if (state.characterId > 0) {
+                        HeaderPill(
+                            text = if (state.generating) "生成中…" else "生成动态",
+                            enabled = !state.generating,
+                            icon = { Icon(Icons.Outlined.AddCircleOutline, contentDescription = null, tint = Color(0xFF1A1A1A), modifier = Modifier.size(15.dp)) },
+                            onClick = onGenerate,
+                        )
+                    }
                 }
+                Spacer(Modifier.height(8.dp))
+                HeaderPill(
+                    text = "角色管理",
+                    enabled = true,
+                    icon = { Icon(Icons.Outlined.ManageAccounts, contentDescription = null, tint = Color(0xFF1A1A1A), modifier = Modifier.size(15.dp)) },
+                    onClick = {
+                        onOpenPermissions()
+                        showPermissions = true
+                    },
+                )
             }
-            // 封面右下:角色名 + 圆形头像(参考截图构图)
+            // 封面右下:页面名(角色页=角色名;全局=朋友圈)+ 头像/首字
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -182,12 +210,13 @@ fun MomentsScreen(
                     .padding(end = 16.dp),
             ) {
                 Text(
-                    state.characterName,
+                    if (state.characterId > 0) state.characterName else "朋友圈",
                     color = Color(0xFF6C6C6C),
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Medium,
                 )
                 Spacer(Modifier.width(10.dp))
+                val avatarFile = if (state.characterId > 0) avatarFiles[state.characterId] else null
                 Box(
                     Modifier
                         .size(76.dp)
@@ -206,7 +235,7 @@ fun MomentsScreen(
                         )
                     } else {
                         Text(
-                            state.characterName.take(1),
+                            (state.characterName.ifBlank { "圈" }).take(1),
                             color = Color(0xFF9A9A9A),
                             fontSize = 26.sp,
                         )
@@ -241,15 +270,18 @@ fun MomentsScreen(
             state.automaticError?.let { error ->
                 item(key = "automatic-error") { Text(error, color = Color(0xFFE05A5A), fontSize = 13.sp) }
             }
-            items(state.items, key = { it.id }) { post ->
+            items(state.items, key = { it.post.id }) { item ->
                 MomentCard(
-                    post = post,
-                    comments = state.comments[post.id].orEmpty(),
-                    characterName = state.characterName,
-                    avatarFile = avatarFile,
-                    replying = state.replyingToId == post.id,
-                    onLike = { onLike(post) },
-                    image = state.imageResults[post.id],
+                    item = item,
+                    comments = state.comments[item.post.id].orEmpty(),
+                    avatarFiles = avatarFiles,
+                    characterNames = state.characterNames,
+                    replying = state.replyingToId == item.post.id,
+                    image = state.imageResults[item.post.id],
+                    onLike = { onLike(item.post) },
+                    onCommentTarget = { commentTargetId = item.post.id },
+                    onDeletePost = onDeletePost,
+                    onDeleteComment = onDeleteComment,
                     onRetryImage = onRetryImage,
                 )
             }
@@ -271,7 +303,7 @@ fun MomentsScreen(
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "点右上「生成动态」,看看${state.characterName}的日常",
+                            "点右上「发动态」分享此刻,或去角色主页看看 Ta 的朋友圈",
                             color = Color(0xFF9A9A9A),
                             fontSize = 13.sp,
                         )
@@ -279,14 +311,14 @@ fun MomentsScreen(
                 }
             }
         }
-        // ── 底部评论输入条(发送 = 用户评论 → 角色回复)──────────────────
+        // ── 底部评论输入条(发送 = 用户评论 → 作者角色回复[权限闸内])─────
         CommentInputBar(
             draft = draft,
             enabled = state.replyingToId == null,
             onDraftChange = { draft = it },
             onSend = {
-                val post = state.items.firstOrNull { it.id == commentTargetId }
-                    ?: state.items.firstOrNull()
+                val post = state.items.firstOrNull { it.post.id == commentTargetId }?.post
+                    ?: state.items.firstOrNull()?.post
                 val body = draft.trim()
                 if (post != null && body.isNotEmpty()) {
                     commentTargetId = post.id
@@ -296,29 +328,228 @@ fun MomentsScreen(
             },
         )
     }
+
+    // H3 发布弹层(用户发帖)
+    if (showPublish) {
+        PublishDialog(
+            publishing = state.publishing,
+            onPublish = { text ->
+                onPublish(text)
+                showPublish = false
+            },
+            onDismiss = { if (!state.publishing) showPublish = false },
+        )
+    }
+    // H2 权限面板(逐角色四开关)
+    if (showPermissions) {
+        PermissionSheet(
+            rows = state.permissions,
+            loading = state.permissionsLoading,
+            onToggle = onTogglePermission,
+            onClose = { showPermissions = false },
+        )
+    }
+}
+
+/** 头部黄胶囊(发动态/生成动态/角色管理共用)。 */
+@Composable
+private fun HeaderPill(
+    text: String,
+    enabled: Boolean,
+    icon: @Composable () -> Unit,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .background(Color(0xFFF6E749), RoundedCornerShape(999.dp))
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        icon()
+        Spacer(Modifier.width(5.dp))
+        Text(text, color = Color(0xFF1A1A1A), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** 发布弹层(H3 用户发帖;字数上限/发布中禁用由 VM 校验兜底)。 */
+@Composable
+private fun PublishDialog(
+    publishing: Boolean,
+    onPublish: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("发布新动态", fontWeight = FontWeight.SemiBold) },
+        text = {
+            Column {
+                BasicTextField(
+                    value = text,
+                    onValueChange = { if (it.length <= 500) text = it },
+                    textStyle = TextStyle(color = Color(0xFF1A1A1A), fontSize = 15.sp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(120.dp),
+                    decorationBox = { inner ->
+                        Box(Modifier.fillMaxWidth()) {
+                            if (text.isEmpty()) {
+                                Text("这一刻的想法…", color = Color(0xFFB5B5B5), fontSize = 15.sp)
+                            }
+                            inner()
+                        }
+                    },
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${text.length}/500 · 授权的角色可以看到并评论",
+                    color = Color(0xFF9A9A9A),
+                    fontSize = 12.sp,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = text.isNotBlank() && !publishing,
+                onClick = { onPublish(text.trim()) },
+            ) { Text(if (publishing) "发布中…" else "发布", color = Color(0xFF7A6BD6)) }
+        },
+        dismissButton = {
+            TextButton(enabled = !publishing, onClick = onDismiss) { Text("取消", color = Color(0xFF6C6C6C)) }
+        },
+    )
+}
+
+/** H2 权限面板(底部弹层;逐角色四开关,切换即写库,生成/查询层双执行)。 */
+@Composable
+private fun PermissionSheet(
+    rows: List<MomentPermissionRow>,
+    loading: Boolean,
+    onToggle: (Long, MomentPermissionField, Boolean) -> Unit,
+    onClose: () -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0x66000000))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onClose() },
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(Color(0xFFFAFAF7), RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { /* 拦截点击,不透传关闭 */ }
+                .navigationBarsPadding()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("角色管理", color = Color(0xFF1A1A1A), fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.weight(1f))
+                Icon(
+                    Icons.Filled.Close,
+                    contentDescription = "关闭",
+                    tint = Color(0xFF6C6C6C),
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clickable { onClose() },
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "开关对自动任务与角色互动即时生效;角色发帖的手动「生成动态」不受限",
+                color = Color(0xFF9A9A9A),
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(10.dp))
+            if (loading) {
+                Text("载入中…", color = Color(0xFF9A9A9A), fontSize = 13.sp)
+            } else if (rows.isEmpty()) {
+                Text("还没有角色", color = Color(0xFF9A9A9A), fontSize = 13.sp)
+            }
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                rows.forEach { row ->
+                    PermissionRow(row, onToggle)
+                }
+            }
+        }
+    }
+}
+
+/** 单个角色的权限行(名字 + 四开关)。 */
+@Composable
+private fun PermissionRow(
+    row: MomentPermissionRow,
+    onToggle: (Long, MomentPermissionField, Boolean) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+    ) {
+        Text(row.name, color = Color(0xFF1A1A1A), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PermissionToggle("参与", row.joined) { onToggle(row.characterId, MomentPermissionField.JOINED, it) }
+            Spacer(Modifier.width(10.dp))
+            PermissionToggle("看我的动态", row.seeUserPosts) { onToggle(row.characterId, MomentPermissionField.SEE_USER_POSTS, it) }
+            Spacer(Modifier.width(10.dp))
+            PermissionToggle("评论互动", row.interact) { onToggle(row.characterId, MomentPermissionField.INTERACT, it) }
+            Spacer(Modifier.width(10.dp))
+            PermissionToggle("自动日更", row.dailyAuto) { onToggle(row.characterId, MomentPermissionField.DAILY_AUTO, it) }
+        }
+    }
+}
+
+@Composable
+private fun PermissionToggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Color(0xFF6C6C6C), fontSize = 12.sp)
+        Spacer(Modifier.width(2.dp))
+        Switch(
+            checked = checked,
+            onCheckedChange = onChange,
+            colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF7A6BD6)),
+            modifier = Modifier.size(38.dp),
+        )
+    }
 }
 
 /**
- * 单条动态卡:头像+名字行 → 正文 → 配图(可选)→ 时间 + 点赞/评论图标
- * → 评论区(用户评论 / 角色回复)。
+ * 单条动态卡(H1 多角色):作者行(头像+名) → 正文 → 配图(可选)→
+ * 时间 + 点赞/评论 + 用户帖删除 → 评论区(用户=「我」/角色=按 id 归名)。
  */
 @Composable
 private fun MomentCard(
-    post: MomentEntity,
+    item: MomentFeed.MomentFeedItem,
     comments: List<MomentCommentEntity>,
-    characterName: String,
-    avatarFile: String?,
+    avatarFiles: Map<Long, String?>,
+    characterNames: Map<Long, String>,
     replying: Boolean,
-    onLike: () -> Unit,
     image: com.neethu.gouxiang.ui.ImageGenerationState?,
+    onLike: () -> Unit,
+    onCommentTarget: () -> Unit,
+    onDeletePost: (MomentEntity) -> Unit,
+    onDeleteComment: (MomentEntity, MomentCommentEntity) -> Unit,
     onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit,
 ) {
+    val post = item.post
+    val isUserPost = item.isUserPost
+    val authorName = item.authorName
+    val authorAvatar = if (!isUserPost) avatarFiles[item.authorCharacterId] else null
     Column(
         Modifier
             .fillMaxWidth()
             .padding(top = 10.dp),
     ) {
-        // 作者行:圆形头像 + 名字(dump 每卡头像 [55,*][188,*] + 名字)
+        // 作者行:圆形头像 + 名字(avatar 帖 = 角色头像;user 帖 = 「我」首字)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
@@ -327,23 +558,23 @@ private fun MomentCard(
                     .padding(1.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                if (avatarFile != null) {
+                if (authorAvatar != null) {
                     AsyncImage(
-                        model = java.io.File(avatarFile),
-                        contentDescription = characterName,
+                        model = java.io.File(authorAvatar),
+                        contentDescription = authorName,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .fillMaxSize()
                             .background(Color(0xFFEDEDED), CircleShape),
                     )
                 } else {
-                    Text(characterName.take(1), color = Color(0xFF9A9A9A), fontSize = 16.sp)
+                    Text(authorName.take(1), color = Color(0xFF9A9A9A), fontSize = 16.sp)
                 }
             }
             Spacer(Modifier.width(12.dp))
             Text(
-                characterName,
-                color = Color(0xFF7A6BD6),
+                authorName,
+                color = if (isUserPost) Color(0xFF3A3A3A) else Color(0xFF7A6BD6),
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Medium,
             )
@@ -374,7 +605,7 @@ private fun MomentCard(
             )
         }
         Spacer(Modifier.height(10.dp))
-        // 时间 + 互动行(参考图「刚刚」左置;点赞/评论两枚图标右置)
+        // 时间 + 互动行(点赞/评论/用户帖删除)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 formatRelativeTime(post.at),
@@ -382,6 +613,17 @@ private fun MomentCard(
                 fontSize = 14.sp,
             )
             Spacer(Modifier.weight(1f))
+            if (isUserPost) {
+                Icon(
+                    Icons.Filled.Delete,
+                    contentDescription = "删除动态",
+                    tint = Color(0xFFB5B5B5),
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clickable { onDeletePost(post) },
+                )
+                Spacer(Modifier.width(14.dp))
+            }
             Icon(
                 if (post.likedByMe) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                 contentDescription = if (post.likedByMe) "取消点赞" else "点赞",
@@ -398,10 +640,12 @@ private fun MomentCard(
                 Icons.Outlined.ChatBubbleOutline,
                 contentDescription = "评论",
                 tint = Color(0xFFB5B5B5),
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier
+                    .size(22.dp)
+                    .clickable { onCommentTarget() },
             )
         }
-        // 评论区(用户评论与角色回复;角色回复行首带名字)
+        // 评论区(用户评论与角色评论/回复;角色行首带归名,用户可删自己的)
         if (comments.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             Column(
@@ -412,23 +656,34 @@ private fun MomentCard(
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 comments.forEach { comment ->
-                    val isUser = comment.authorKind == "user"
-                    Row {
-                        if (!isUser) {
-                            Text(
-                                "$characterName:",
-                                color = Color(0xFF7A6BD6),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                            )
-                            Spacer(Modifier.width(4.dp))
-                        }
+                    val isUser = comment.authorKind == MomentAuthorKind.USER
+                    val name = if (isUser) MomentFeed.USER_DISPLAY_NAME
+                    else characterNames[comment.authorId] ?: authorName
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "$name:",
+                            color = if (isUser) Color(0xFF3A3A3A) else Color(0xFF7A6BD6),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Spacer(Modifier.width(4.dp))
                         Text(
                             comment.text,
-                            color = if (isUser) Color(0xFF3A3A3A) else Color(0xFF3A3A3A),
+                            color = Color(0xFF3A3A3A),
                             fontSize = 14.sp,
                             lineHeight = 21.sp,
+                            modifier = Modifier.weight(1f),
                         )
+                        if (isUser) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "删除评论",
+                                tint = Color(0xFFB5B5B5),
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { onDeleteComment(post, comment) },
+                            )
+                        }
                     }
                 }
             }
@@ -436,7 +691,7 @@ private fun MomentCard(
         if (replying) {
             Spacer(Modifier.height(6.dp))
             Text(
-                "$characterName 正在回复…",
+                "正在处理评论…",
                 color = Color(0xFF9A9A9A),
                 fontSize = 13.sp,
             )

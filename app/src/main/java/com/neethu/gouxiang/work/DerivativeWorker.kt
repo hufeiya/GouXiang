@@ -77,6 +77,7 @@ class DerivativeWorker(
         if (source == DerivativeSource.AUTOMATIC && (
                 !automaticEnabled(app, kind) ||
                     (kind == DerivativeKind.INNER_VOICE && task.characterId > 0L && !innerVoiceAutoAllowed(app, task.characterId)) ||
+                    (kind == DerivativeKind.MOMENT && task.characterId > 0L && !momentsAutoAllowed(app, task.characterId)) ||
                     inputData.getLong(KEY_AUTOMATIC_EPOCH, -1L) != automaticEpoch(app, kind) ||
                     (kind in setOf(DerivativeKind.MOMENT, DerivativeKind.INNER_VOICE) && day != DerivativeTask.localDay())
             )) {
@@ -141,15 +142,29 @@ class DerivativeWorker(
             DerivativeKind.PHOTO,
         )
 
-        /**
-         * 心声自动的角色级放行(G4):全局自动开关之外再查角色开关
-         * (`characters.innerVoiceAuto`,关开关的角色不入队/不执行)。
-         */
-        internal suspend fun innerVoiceAutoAllowed(context: Context, characterId: Long): Boolean {
-            if (!com.neethu.gouxiang.ai.GenerationPrefs.innerVoiceAuto(context)) return false
-            if (characterId <= 0L) return true
-            return GouXiangRepo.get(context).characterById(characterId)?.innerVoiceAuto ?: true
-        }
+    /**
+     * 心声自动的角色级放行(G4):全局自动开关之外再查角色开关
+     * (`characters.innerVoiceAuto`,关开关的角色不入队/不执行)。
+     */
+    internal suspend fun innerVoiceAutoAllowed(context: Context, characterId: Long): Boolean {
+        if (!com.neethu.gouxiang.ai.GenerationPrefs.innerVoiceAuto(context)) return false
+        if (characterId <= 0L) return true
+        return GouXiangRepo.get(context).characterById(characterId)?.innerVoiceAuto ?: true
+    }
+
+    /**
+     * 朋友圈自动日更的角色级放行(H2):全局「朋友圈日更」开关之外再查角色
+     * 参与与角色级日更开关(`characters.momentsJoined`/`momentsDailyAuto`)——
+     * 关闭任一项的角色不入队/不执行(双重执行的第二层;第一层在
+     * [DerivativeScheduler.MomentsDailyWorker] 与 VM 的入队处)。点击路径
+     * (MANUAL)不受本闸限制。
+     */
+    internal suspend fun momentsAutoAllowed(context: Context, characterId: Long): Boolean {
+        if (!com.neethu.gouxiang.ai.GenerationPrefs.momentsDaily(context)) return false
+        if (characterId <= 0L) return true
+        val character = GouXiangRepo.get(context).characterById(characterId) ?: return false
+        return character.momentsJoined && character.momentsDailyAuto
+    }
 
         /** 网络约束 + 指数退避 30s(§2.2 约定)。 */
         private val constraints = Constraints.Builder()

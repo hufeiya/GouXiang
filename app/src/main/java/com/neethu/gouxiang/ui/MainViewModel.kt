@@ -38,12 +38,14 @@ import com.neethu.gouxiang.ui.character.CharacterFormValidator
 import com.neethu.gouxiang.ui.character.CharacterSaveOutcome
 import com.neethu.gouxiang.ui.character.avatarCacheKey
 import com.neethu.gouxiang.ui.character.splitOpeningLine
+import com.neethu.gouxiang.ui.moments.MomentPermissionField
 import com.neethu.gouxiang.ui.nav.BottomTab
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -51,6 +53,14 @@ import kotlinx.coroutines.launch
  * 主框架状态:底栏选中 tab + 首页推荐流 + 消息列表 + 聊天主页导航 + 头像缓存路径。
  */
 class MainViewModel(app: Application) : AndroidViewModel(app) {
+
+    /** 全局朋友圈入口的会话哨兵(H1:无当前角色,发现页进入;会话 id 恒为正)。 */
+    companion object {
+        const val MOMENTS_GLOBAL_ID = -1L
+
+        /** 用户动态正文字数上限(H3 发布校验;超限拒绝发布,UI 提示)。 */
+        const val USER_POST_MAX_CHARS = 500
+    }
 
     private val repo = GouXiangRepo.get(app)
     private val orchestrator =
@@ -1527,9 +1537,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    // ── 朋友圈页 06(F9:入口=角色主页「Ta 的朋友圈」占位卡)───────────
+    // ── 朋友圈页 06(H1 多角色时间线;入口=角色主页「Ta 的朋友圈」/发现页)──
 
-    /** 朋友圈页打开的会话 id(null=未进入)。 */
+    /** 朋友圈页打开的会话 id(null=未进入;[MOMENTS_GLOBAL_ID]=全局朋友圈)。 */
     private val _momentsConversationId = MutableStateFlow<Long?>(null)
     val momentsConversationId: StateFlow<Long?> = _momentsConversationId.asStateFlow()
 
@@ -1549,6 +1559,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    /** 互评引擎(与 Worker 侧共用同一认领账本;发布动态后由 VM 触发一轮)。 */
+    private val momentInteractionEngine by lazy {
+        com.neethu.gouxiang.chat.MomentInteractionEngine(repo.db, momentsChannel)
+    }
+
     /** 朋友圈配图 provider(进程内单例;filesDir/moments 缓存)。 */
     private fun momentsImageProvider(): com.neethu.gouxiang.ai.image.AvatarImageProvider =
         momentsImageProviderLazy ?: synchronized(this) {
@@ -1560,8 +1575,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var momentsImageProviderLazy: com.neethu.gouxiang.ai.image.AvatarImageProvider? = null
 
     /**
-     * 打开朋友圈页:按会话取角色 + 订阅动态流与评论流(生成/评论落库即上屏)。
-     * 空时间线仅在日更开启时入队自动任务；后台按角色和本地日期去重。
+     * 打开朋友圈页:订阅多角色合并时间线(用户帖 + 参与角色的动态,查询层
+     * 权限过滤)+ 全量评论流(生成/评论落库即上屏)。带会话进入时保留该角色
+     * 上下文(「生成动态」按钮);全局入口(characterId=0)只读+发帖。
+     * 空时间线仅在全局日更与角色级日更/参与同时开启时入队自动任务(角色页)。
      */
     fun openMoments(conversationId: Long) {
         if (_momentsConversationId.value == conversationId) return
@@ -1569,43 +1586,66 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _momentsUi.value = com.neethu.gouxiang.ui.moments.MomentsUiState(loading = true)
         momentsJob?.cancel()
         momentsJob = viewModelScope.launch {
-            val conv = repo.db.conversationDao().byId(conversationId)
-            val character = conv?.let { repo.characterById(it.characterId) }
-            if (conv == null || character == null) {
-                _momentsUi.value = _momentsUi.value.copy(loading = false, loadFailed = true)
-                return@launch
-            }
-            _momentsUi.value = _momentsUi.value.copy(characterId = character.id, characterName = character.name)
-            com.neethu.gouxiang.work.reconcileDerivativeTasks(getApplication())
-            launch {
-                repo.db.derivativeResultDao().observeImageTasks(character.id, "MOMENT").collect {
-                    repo.db.derivativeResultDao().recoverInterruptedImages()
+            val isGlobal = conversationId == MOMENTS_GLOBAL_ID
+            var currentCharacter: com.neethu.gouxiang.data.CharacterEntity? = null
+            if (isGlobal) {
+                com.neethu.gouxiang.work.reconcileDerivativeTasks(getApplication())
+            } else {
+                val conv = repo.db.conversationDao().byId(conversationId)
+                val character = conv?.let { repo.characterById(it.characterId) }
+                if (conv == null || character == null) {
+                    _momentsUi.value = _momentsUi.value.copy(loading = false, loadFailed = true)
+                    return@launch
                 }
-            }
-            launch {
-                repo.db.derivativeTaskDao().observeLatest(character.id, com.neethu.gouxiang.chat.DerivativeKind.MOMENT.name).collect { task ->
-                    _momentsUi.value = _momentsUi.value.copy(automaticError = if (task?.source == "AUTOMATIC" && task.state == "failed")
-                        "自动生成失败：${task.failureReason ?: "请检查网络与模型配置"}。可点击生成动态重试。" else null)
+                currentCharacter = character
+                _momentsUi.value = _momentsUi.value.copy(characterId = character.id, characterName = character.name)
+                com.neethu.gouxiang.work.reconcileDerivativeTasks(getApplication())
+                launch {
+                    repo.db.derivativeResultDao().observeImageTasks(character.id, "MOMENT").collect {
+                        repo.db.derivativeResultDao().recoverInterruptedImages()
+                    }
                 }
+                launch {
+                    repo.db.derivativeTaskDao().observeLatest(character.id, com.neethu.gouxiang.chat.DerivativeKind.MOMENT.name).collect { task ->
+                        _momentsUi.value = _momentsUi.value.copy(automaticError = if (task?.source == "AUTOMATIC" && task.state == "failed")
+                            "自动生成失败：${task.failureReason ?: "请检查网络与模型配置"}。可点击生成动态重试。" else null)
+                    }
+                }
+                launch {
+                    observeManualDerivative(com.neethu.gouxiang.chat.DerivativeKind.MOMENT, conversationId) { generating, error ->
+                        _momentsUi.value = _momentsUi.value.copy(generating = generating, error = error)
+                    }
+                }
+                ensureAvatars(listOf(character))
             }
             launch {
-                repo.db.derivativeResultDao().observeForCharacter(character.id, "MOMENT").collect { results ->
+                // 配图状态不分角色(合并时间线跨角色;全局入口同样要看到补图入口)
+                repo.db.derivativeResultDao().observeForKind("MOMENT").collect { results ->
                     _momentsUi.value = _momentsUi.value.copy(imageResults = imageStates(results))
                 }
             }
             launch {
-                observeManualDerivative(com.neethu.gouxiang.chat.DerivativeKind.MOMENT, conversationId) { generating, error ->
-                    _momentsUi.value = _momentsUi.value.copy(generating = generating, error = error)
+                // 评论者/作者展示名(角色改名即时刷新;user 恒「我」)
+                repo.db.characterDao().observeAll().collect { characters ->
+                    _momentsUi.value = _momentsUi.value.copy(
+                        characterNames = characters.associate { it.id to it.name },
+                    )
                 }
             }
-            ensureAvatars(listOf(character))
             var autoGenerated = false
-            // 每条动态单独订阅评论流，新动态出现即挂。
-            repo.observeMoments(character.id).collect { posts ->
-                if (posts.isEmpty() && !autoGenerated && !_momentsUi.value.generating) {
+            // 多角色合并时间线(查询层权限过滤:H1)。
+            repo.momentsFeed.collect { feed ->
+                // 角色页首帧为空时按开关入队自动日更(H2:全局+参与+角色级日更同开才发)。
+                if (!isGlobal && feed.none { !it.isUserPost && it.authorCharacterId == currentCharacter?.id } &&
+                    !autoGenerated && !_momentsUi.value.generating
+                ) {
                     autoGenerated = true
-                    val epoch = com.neethu.gouxiang.work.automaticEpoch(getApplication(), com.neethu.gouxiang.chat.DerivativeKind.MOMENT)
-                    if (com.neethu.gouxiang.ai.GenerationPrefs.momentsDaily(getApplication())) {
+                    val character = currentCharacter
+                    if (character != null &&
+                        com.neethu.gouxiang.ai.GenerationPrefs.momentsDaily(getApplication()) &&
+                        character.momentsJoined && character.momentsDailyAuto
+                    ) {
+                        val epoch = com.neethu.gouxiang.work.automaticEpoch(getApplication(), com.neethu.gouxiang.chat.DerivativeKind.MOMENT)
                         com.neethu.gouxiang.work.DerivativeWorker.enqueue(
                             getApplication(),
                             com.neethu.gouxiang.chat.DerivativeTask(
@@ -1618,13 +1658,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     }
                 }
-                _momentsUi.value = _momentsUi.value.copy(items = posts, loading = false)
-                posts.forEach { post ->
-                    if (post.id !in momentCommentJobs) {
-                        momentCommentJobs[post.id] = launch {
-                            repo.observeMomentComments(post.id).collect { comments ->
+                _momentsUi.value = _momentsUi.value.copy(items = feed, loading = false)
+                feed.forEach { item ->
+                    if (item.post.id !in momentCommentJobs) {
+                        momentCommentJobs[item.post.id] = launch {
+                            repo.observeMomentComments(item.post.id).collect { comments ->
                                 _momentsUi.value = _momentsUi.value.copy(
-                                    comments = _momentsUi.value.comments + (post.id to comments),
+                                    comments = _momentsUi.value.comments + (item.post.id to comments),
                                 )
                             }
                         }
@@ -1633,6 +1673,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+
+    /** 全局朋友圈入口(H4 发现页;无当前角色,只浏览/发帖/评论)。 */
+    fun openMomentsGlobal() = openMoments(MOMENTS_GLOBAL_ID)
 
     fun closeMoments() {
         momentsJob?.cancel()
@@ -1644,7 +1687,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 「生成动态」为手动请求，不受自动开关限制。落库后由动态流上屏。
+     * 「生成动态」为手动请求，不受自动开关限制（角色级日更/参与闸只门控自动
+     * 路径）。落库后由合并时间线上屏，随后触发一轮角色互评（Worker 内）。
      */
     fun generateMoment(conversationId: Long) {
         if (_momentsUi.value.generating) return
@@ -1659,6 +1703,105 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 )
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { _momentsUi.value = _momentsUi.value.copy(generating = false, error = "任务入队失败，请重试") }
+        }
+    }
+
+    /** 用户动态正文字数上限(H3 发布校验;超限拒绝发布,UI 提示;常量在 companion)。 */
+
+    /**
+     * 用户发布动态(H1/H3):落库 → 触发一轮角色互评(授权角色各评一条;
+     * 权限/去重在引擎的候选层执行)。失败不吞:上屏错误提示,帖子已落的
+     * 保持可见(文字已真实落库,不假成功)。
+     */
+    fun publishUserMoment(text: String) {
+        val body = text.trim()
+        if (body.isEmpty() || body.length > USER_POST_MAX_CHARS) {
+            _momentsUi.value = _momentsUi.value.copy(
+                error = if (body.isEmpty()) "想说什么写下来再发布吧" else "最多 $USER_POST_MAX_CHARS 字",
+            )
+            return
+        }
+        if (_momentsUi.value.publishing) return
+        _momentsUi.value = _momentsUi.value.copy(publishing = true, error = null)
+        viewModelScope.launch {
+            try {
+                val postId = repo.insertMoment(
+                    com.neethu.gouxiang.data.MomentEntity(
+                        characterId = 0,
+                        authorKind = com.neethu.gouxiang.data.MomentAuthorKind.USER,
+                        text = body,
+                        at = System.currentTimeMillis(),
+                    ),
+                )
+                // 发布即一轮互评(用户帖对满足「参与+互动+可看用户动态」的角色
+                // 开放;评论不触发新轮次 → 结构上不循环)
+                repo.db.momentDao().byId(postId)?.let { post ->
+                    runCatching { momentInteractionEngine.runRound(post) }
+                        .onFailure { android.util.Log.w("Moments", "interaction round failed", it) }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _momentsUi.value = _momentsUi.value.copy(error = "发布失败，请重试")
+            } finally {
+                _momentsUi.value = _momentsUi.value.copy(publishing = false)
+            }
+        }
+    }
+
+    /** 删除用户自己的动态(H3;角色动态不开放删除,返回后由流上屏)。 */
+    fun deleteUserMoment(postId: Long) {
+        viewModelScope.launch {
+            runCatching { repo.deleteUserMoment(postId) }
+                .onFailure { android.util.Log.w("Moments", "delete post failed", it) }
+            _momentsUi.value = _momentsUi.value.copy(
+                comments = _momentsUi.value.comments - postId,
+            )
+        }
+    }
+
+    /** 删除用户自己的评论(H3;角色评论不开放删除;评论区走流自动刷新)。 */
+    fun deleteUserComment(commentId: Long) {
+        viewModelScope.launch {
+            runCatching { repo.deleteUserMomentComment(commentId) }
+                .onFailure { android.util.Log.w("Moments", "delete comment failed", it) }
+        }
+    }
+
+    // ── 朋友圈权限管理面板(H2)──────────────────────────────────────
+
+    /** 面板行刷新(打开面板时拉一次;切换开关后即时回写快照)。 */
+    fun refreshMomentPermissions() {
+        viewModelScope.launch {
+            _momentsUi.value = _momentsUi.value.copy(permissionsLoading = true)
+            val rows = repo.db.characterDao().observeAll().firstOrNull().orEmpty()
+            _momentsUi.value = _momentsUi.value.copy(
+                permissions = rows.map { com.neethu.gouxiang.ui.moments.MomentPermissionRow.of(it) },
+                permissionsLoading = false,
+            )
+        }
+    }
+
+    /**
+     * 切换某角色的一项朋友圈权限(H2):写回 `characters` 对应列;生成层
+     * (Scheduler 入队/Worker 执行)与查询层(合并时间线/互评候选)各自生效。
+     * 手动「生成动态」不受限(与心声开关同语义,只门控自动与互动)。
+     */
+    fun setMomentPermission(characterId: Long, field: MomentPermissionField, enabled: Boolean) {
+        viewModelScope.launch {
+            val character = repo.characterById(characterId) ?: return@launch
+            val updated = when (field) {
+                MomentPermissionField.JOINED -> character.copy(momentsJoined = enabled)
+                MomentPermissionField.SEE_USER_POSTS -> character.copy(momentsSeeUserPosts = enabled)
+                MomentPermissionField.INTERACT -> character.copy(momentsInteract = enabled)
+                MomentPermissionField.DAILY_AUTO -> character.copy(momentsDailyAuto = enabled)
+            }
+            repo.updateCharacter(updated)
+            _momentsUi.value = _momentsUi.value.copy(
+                permissions = _momentsUi.value.permissions.map {
+                    if (it.characterId == characterId) com.neethu.gouxiang.ui.moments.MomentPermissionRow.of(updated) else it
+                },
+            )
         }
     }
 
@@ -1684,32 +1827,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 用户评论(F9 互动 4):用户评论先落库 → 角色经 LLM 回复同一动态
-     * (回复落库即上屏;失败只插一条角色侧兜底占位行,与聊天页「永远有
-     * 回复」的兜底约定同源,界面永远不崩)。
+     * 用户评论(F9 互动 4 → H 工作包权限化):用户评论先落库 → 动态作者角色
+     * 回复(H2 权限在生成层执行:作者不参与朋友圈/关评论互动 → 不回复,
+     * 也不插占位行;用户帖没有角色作者,不触发回复)。回复失败仍插兜底
+     * 占位行(与聊天页「永远有回复」的既有约定同源;权限关闭 ≠ 失败)。
      */
     fun sendMomentComment(post: com.neethu.gouxiang.data.MomentEntity, text: String) {
-        val conversationId = _momentsConversationId.value ?: return
         val body = text.trim()
         if (body.isEmpty() || _momentsUi.value.replyingToId != null) return
         _momentsUi.value = _momentsUi.value.copy(replyingToId = post.id)
         viewModelScope.launch {
             try {
-                val character = repo.characterById(post.characterId) ?: return@launch
                 val userCommentId = repo.insertMomentComment(
                     com.neethu.gouxiang.data.MomentCommentEntity(
                         postId = post.id,
                         authorKind = "user",
+                        authorId = 0,
                         text = body,
                         at = System.currentTimeMillis(),
                     ),
                 )
+                // 作者回复闸(H2):只对参与且允许互动的角色帖作者生成回复。
+                val author = post.characterId.takeIf { post.authorKind != "user" }
+                    ?.let { repo.characterById(it) }
+                if (author == null || !author.momentsJoined || !author.momentsInteract) return@launch
                 // 角色回复:LLM 生成;失败插兜底占位行(楼中楼挂用户评论)
-                val memories = repo.memoriesFor(character.id)
+                val memories = repo.memoriesFor(author.id)
                 val thread = repo.momentComments(post.id)
-                val system = com.neethu.gouxiang.chat.MomentsGenerator.replySystemPrompt(character, memories)
+                val system = com.neethu.gouxiang.chat.MomentsGenerator.replySystemPrompt(author, memories)
                 val user = com.neethu.gouxiang.chat.MomentsGenerator.replyUserPrompt(
-                    character, post, thread.dropLast(1), thread.last(),
+                    author, post, thread.dropLast(1), thread.last(),
                 )
                 val raw = momentsChannel.requestReply(system, user)
                 val reply = raw?.let { com.neethu.gouxiang.chat.MomentsGenerator.parseReply(it) }
@@ -1717,6 +1864,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     com.neethu.gouxiang.data.MomentCommentEntity(
                         postId = post.id,
                         authorKind = "avatar",
+                        authorId = author.id,
                         replyToId = userCommentId,
                         text = reply ?: "……(刚刚没想好说什么)",
                         at = System.currentTimeMillis(),
@@ -1726,16 +1874,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e("Moments", "comment round failed", e)
-                // 数据层失败也要给用户评论一个角色侧落点(防评论区悬空)
-                runCatching {
-                    repo.insertMomentComment(
-                        com.neethu.gouxiang.data.MomentCommentEntity(
-                            postId = post.id,
-                            authorKind = "avatar",
-                            text = "……(刚刚没想好说什么)",
-                            at = System.currentTimeMillis(),
-                        ),
-                    )
+                // 数据层失败也要给用户评论一个角色侧落点(防评论区悬空);
+                // 作者未知时不落(权限语义:不能替未授权的角色说话)
+                val author = post.characterId.takeIf { post.authorKind != "user" }
+                    ?.let { repo.characterById(it) }
+                if (author != null && author.momentsJoined && author.momentsInteract) {
+                    runCatching {
+                        repo.insertMomentComment(
+                            com.neethu.gouxiang.data.MomentCommentEntity(
+                                postId = post.id,
+                                authorKind = "avatar",
+                                authorId = author.id,
+                                text = "……(刚刚没想好说什么)",
+                                at = System.currentTimeMillis(),
+                            ),
+                        )
+                    }
                 }
             } finally {
                 _momentsUi.value = _momentsUi.value.copy(replyingToId = null)

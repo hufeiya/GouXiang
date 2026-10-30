@@ -173,6 +173,13 @@ fun aiDebugHelp(): String = """
 |  open_photo / close_photo   打开/关闭对应页(dump 验证)
 |  innervoice_switch <arg>  当前角色「自动生成心声」开关(arg=on|off;需先 open innervoice)
 |  innervoice_delete <ai_x=id> 删除一张心声卡(内容管理)
+|Moments (朋友圈扩展与发现,H 工作包):
+|  moments_list             多角色合并时间线: id 作者(avatar/user) 赞N 评N 文本
+|  moments <arg>            gen|post <文本>|like <postId>|comment <postId> <文本>|
+|                           del_post <postId>|del_comment <commentId>(与 UI 同路径)
+|  moments_perm <arg>       <角色名|id> <joined|see|interact|daily> <on|off>
+|                           逐角色权限(自动任务入队+执行双重拦截)
+|  open_tab discover        切到「发现」tab(本地角色浏览/搜索/历史 + 朋友圈入口)
 |
     |Hot start: 应用已启动时再次 am start 走 onNewIntent(命令经进程级总线入队);
     |排查入队用 adb logcat -d -s AIDebug.Queue,执行结果用 -s AIDebug。

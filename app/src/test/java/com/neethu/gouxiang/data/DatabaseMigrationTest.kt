@@ -65,6 +65,7 @@ class DatabaseMigrationTest {
                 GouXiangDatabase.MIGRATION_9_10,
                 GouXiangDatabase.MIGRATION_10_11,
                 GouXiangDatabase.MIGRATION_11_12,
+                GouXiangDatabase.MIGRATION_12_13,
             )
             .allowMainThreadQueries().build()
         try {
@@ -120,7 +121,7 @@ class DatabaseMigrationTest {
     @Test fun v6TaskHistoryGainsFailureKindColumnAndKeepsRows() {
         createV6FromV5WithTaskHistoryRow()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12)
+            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -148,7 +149,7 @@ class DatabaseMigrationTest {
     @Test fun v7CharactersGainAvatarVersionColumnAndKeepsRows() {
         createV7FromV6()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12)
+            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -178,7 +179,7 @@ class DatabaseMigrationTest {
     @Test fun v8ProactiveLedgerTablesCreatedAndOldDataKept() {
         createV8FromV7()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12)
+            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -263,7 +264,7 @@ class DatabaseMigrationTest {
     @Test fun v9CharacterStatusRecordsTableCreatedAndOldDataKept() {
         createV9FromV8()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12)
+            .addMigrations(GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -323,7 +324,7 @@ class DatabaseMigrationTest {
     @Test fun v10SidestoryRecordsTableCreatedAndOldDataKept() {
         createV10FromV9()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12)
+            .addMigrations(GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -407,7 +408,7 @@ class DatabaseMigrationTest {
     @Test fun v11ChatDerivativeRecordsCreatedAndInnerVoicesKept() {
         createV11FromV10()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_11_12)
+            .addMigrations(GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -442,5 +443,103 @@ class DatabaseMigrationTest {
             sql.execSQL("UPDATE characters SET innerVoiceAuto = 0 WHERE id = 1")
             assertEquals(0L, longScalar("SELECT innerVoiceAuto FROM characters WHERE id=1"))
         } finally { db.close() }
+    }
+
+    /** v12 库 = v11 全部语句 + chat_derivative_records + innerVoiceAuto 列(照 11→12 真实迁移顺序)。 */
+    private fun createV12FromV11() {
+        createV11FromV10()
+        val db = context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null)
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `chat_derivative_records` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`kind` TEXT NOT NULL, " +
+                "`title` TEXT NOT NULL, " +
+                "`characterId` INTEGER NOT NULL, " +
+                "`conversationId` INTEGER NOT NULL, " +
+                "`optionJson` TEXT NOT NULL, " +
+                "`sourceStartMessageId` INTEGER, " +
+                "`sourceEndMessageId` INTEGER, " +
+                "`sourceVersion` INTEGER NOT NULL, " +
+                "`requestId` TEXT NOT NULL, " +
+                "`state` TEXT NOT NULL, " +
+                "`failureReason` TEXT NOT NULL, " +
+                "`bodyJson` TEXT NOT NULL, " +
+                "`imageFile` TEXT NOT NULL, " +
+                "`imageStatus` TEXT NOT NULL, " +
+                "`notified` INTEGER NOT NULL, " +
+                "`isStale` INTEGER NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_derivative_records_characterId` ON `chat_derivative_records` (`characterId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_derivative_records_conversationId` ON `chat_derivative_records` (`conversationId`)")
+        db.execSQL("ALTER TABLE characters ADD COLUMN innerVoiceAuto INTEGER NOT NULL DEFAULT 1")
+        db.version = 12
+        db.close()
+    }
+
+    /**
+     * H 工作包 v12→v13:作者/评论者模型 + 权限四列 + 互评认领表;
+     * 旧角色动态与点赞/评论(H1 验收 3)在 schema 变更后仍可见、可读。
+     */
+    @Test fun v13MomentsAuthorModelPermissionsAndOldDataKept() {
+        createV12FromV11()
+        // 旧单角色模型的存量数据:一条已点赞动态 + 一条角色评论(作者=动态作者)
+        val db = context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null)
+        db.execSQL(
+            "INSERT INTO moments (id, characterId, text, imagePrompt, imageFile, likedByMe, at, isStale) " +
+                "VALUES (9, 1, '旧动态正文', '配图描述', '/tmp/moments/old.jpg', 1, 20, 0)",
+        )
+        db.execSQL(
+            "INSERT INTO moment_comments (id, postId, authorKind, replyToId, text, at) " +
+                "VALUES (10, 9, 'avatar', NULL, '旧角色评论', 21)",
+        )
+        db.execSQL(
+            "INSERT INTO moment_comments (id, postId, authorKind, replyToId, text, at) " +
+                "VALUES (11, 9, 'user', NULL, '旧用户评论', 22)",
+        )
+        db.version = 12
+        db.close()
+
+        val db2 = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
+            .addMigrations(GouXiangDatabase.MIGRATION_12_13)
+            .allowMainThreadQueries().build()
+        try {
+            val sql = db2.openHelper.writableDatabase
+            fun scalar(query: String): String = sql.query(query).use { it.moveToFirst(); it.getString(0) }
+            fun longScalar(query: String): Long = sql.query(query).use { it.moveToFirst(); it.getLong(0) }
+            // H1:旧动态原样可见,authorKind 回填 avatar、点赞与配图路径保持可读
+            assertEquals("旧动态正文", scalar("SELECT text FROM moments WHERE id=9"))
+            assertEquals("avatar", scalar("SELECT authorKind FROM moments WHERE id=9"))
+            assertEquals(1L, longScalar("SELECT likedByMe FROM moments WHERE id=9"))
+            assertEquals("/tmp/moments/old.jpg", scalar("SELECT imageFile FROM moments WHERE id=9"))
+            // H1 评论者模型:avatar 评论按动态作者回填 authorId=1;user 评论 authorId=0
+            assertEquals(1L, longScalar("SELECT authorId FROM moment_comments WHERE id=10"))
+            assertEquals("旧角色评论", scalar("SELECT text FROM moment_comments WHERE id=10"))
+            assertEquals(0L, longScalar("SELECT authorId FROM moment_comments WHERE id=11"))
+            // H2:权限四列回填 1(默认全参与,既有行为不变)
+            assertEquals(1L, longScalar("SELECT momentsJoined FROM characters WHERE id=1"))
+            assertEquals(1L, longScalar("SELECT momentsSeeUserPosts FROM characters WHERE id=1"))
+            assertEquals(1L, longScalar("SELECT momentsInteract FROM characters WHERE id=1"))
+            assertEquals(1L, longScalar("SELECT momentsDailyAuto FROM characters WHERE id=1"))
+            // H3:互评认领表可写;(postId, characterId) 唯一索引拒绝重复认领
+            sql.execSQL(
+                "INSERT INTO moment_interactions (postId, characterId, requestId, state, at) " +
+                    "VALUES (9, 1, 'req-h1', 'running', 30)",
+            )
+            assertEquals("running", scalar("SELECT state FROM moment_interactions WHERE postId=9 AND characterId=1"))
+            try {
+                sql.execSQL(
+                    "INSERT INTO moment_interactions (postId, characterId, requestId, state, at) " +
+                        "VALUES (9, 1, 'req-h2', 'running', 31)",
+                )
+                throw AssertionError("moment_interactions 唯一索引应拒绝同 (postId, characterId) 重复认领")
+            } catch (expected: android.database.sqlite.SQLiteConstraintException) {
+                // 预期:唯一冲突
+            }
+            // 权限列可写(H2 面板的落地面)
+            sql.execSQL("UPDATE characters SET momentsJoined = 0 WHERE id = 1")
+            assertEquals(0L, longScalar("SELECT momentsJoined FROM characters WHERE id=1"))
+        } finally { db2.close() }
     }
 }

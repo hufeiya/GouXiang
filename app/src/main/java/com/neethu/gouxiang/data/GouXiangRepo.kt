@@ -2,6 +2,7 @@ package com.neethu.gouxiang.data
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.withTransaction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,6 +40,7 @@ class GouXiangRepo private constructor(context: Context) {
         GouXiangDatabase.MIGRATION_9_10,
         GouXiangDatabase.MIGRATION_10_11,
         GouXiangDatabase.MIGRATION_11_12,
+        GouXiangDatabase.MIGRATION_12_13,
     ).build()
 
     init {
@@ -155,14 +157,28 @@ class GouXiangRepo private constructor(context: Context) {
     suspend fun setInnerVoiceImage(id: Long, file: String) =
         db.innerVoiceDao().setImageFile(id, file)
 
-    // ── 朋友圈(F9「Ta 的朋友圈」)────────────────────────────────────
+    // ── 朋友圈(F9「Ta 的朋友圈」→ H 工作包 H1 多角色时间线)───────────
 
-    /** 动态时间线流(朋友圈页与角色主页占位卡共用,落库即上屏)。 */
+    /** 动态时间线流(角色主页按角色分片查询,不受权限过滤——用户主动查看
+     *  某角色时全量可见;多角色合并时间线走 [observeMomentsFeed])。 */
     fun observeMoments(characterId: Long): Flow<List<MomentEntity>> =
         db.momentDao().observeForCharacter(characterId)
 
     suspend fun moments(characterId: Long): List<MomentEntity> =
         db.momentDao().forCharacter(characterId)
+
+    /**
+     * 多角色合并时间线流(H1):用户帖 + 参与朋友圈([CharacterEntity.momentsJoined])
+     * 角色的动态,按时间倒序;查询层权限过滤(非参与角色的动态不进合并流,
+     * 但数据不删,角色主页分片查询仍可见)。作者名随行解析(角色改名即刷新)。
+     */
+    val momentsFeed: Flow<List<MomentFeed.MomentFeedItem>> =
+        kotlinx.coroutines.flow.combine(
+            db.momentDao().observeAll(),
+            db.characterDao().observeAll(),
+        ) { posts, characters ->
+            MomentFeed.assemble(posts, characters.associateBy { it.id })
+        }
 
     /** 角色主页占位卡尾注(「全部 N」;N=0 时不带尾注,与心声同约定)。 */
     suspend fun countMoments(characterId: Long): Int =
@@ -192,6 +208,32 @@ class GouXiangRepo private constructor(context: Context) {
     /** 评论落库(用户评论与角色回复同一通道;id 供楼中楼 replyToId 挂靠)。 */
     suspend fun insertMomentComment(comment: MomentCommentEntity): Long =
         db.momentCommentDao().insert(comment)
+
+    /** 删除用户自己的评论(H3)。 */
+    suspend fun deleteUserMomentComment(id: Long): Int = db.momentCommentDao().deleteById(id)
+
+    /**
+     * 删除用户自己的动态(H3):评论区与动态行同一事务清空(不留孤儿评论);
+     * 角色动态不开放删除入口(用户只删自己的内容)。
+     */
+    suspend fun deleteUserMoment(postId: Long): Int = db.withTransaction {
+        val removed = db.momentCommentDao().deleteForPost(postId)
+        val post = db.momentDao().byId(postId)
+        // 只允许删用户帖(角色动态走管理路径);幂等:已删返回 0 不抛。
+        if (post != null && post.authorKind == MomentAuthorKind.USER) {
+            db.momentDao().deleteById(postId)
+            removed + 1
+        } else {
+            0
+        }
+    }
+
+    // ── 互评认领账本(H3;引擎在 chat/MomentInteractions.kt 直用 DAO,
+    //    此处仅暴露调试观测面)────────────────────────────────────────
+
+    /** 调试/排查:一帖的互评认领明细(ai_cmd 观测用)。 */
+    suspend fun momentInteractionsForPost(postId: Long): List<MomentInteractionEntity> =
+        db.momentInteractionDao().forPost(postId)
 
     /** 消息落库后刷新会话行摘要(最近时间/预览文案,消息列表 02 同步可见)。 */
     suspend fun touchConversation(conversationId: Long, summary: String, at: Long) =

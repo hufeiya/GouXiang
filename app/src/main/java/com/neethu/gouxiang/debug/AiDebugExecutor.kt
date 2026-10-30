@@ -113,6 +113,9 @@ internal suspend fun executeAiCommand(
             }
             "innervoice_switch" -> cmdInnerVoiceSwitch(vm, command)
             "innervoice_delete" -> cmdInnerVoiceDelete(vm, command)
+            "moments" -> cmdMoments(context, vm, command)
+            "moments_list" -> cmdMomentsList(context)
+            "moments_perm" -> cmdMomentsPerm(context, vm, command)
             else -> throw IllegalArgumentException(
                 "unknown command, send ai_cmd=help (see docs/ai-debug-intents.md)",
             )
@@ -223,8 +226,13 @@ private suspend fun cmdOpenTab(vm: MainViewModel, command: AiDebugCommand): Stri
             vm.selectedTab.value = BottomTab.CREATE
             return "tab=create"
         }
+        "discover" -> {
+            // H 工作包:发现 tab(H4 本地角色浏览/搜索/历史 + 朋友圈入口)
+            vm.selectedTab.value = BottomTab.DISCOVER
+            return "tab=discover"
+        }
         else -> throw IllegalArgumentException(
-            "No tab matches '$arg'. Options: home | messages | profile | create.",
+            "No tab matches '$arg'. Options: home | messages | profile | create | discover.",
         )
     }
     vm.selectedTab.value = tab
@@ -783,6 +791,142 @@ private fun cmdInnerVoiceDelete(vm: MainViewModel, command: AiDebugCommand): Str
         ?: throw IllegalArgumentException("missing voice id — pass ai_x=<innerVoiceId>")
     vm.deleteInnerVoice(id)
     return "inner voice $id delete requested (poll innervoice screen or dump)"
+}
+
+// ── 5.6c 朋友圈扩展与发现(H 工作包)────────────────────────────
+
+/**
+ * 合并时间线清单(H1,真实计数,不伪造社交数据):
+ * `id 作者(类型) 赞 评论数 「文本前40字」`。
+ */
+private suspend fun cmdMomentsList(context: Context): String {
+    val repo = com.neethu.gouxiang.data.GouXiangRepo.get(context)
+    val characters = repo.db.characterDao().observeAll().first()
+    val feed = com.neethu.gouxiang.data.MomentFeed.assemble(
+        repo.db.momentDao().all(),
+        characters.associateBy { it.id },
+    )
+    if (feed.isEmpty()) {
+        return "(no moments — ai_cmd=moments post <文本> 发一条,或 open_chat 后 ai_cmd=moments gen)"
+    }
+    val lines = mutableListOf<String>()
+    for (item in feed) {
+        val like = if (item.post.likedByMe) "赞1" else "赞0"
+        val comments = repo.countMomentComments(item.post.id)
+        lines += "${item.post.id} ${item.authorName}(${item.post.authorKind}) $like " +
+            "评$comments 「${item.post.text.take(40)}」"
+    }
+    return lines.joinToString("\n")
+}
+
+/**
+ * `moments <动作>`(H 工作包验收触达口):
+ * `gen`(对当前打开聊天生成一条角色动态)/ `post <文本>`(用户发帖 → 互评
+ * 轮异步)/ `like <postId>` / `comment <postId> <文本>` / `del_post <postId>` /
+ * `del_comment <commentId>`。
+ */
+private suspend fun cmdMoments(context: Context, vm: MainViewModel, command: AiDebugCommand): String {
+    val arg = requireArg(command).trim()
+    val repo = com.neethu.gouxiang.data.GouXiangRepo.get(context)
+    val head = arg.substringBefore(' ').lowercase()
+    val rest = arg.substringAfter(' ', "").trim()
+    return when (head) {
+        "gen" -> {
+            val conversationId = vm.debugConversationId
+                ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+            if (vm.momentsUi.value.generating) {
+                throw IllegalStateException("moment generation already in progress (poll moments_list)")
+            }
+            vm.generateMoment(conversationId)
+            "moment generation queued for conversation $conversationId (poll moments_list)"
+        }
+        "post" -> {
+            if (rest.isEmpty()) {
+                throw IllegalArgumentException("usage: ai_cmd=moments --es ai_arg 'post <文本>'")
+            }
+            if (vm.momentsUi.value.publishing) {
+                throw IllegalStateException("a post is still publishing — poll moments_list")
+            }
+            vm.publishUserMoment(rest)
+            "user post queued (poll moments_list; interaction round runs async)"
+        }
+        "like" -> {
+            val post = momentById(repo, rest)
+            vm.toggleMomentLike(post)
+            "like toggled on post ${post.id} (liked=${!post.likedByMe} after toggle; poll moments_list)"
+        }
+        "comment" -> {
+            val postId = rest.substringBefore(' ').toLongOrNull()
+                ?: throw IllegalArgumentException("usage: ai_cmd=moments --es ai_arg 'comment <postId> <文本>'")
+            val text = rest.substringAfter(' ', "").trim()
+            val post = momentById(repo, postId.toString())
+            if (text.isEmpty()) {
+                throw IllegalArgumentException("usage: ai_cmd=moments --es ai_arg 'comment <postId> <文本>'")
+            }
+            vm.sendMomentComment(post, text)
+            "user comment queued on post $postId (author reply gated by permissions; poll moments_list)"
+        }
+        "del_post" -> {
+            val post = momentById(repo, rest)
+            vm.deleteUserMoment(post.id)
+            "user post ${post.id} delete requested (avatar posts are ignored by design; poll moments_list)"
+        }
+        "del_comment" -> {
+            val id = rest.toLongOrNull()
+                ?: throw IllegalArgumentException("usage: ai_cmd=moments --es ai_arg 'del_comment <commentId>' (see moment comments via moments_list)")
+            vm.deleteUserComment(id)
+            "comment $id delete requested (only user comments are removable; poll moments_list)"
+        }
+        else -> throw IllegalArgumentException(
+            "unknown moments action '$head' — gen | post | like | comment | del_post | del_comment",
+        )
+    }
+}
+
+private suspend fun momentById(repo: com.neethu.gouxiang.data.GouXiangRepo, raw: String): com.neethu.gouxiang.data.MomentEntity {
+    val id = raw.toLongOrNull()
+        ?: throw IllegalArgumentException("usage: pass a numeric postId (see moments_list)")
+    return repo.db.momentDao().byId(id)
+        ?: throw IllegalArgumentException("No moment matches id $id. Send ai_cmd=moments_list to see options.")
+}
+
+/**
+ * `moments_perm <角色名|id> <joined|see|interact|daily> <on|off>`(H2):
+ * 逐角色切换 参与/看用户动态/评论互动/自动日更;写回 characters 对应列,
+ * 生成层(入队+执行)与查询层(合并时间线/互评候选)双执行。
+ */
+private suspend fun cmdMomentsPerm(context: Context, vm: MainViewModel, command: AiDebugCommand): String {
+    val arg = requireArg(command)
+    val parts = arg.trim().split(Regex("\\s+"))
+    if (parts.size < 3) {
+        throw IllegalArgumentException(
+            "usage: ai_cmd=moments_perm --es ai_arg '<角色名|id> <joined|see|interact|daily> <on|off>' (see chars)",
+        )
+    }
+    val repo = com.neethu.gouxiang.data.GouXiangRepo.get(context)
+    val who = parts[0]
+    val character = repo.characterByName(who)
+        ?: who.toLongOrNull()?.let { repo.characterById(it) }
+        ?: throw IllegalArgumentException(
+            "No character matches '$who'. Send ai_cmd=chars to see options.",
+        )
+    val field = when (parts[1].lowercase()) {
+        "joined" -> com.neethu.gouxiang.ui.moments.MomentPermissionField.JOINED
+        "see" -> com.neethu.gouxiang.ui.moments.MomentPermissionField.SEE_USER_POSTS
+        "interact" -> com.neethu.gouxiang.ui.moments.MomentPermissionField.INTERACT
+        "daily" -> com.neethu.gouxiang.ui.moments.MomentPermissionField.DAILY_AUTO
+        else -> throw IllegalArgumentException(
+            "unknown permission '${parts[1]}' — joined | see | interact | daily",
+        )
+    }
+    val enabled = when (parts[2].lowercase()) {
+        "on", "true", "1" -> true
+        "off", "false", "0" -> false
+        else -> throw IllegalArgumentException("value must be on|off (got '${parts[2]}')")
+    }
+    vm.setMomentPermission(character.id, field, enabled)
+    return "moments permission ${parts[1].lowercase()} of ${character.name} -> $enabled " +
+        "(auto tasks re-checked at enqueue/execute; feed & interactions re-filter immediately)"
 }
 
 /** char 载荷容错 JSON 解析(与 MultiBubbleParser 同款 lenient 配置)。 */

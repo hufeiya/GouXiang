@@ -148,7 +148,8 @@ class InnerVoiceAutoWorker(context: Context, params: WorkerParameters) :
     }
 }
 
-/** 朋友圈每日:对每个角色会话入队一条 MOMENT(Executor 内按当日查重防重发)。 */
+/** 朋友圈每日:对每个角色会话入队一条 MOMENT(H2 角色级权限入队闸:
+ *  不参与/关日更的角色跳过;Worker 执行时仍会二次自查)。 */
 class MomentsDailyWorker(context: Context, params: WorkerParameters) :
     AutoGuardWorker(context, params) {
 
@@ -160,6 +161,9 @@ class MomentsDailyWorker(context: Context, params: WorkerParameters) :
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(app)
         return runCatching {
             for (conv in repo.db.conversationDao().latestImPerCharacter()) {
+                // H2 角色级入队闸:不参与朋友圈或关了角色级日更的不发(生成层第一闸)。
+                val character = repo.characterById(conv.characterId)
+                if (character != null && (!character.momentsJoined || !character.momentsDailyAuto)) continue
                 DerivativeWorker.enqueue(
                     app,
                     DerivativeTask(DerivativeKind.MOMENT, conv.id, DerivativeSource.AUTOMATIC, conv.characterId, automaticEpoch = epoch),

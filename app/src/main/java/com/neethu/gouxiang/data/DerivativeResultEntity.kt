@@ -33,6 +33,10 @@ interface DerivativeResultDao {
     @Query("SELECT * FROM derivative_results WHERE characterId = :characterId AND kind = :kind ORDER BY rowid DESC")
     fun observeForCharacter(characterId: Long, kind: String): kotlinx.coroutines.flow.Flow<List<DerivativeResultEntity>>
 
+    /** 全角色按类型观察(朋友圈合并时间线 H1 的配图状态源,不分角色)。 */
+    @Query("SELECT * FROM derivative_results WHERE kind = :kind ORDER BY rowid DESC")
+    fun observeForKind(kind: String): kotlinx.coroutines.flow.Flow<List<DerivativeResultEntity>>
+
     @Query("SELECT * FROM derivative_results WHERE requestId = :requestId")
     suspend fun byRequestId(requestId: String): DerivativeResultEntity?
 

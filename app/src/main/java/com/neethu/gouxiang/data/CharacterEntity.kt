@@ -49,6 +49,24 @@ data class CharacterEntity(
      * 默认关叠加:关全局=谁都不自动,开全局=未关角色的可自动)。
      */
     @androidx.room.ColumnInfo(defaultValue = "1") val innerVoiceAuto: Boolean = true,
+    /**
+     * H2 朋友圈权限四开关(10-moments.md §1.6 三开关 + 本地自动日更的
+     * 角色级拆分;默认全开,迁移回填 1 保住既有行为):
+     *
+     * - [momentsJoined] 角色是否参与朋友圈:关 = 不再出现在多角色时间线、
+     *   不作为互评候选、自动日更不生成(调度入队与 Worker 执行双重检查);
+     *   其历史动态仍可在角色主页「Ta 的朋友圈」单独查看(数据不删);
+     * - [momentsSeeUserPosts] 能否看用户动态:关 = 看不到用户发帖(互评引擎
+     *   不为其生成对用户帖的评论;合并时间线中用户帖对该角色的可见性同理);
+     * - [momentsInteract] 能否评论互动:关 = 不再发任何评论/回复(含对自己
+     *   动态下用户评论的回复),互评引擎不为其认领互评;
+     * - [momentsDailyAuto] 按角色独立控制自动日更:关 = 该角色不自动发帖
+     *   (与全局「朋友圈日更」开关叠加;点「生成动态」不受限)。
+     */
+    @androidx.room.ColumnInfo(defaultValue = "1") val momentsJoined: Boolean = true,
+    @androidx.room.ColumnInfo(defaultValue = "1") val momentsSeeUserPosts: Boolean = true,
+    @androidx.room.ColumnInfo(defaultValue = "1") val momentsInteract: Boolean = true,
+    @androidx.room.ColumnInfo(defaultValue = "1") val momentsDailyAuto: Boolean = true,
     /** 来源标识(预留:脑洞 2.0 / 本地创作)。 */
     val source: String = "local",
     /** 创建时间(epoch millis)。 */

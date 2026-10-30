@@ -304,6 +304,16 @@ interface MomentDao {
     @Query("SELECT * FROM moments WHERE characterId = :characterId ORDER BY at DESC, id DESC")
     suspend fun forCharacter(characterId: Long): List<MomentEntity>
 
+    /**
+     * 多角色合并时间线源(H1):全部动态按时间倒序,作者/参与过滤在
+     * [com.neethu.gouxiang.data.MomentFeed] 按角色权限执行(查询层权限)。
+     */
+    @Query("SELECT * FROM moments ORDER BY at DESC, id DESC")
+    fun observeAll(): Flow<List<MomentEntity>>
+
+    @Query("SELECT * FROM moments ORDER BY at DESC, id DESC")
+    suspend fun all(): List<MomentEntity>
+
     /** 角色主页「Ta 的朋友圈」占位卡尾注(「全部 N」)。 */
     @Query("SELECT COUNT(*) FROM moments WHERE characterId = :characterId")
     suspend fun countForCharacter(characterId: Long): Int
@@ -342,6 +352,44 @@ interface MomentCommentDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(comment: MomentCommentEntity): Long
+
+    /** 删除一条评论(H3:用户删自己的评论;返回删除行数)。 */
+    @Query("DELETE FROM moment_comments WHERE id = :id")
+    suspend fun deleteById(id: Long): Int
+
+    /** 删帖联动(H3:删用户动态时清空其评论区;事务内由 Repo 收口)。 */
+    @Query("DELETE FROM moment_comments WHERE postId = :postId")
+    suspend fun deleteForPost(postId: Long): Int
+}
+
+@Dao
+interface MomentInteractionDao {
+    /**
+     * 幂等认领(H3):(postId, characterId) 唯一索引兜底;IGNORE 语义下
+     * 已有认领返回 -1,调用方跳过该候选(同角色对同动态至多一条互评)。
+     */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun claim(entity: MomentInteractionEntity): Long
+
+    /** 认领行是否已被占(-1 = 未认领成功)。 */
+    @Query("SELECT EXISTS(SELECT 1 FROM moment_interactions WHERE postId = :postId AND characterId = :characterId)")
+    suspend fun isClaimed(postId: Long, characterId: Long): Boolean
+
+    /** 已认领的角色 id 集(互评候选过滤的查询层依据)。 */
+    @Query("SELECT characterId FROM moment_interactions WHERE postId = :postId")
+    suspend fun claimedCharacterIds(postId: Long): List<Long>
+
+    /** 生成成功收口:评论行与认领行同一事务置终态(调用方 withTransaction)。 */
+    @Query("UPDATE moment_interactions SET state = :state WHERE postId = :postId AND characterId = :characterId")
+    suspend fun markState(postId: Long, characterId: Long, state: String)
+
+    /** 生成失败释放认领(可重试;同 requestId 幂等不适用——认领即独占)。 */
+    @Query("DELETE FROM moment_interactions WHERE postId = :postId AND characterId = :characterId")
+    suspend fun release(postId: Long, characterId: Long)
+
+    /** 调试/排查:一帖的认领明细。 */
+    @Query("SELECT * FROM moment_interactions WHERE postId = :postId ORDER BY id ASC")
+    suspend fun forPost(postId: Long): List<MomentInteractionEntity>
 }
 
 /** 同名角色冲突(创作保存的语义化失败,C 工作包):调用方映射为可读提示。 */
