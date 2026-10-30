@@ -41,7 +41,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = GouXiangRepo.get(app)
     private val orchestrator =
-        ChatOrchestrator(ChatDaoAccess(repo), llm = ChatOrchestrator.defaultLlm())
+        ChatOrchestrator(
+            ChatDaoAccess(repo),
+            llm = ChatOrchestrator.defaultLlm(),
+            // 大模型端点跟随「我的 → AI 服务配置」(每回合现读,改完即生效;
+            // 留空回落 BuildConfig 内置默认)
+            llmEndpointSource = {
+                com.neethu.gouxiang.ai.config.AiConfigStore.load(app).llmEndpoint()
+            },
+        )
 
     // ── 记忆系统(F3):书 + 抽取通道 + 协调器,回合收尾挂进编排器 ──────
     val memoryBook = MemoryBook(com.neethu.gouxiang.data.RoomMemorySource(repo)).also {
@@ -337,6 +345,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             com.neethu.gouxiang.ai.speech.VoiceCallEngine(
                 app = getApplication(),
                 scope = viewModelScope,
+                // 通话合成/识别的 Key、音色与 ASR 模型跟随「我的 → AI 服务配置」
+                aiConfigSource = {
+                    com.neethu.gouxiang.ai.config.AiConfigStore.load(getApplication())
+                },
                 runChatRound = { userText ->
                     val conv = repo.db.conversationDao().byId(convId) ?: return@VoiceCallEngine emptyList()
                     val character = repo.characterById(conv.characterId) ?: return@VoiceCallEngine emptyList()

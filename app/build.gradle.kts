@@ -39,6 +39,11 @@ android {
         // Ark(两个控制台各发各的);缺省空串 = 硅基 TTS 兜底(与既有"空 Key 视为
         // 未配置"约定一致)
         buildConfigField("String", "VOLCANO_TTS_API_KEY", "\"${secret("VOLCANO_TTS_API_KEY")}\"")
+        // 多厂商目录(我的→AI 服务配置,AiConfigStore.defaultKeyFor 的留空回落值):
+        // 全量密钥见仓库根 secrets.properties;GitHub Token/Grok 仅存文件不进 APK
+        buildConfigField("String", "OPENROUTER_API_KEY", "\"${secret("OPENROUTER_API_KEY")}\"")
+        buildConfigField("String", "DEEPSEEK_OFFICIAL_API_KEY", "\"${secret("DEEPSEEK_OFFICIAL_API_KEY")}\"")
+        buildConfigField("String", "ALIYUNBAILIAN_API_KEY", "\"${secret("ALIYUNBAILIAN_API_KEY")}\"")
         buildConfigField("String", "VOLCANO_ARK_BASE_URL", "\"https://ark.cn-beijing.volces.com/api/v3\"")
         buildConfigField("String", "SILICONFLOW_BASE_URL", "\"https://api.siliconflow.cn/v1\"")
     }

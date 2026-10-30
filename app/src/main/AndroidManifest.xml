@@ -29,6 +29,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- 我的页 → AI 服务配置(LLM/TTS/ASR,移植自 AIAvatar-SDK) -->
+        <activity
+            android:name=".ui.aiconfig.AiConfigActivity"
+            android:exported="false"
+            android:label="AI 服务配置"
+            android:theme="@style/Theme.GouXiang"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>

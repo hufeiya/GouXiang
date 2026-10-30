@@ -45,6 +45,13 @@ class ChatOrchestrator(
     /** 可注入假 LLM 测试;生产默认 Ark(doubao-seed-2-0-mini,冒烟已实测连通)。 */
     private val llm: Llm,
     /**
+     * 大模型端点源(「我的 → AI 服务配置」可改,每回合现取现组——配置页改完
+     * 即生效无需重启):缺省回落 BuildConfig 烘入的火山方舟默认链路,未配置时
+     * 行为与「密钥烘进 BuildConfig」时代完全一致。
+     */
+    private val llmEndpointSource: () -> com.neethu.gouxiang.ai.config.LlmEndpoint =
+        { DEFAULT_ENDPOINT },
+    /**
      * 泡间连发节奏开关(毫秒):>0 时每泡间按 600~1200ms 随机间隔连发
      * (04 号文档「条间隔 600~1200ms 随机」,区间见 [BUBBLE_GAP_MIN_MS]/
      * [BUBBLE_GAP_MAX_MS]);0 = 完全跳过延迟(测试通路,既有测试注入 0)。
@@ -369,28 +376,48 @@ class ChatOrchestrator(
         Streamed(text = sb.toString(), failed = failed)
     }
 
-    private fun llmConfig() = LlmConfig(
-        baseUrl = BuildConfig.VOLCANO_ARK_BASE_URL,
-        apiKey = BuildConfig.VOLCANO_ARK_API_KEY,
-        model = MODEL,
-        temperature = 0.9f,
-        topP = 0.9f,
-        maxTokens = 512,
-    )
+    private fun llmConfig() = llmEndpointSource().let { e ->
+        LlmConfig(
+            baseUrl = e.baseUrl,
+            apiKey = e.apiKey,
+            model = e.model,
+            temperature = 0.9f,
+            topP = 0.9f,
+            maxTokens = 512,
+            extraBody = e.extraBody,
+        )
+    }
 
     /** 记忆通道的请求配置:同端点同模型(temperature 由抽取层覆盖为稳态)。 */
-    fun llmConfigForMemory(): LlmConfig = LlmConfig(
-        baseUrl = BuildConfig.VOLCANO_ARK_BASE_URL,
-        apiKey = BuildConfig.VOLCANO_ARK_API_KEY,
-        model = MODEL,
-        temperature = 0.2f,
-        topP = 0.9f,
-        maxTokens = 512,
-    )
+    fun llmConfigForMemory(): LlmConfig = llmEndpointSource().let { e ->
+        LlmConfig(
+            baseUrl = e.baseUrl,
+            apiKey = e.apiKey,
+            model = e.model,
+            temperature = 0.2f,
+            topP = 0.9f,
+            maxTokens = 512,
+            extraBody = e.extraBody,
+        )
+    }
 
     companion object {
         /** Ark 在售最小档(冒烟测试同款,2026-10-28 实查)。 */
         const val MODEL = "doubao-seed-2-0-mini-260428"
+
+        /**
+         * 缺省端点:BuildConfig 烘入的火山方舟默认链路(MODEL 与火山目录默认
+         * 首位同款)。extraBody 带上 doubao-seed 系的关思考方言(思考 token 走
+         * reasoning_content 而适配器只读 delta.content,不关就是首句前的纯等待)。
+         */
+        val DEFAULT_ENDPOINT = com.neethu.gouxiang.ai.config.LlmEndpoint(
+            baseUrl = BuildConfig.VOLCANO_ARK_BASE_URL,
+            apiKey = BuildConfig.VOLCANO_ARK_API_KEY,
+            model = MODEL,
+            extraBody = com.neethu.gouxiang.ai.config.llmExtraBody(
+                com.neethu.gouxiang.ai.config.AiProvider.VOLCANO, MODEL,
+            ),
+        )
 
         /** 上下文窗口:最近 20 条对话(多泡协议下 ≈6~10 轮)。 */
         const val HISTORY_LIMIT = 20

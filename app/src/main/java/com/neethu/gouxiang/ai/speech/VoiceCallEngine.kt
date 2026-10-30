@@ -40,6 +40,14 @@ class VoiceCallEngine(
     private val scope: CoroutineScope,
     /** 聊天回合接线(MainViewModel 注入:用户消息落库 + 编排器整回合)。 */
     private val runChatRound: suspend (userText: String) -> List<Bubble>,
+    /**
+     * AI 配置源(「我的 → AI 服务配置」可改,每回合现取):消费 通话合成 Key
+     * (豆包语音,留空回落 BuildConfig)/ 兜底与识别的硅基流动 Key / 通话音色 /
+     * ASR 模型名。缺省 = 全默认(与配置页未接线时代行为一致)。
+     */
+    private val aiConfigSource: () -> com.neethu.gouxiang.ai.config.AiConfig = {
+        com.neethu.gouxiang.ai.config.AiConfig()
+    },
 ) {
 
     enum class Phase { LISTENING, RECOGNIZING, THINKING, SPEAKING }
@@ -197,7 +205,14 @@ class VoiceCallEngine(
     /** 识别:WAV → 文本;失败返回空串(上层走「没听清」),页面永不崩。 */
     private suspend fun transcribe(wav: ByteArray): String = withContext(Dispatchers.IO) {
         try {
-            asr().transcribe(wav, "audio/wav", AsrConfig(model = ASR_MODEL, language = "zh"))
+            // 模型留空按端点推断(硅基 → Qwen3-ASR-1.7B,与历史行为一致);
+            // Key = 配置页硅基流动生效值(留空回落 BuildConfig)
+            val cfg = aiConfigSource()
+            val key = cfg.effectiveAsrKey()
+            val model = com.neethu.gouxiang.ai.config.resolveAsrModel(
+                BuildConfig.SILICONFLOW_BASE_URL, cfg.asrModel,
+            )
+            asr(key, model).transcribe(wav, "audio/wav", AsrConfig(model = model, language = "zh"))
         } catch (e: Exception) {
             Log.w(TAG, "ASR failed", e)
             ""
@@ -206,13 +221,20 @@ class VoiceCallEngine(
 
     /** 开口说:合成 + 播放。true = 已开始播(完成/打断由 [playDone] 收口)。 */
     private suspend fun speak(text: String): Boolean {
-        if (BuildConfig.VOLCANO_TTS_API_KEY.isNotBlank()) {
+        val cfg = aiConfigSource()
+        val volcanoKey = cfg.effectiveTtsKey()
+        val siliconKey = cfg.effectiveApiKey(com.neethu.gouxiang.ai.config.AiProvider.SILICONFLOW)
+        // 音色留空 = 目录默认(与适配器 DEFAULT_SPEAKER 同款 zh_female_vv_uranus)
+        val voiceId = com.neethu.gouxiang.ai.config.resolveVoice(
+            com.neethu.gouxiang.ai.config.AiProvider.VOLCANO, cfg.ttsVoice,
+        )
+        if (volcanoKey.isNotBlank()) {
             val r = runCatching {
-                volcanoTts().synthesize(
+                volcanoTts(volcanoKey).synthesize(
                     text,
                     TtsConfig(
                         model = "",
-                        voice = VolcanoEngineTtsAdapter.DEFAULT_SPEAKER,
+                        voice = voiceId,
                         sampleRate = VolcanoEngineTtsAdapter.DEFAULT_SAMPLE_RATE,
                     ),
                 )
@@ -224,11 +246,11 @@ class VoiceCallEngine(
             }
             Log.w(TAG, "volcano tts failed", r.exceptionOrNull())
         } else {
-            Log.i(TAG, "VOLCANO_TTS_API_KEY blank, fallback to siliconflow tts")
+            Log.i(TAG, "volcano tts key blank, fallback to siliconflow tts")
         }
-        if (BuildConfig.SILICONFLOW_API_KEY.isNotBlank()) {
+        if (siliconKey.isNotBlank()) {
             val r = runCatching {
-                siliconTts().synthesize(
+                siliconTts(siliconKey).synthesize(
                     text,
                     TtsConfig(
                         model = SILICONFLOW_TTS_MODEL,
@@ -249,23 +271,36 @@ class VoiceCallEngine(
         return false
     }
 
-    private fun asr(): AsrAdapter = asrAdapter ?: OpenAiCompatibleAsrAdapter(
-        BuildConfig.SILICONFLOW_BASE_URL,
-        BuildConfig.SILICONFLOW_API_KEY,
-    ).also { asrAdapter = it }
-
-    private fun volcanoTts(): TtsAdapter = volcanoAdapter ?: VolcanoEngineTtsAdapter(
-        BuildConfig.VOLCANO_TTS_API_KEY,
-    ).also { volcanoAdapter = it }
-
-    private fun siliconTts(): TtsAdapter = siliconAdapter ?: OpenAiCompatibleTtsAdapter(
-        BuildConfig.SILICONFLOW_BASE_URL,
-        BuildConfig.SILICONFLOW_API_KEY,
-    ).also { siliconAdapter = it }
-
+    // 适配器按 (Key[, 模型]) 缓存:配置页改 Key 后下次回合用新适配器,
+    // 不用杀通话页(旧适配器随重建被替换)
     private var asrAdapter: AsrAdapter? = null
+    private var asrCacheKey: Pair<String, String>? = null
     private var volcanoAdapter: TtsAdapter? = null
+    private var volcanoCacheKey: String? = null
     private var siliconAdapter: TtsAdapter? = null
+    private var siliconCacheKey: String? = null
+
+    private fun asr(key: String, model: String): AsrAdapter {
+        val cached = asrCacheKey
+        if (asrAdapter != null && cached == key to model) return asrAdapter!!
+        return OpenAiCompatibleAsrAdapter(
+            BuildConfig.SILICONFLOW_BASE_URL,
+            key,
+        ).also { asrAdapter = it; asrCacheKey = key to model }
+    }
+
+    private fun volcanoTts(key: String): TtsAdapter {
+        if (volcanoAdapter != null && volcanoCacheKey == key) return volcanoAdapter!!
+        return VolcanoEngineTtsAdapter(key).also { volcanoAdapter = it; volcanoCacheKey = key }
+    }
+
+    private fun siliconTts(key: String): TtsAdapter {
+        if (siliconAdapter != null && siliconCacheKey == key) return siliconAdapter!!
+        return OpenAiCompatibleTtsAdapter(
+            BuildConfig.SILICONFLOW_BASE_URL,
+            key,
+        ).also { siliconAdapter = it; siliconCacheKey = key }
+    }
 
     companion object {
         private const val TAG = "VoiceCall"

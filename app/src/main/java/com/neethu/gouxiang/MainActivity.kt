@@ -34,6 +34,8 @@ import com.neethu.gouxiang.ui.memory.MemoryScreen
 import com.neethu.gouxiang.ui.nav.BottomTab
 import com.neethu.gouxiang.ui.phone.PhoneChatGuideScreen
 import com.neethu.gouxiang.ui.phone.PhoneChatScreen
+import com.neethu.gouxiang.ui.profile.ProfileScreen
+import com.neethu.gouxiang.ui.aiconfig.AiConfigActivity
 import com.neethu.gouxiang.ui.theme.GouXiangTheme
 
 class MainActivity : ComponentActivity() {
@@ -124,7 +126,14 @@ class MainActivity : ComponentActivity() {
                         onOpenChat = { vm.openChat(it) },
                         onOpenPhoneChat = { vm.openChat(it, phoneMode = true) },
                     )
-                    BottomTab.PROFILE -> PlaceholderPage("我的", PlaceholderIcons.Profile)
+                    BottomTab.PROFILE -> ProfileScreen(
+                        // AI 服务配置(独立 Activity):大模型/语音通话 TTS/ASR
+                        onOpenAiConfig = {
+                            startActivity(
+                                android.content.Intent(this@MainActivity, AiConfigActivity::class.java),
+                            )
+                        },
+                    )
                 }
             }
         }
