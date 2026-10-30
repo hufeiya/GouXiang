@@ -257,6 +257,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         draftJob = null
         _streamDraft.value = ""
         stopVoicePlayback()
+        cancelVoiceInput()
         _chatConversationId.value = null
         _isPhoneChat.value = false
         // 重建整态:离开聊天页即清空失败回合条(failedTurn)
@@ -333,9 +334,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 手机聊天「+」面板提交的卡片:编码为行内协议标记发送,入库侧自动落 kind=card。 */
+    /** 手机聊天「+」面板提交的卡片:编码为行内协议标记发送,入库侧自动落 kind=card。
+     * F2 金额校验兜底(UI 校验的最后防线):转账/代付空金额静默拦截。
+     */
     fun sendCard(payload: com.neethu.gouxiang.protocol.CardPayload) {
         if (isPhoneChat.value.not()) return
+        if (!payload.sendable) return
         sendChatMessage(payload.toProtocolLine(), phoneMode = true)
     }
 
@@ -741,6 +745,116 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 语音条播放(范围 1:TTS 或占位;TTS 不可用时静默不发声)。 */
     fun playVoice(messageId: Long, text: String) {
         voicePlayer.play(messageId, text)
+    }
+
+    // ── 按住说话·语音输入(F4-P1:聊天输入条复用 F6 录音+ASR 管线)──────
+
+    /**
+     * 语音输入状态机(与 [VoiceCallEngine] 的 holdStart/holdRelease 同构,
+     * 但松手后不进 LLM 回合 —— ASR 转写结果填回输入条草稿,用户可改再发,
+     * 对齐猫箱「转写可改」;失败置 notice 给 Toast 兜底,录音器永留后台线程)。
+     *
+     * 录音格式与 F6 完全同源:[WavRecorder](16-bit PCM 单声道 16 kHz → WAV),
+     * 误触丢弃阈值同 [VoiceCallEngine.MIN_WAV_BYTES];ASR = 硅基
+     * Qwen3-ASR(适配器与 Key 解析同 F6 的 [VoiceCallEngine.transcribe] 口径)。
+     */
+    private val recorder = com.neethu.gouxiang.ai.speech.WavRecorder()
+
+    /** 语音输入进行中(输入条按住态高亮);holdRelease 开始转写后即 false。 */
+    private val _voiceInputActive = MutableStateFlow(false)
+    val voiceInputActive: StateFlow<Boolean> = _voiceInputActive.asStateFlow()
+
+    /** 语音输入失败提示(空=无);Toast 消费后清空。 */
+    private val _voiceInputNotice = MutableStateFlow("")
+    val voiceInputNotice: StateFlow<String> = _voiceInputNotice.asStateFlow()
+
+    /** 语音输入转写完成(文本;UI 消费填入草稿框后即清空)。 */
+    private val _voiceInputTranscribed = MutableStateFlow("")
+    val voiceInputTranscribed: StateFlow<String> = _voiceInputTranscribed.asStateFlow()
+
+    /** 转写在途(松手后 ASR 网络请求期间输入条提示「识别中」)。 */
+    private val _voiceInputRecognizing = MutableStateFlow(false)
+    val voiceInputRecognizing: StateFlow<Boolean> = _voiceInputRecognizing.asStateFlow()
+
+    /** 按住说话·按下开录(麦克风被占用/无权限给 notice,不崩)。 */
+    fun voiceInputStart() {
+        if (_voiceInputActive.value || _voiceInputRecognizing.value) return
+        _voiceInputNotice.value = ""
+        try {
+            recorder.start()
+            _voiceInputActive.value = true
+        } catch (e: Exception) {
+            android.util.Log.w("VoiceInput", "mic start failed", e)
+            _voiceInputNotice.value = "麦克风不可用,检查录音权限"
+        }
+    }
+
+    /** 按住说话·松手停录 → ASR 转写 → [voiceInputTranscribed] 出结果。 */
+    fun voiceInputRelease() {
+        if (_voiceInputActive.value.not()) return
+        _voiceInputActive.value = false
+        viewModelScope.launch {
+            _voiceInputRecognizing.value = true
+            try {
+                val wav = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    recorder.stop()
+                    recorder.takeWav()
+                }
+                val text = if (wav.size <= com.neethu.gouxiang.ai.speech.VoiceCallEngine.MIN_WAV_BYTES) {
+                    ""
+                } else {
+                    transcribeVoiceInput(wav)
+                }
+                if (text.isBlank()) {
+                    _voiceInputNotice.value = "没听清,再试一次?"
+                } else {
+                    _voiceInputTranscribed.value = text
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w("VoiceInput", "asr failed", e)
+                _voiceInputNotice.value = "识别失败,请重试"
+            } finally {
+                _voiceInputRecognizing.value = false
+            }
+        }
+    }
+
+    /** 识别:WAV → 文本(Key/模型解析与 VoiceCallEngine 同口径;失败返回空串)。 */
+    private suspend fun transcribeVoiceInput(wav: ByteArray): String =
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val cfg = com.neethu.gouxiang.ai.config.AiConfigStore.load(getApplication())
+                val key = cfg.effectiveAsrKey()
+                val model = com.neethu.gouxiang.ai.config.resolveAsrModel(
+                    com.neethu.gouxiang.BuildConfig.SILICONFLOW_BASE_URL, cfg.asrModel,
+                )
+                com.neethu.gouxiang.ai.speech.OpenAiCompatibleAsrAdapter(
+                    com.neethu.gouxiang.BuildConfig.SILICONFLOW_BASE_URL,
+                    key,
+                ).transcribe(wav, "audio/wav", com.neethu.gouxiang.ai.speech.AsrConfig(model = model, language = "zh"))
+            } catch (e: Exception) {
+                android.util.Log.w("VoiceInput", "ASR failed", e)
+                ""
+            }
+        }
+
+    /** Toast/草稿消费完提示后清空(一次性事件语义)。 */
+    fun consumeVoiceInputNotice() {
+        _voiceInputNotice.value = ""
+    }
+
+    fun consumeVoiceInputTranscribed() {
+        _voiceInputTranscribed.value = ""
+    }
+
+    /** 离开聊天页/切后台:若按住态未松手,同步停录丢弃(防录音器悬挂)。 */
+    fun cancelVoiceInput() {
+        if (_voiceInputActive.value) {
+            _voiceInputActive.value = false
+            try { recorder.stop() } catch (_: Exception) { }
+        }
     }
 
     /** 离线回归阈值(PhoneChatPrefs;调试/后续设置页可调)。 */

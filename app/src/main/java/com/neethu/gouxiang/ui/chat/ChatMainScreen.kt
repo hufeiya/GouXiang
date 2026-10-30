@@ -3,6 +3,8 @@ package com.neethu.gouxiang.ui.chat
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,9 +23,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
@@ -51,6 +57,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -72,6 +81,11 @@ import com.neethu.gouxiang.ui.ChatUiState
  * (emoji + 在做什么,点击占位)+ 左下角「名字 >」+ @来源 + 右侧互动列
  * + 输入条(电话 / 按住说话 / 键盘 / + / 发送)。
  * 消息列表 LazyColumn reverseLayout:新消息自然贴底,历史向上滚。
+ *
+ * F1 长按操作:气泡 combinedClickable 长按弹「复制/回溯/重新生成」菜单,
+ * 与手机聊天页同源(共用 ui.chat.MessageActionsDialog;复制=04 §3.2.F
+ * 本地 v1 最小项,回溯=删除该条及之后回到该点,成功 Toast;重新生成仅
+ * 角色侧泡提供)。
  */
 @Composable
 fun ChatMainScreen(
@@ -91,9 +105,29 @@ fun ChatMainScreen(
     onOpenHistory: () -> Unit = {},
     /** 失败回合重试条点击(02 文档 §3.5:IM 用户回合失败也显式出条,按原文本重试)。 */
     onRetryFailedTurn: () -> Unit = {},
+    /** 长按「回溯」确认后回调(删除该条及之后消息;F1 与手机聊天页同款 VM 出口)。 */
+    onRewind: (messageId: Long) -> Unit = {},
+    /** 长按「重新生成」回调(仅角色侧泡;F1 与手机聊天页同款 VM 出口)。 */
+    onRegenerate: (turnId: String) -> Unit = {},
+    /** F4 语音输入:按下开录 / 松手转写(转写结果填草稿,不直接发送)。 */
+    onHoldStart: () -> Unit = {},
+    onHoldRelease: () -> Unit = {},
+    /** F4 语音输入状态:按住录音中(条高亮)/松手识别中(条文案)。 */
+    holdActive: Boolean = false,
+    recognizing: Boolean = false,
+    /** F4 转写结果(非空=待填入草稿框;消费后由调用方清空)。 */
+    voiceTranscribed: String = "",
+    /** F4 转写填入草稿后回调(VM 清事件)。 */
+    onVoiceTranscribedConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler { onBack() }
+    // 长按操作菜单(F1):目标消息 id → 弹窗;回溯二次确认目标点名防误触。
+    var longPressTarget by remember { mutableStateOf<Long?>(null) }
+    var rewindTarget by remember { mutableStateOf<Long?>(null) }
+    var rewindTargetText by remember { mutableStateOf("") }
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     Box(modifier = modifier.fillMaxSize()) {
         // ── 全屏角色照片底(生成缓存命中显示真图,未生成显示渐变占位)──
         if (avatarFile != null) {
@@ -158,7 +192,10 @@ fun ChatMainScreen(
                     item(key = "failed-turn") { FailedTurnBar(onRetry = onRetryFailedTurn) }
                 }
                 items(state.bubbleItems.asReversed()) { group ->
-                    BubbleGroup(group)
+                    BubbleGroup(
+                        group = group,
+                        onLongPress = { longPressTarget = it },
+                    )
                 }
                 if (state.loadFailed) {
                     item(key = "failed") {
@@ -200,6 +237,62 @@ fun ChatMainScreen(
                 sending = state.sending,
                 onSend = onSend,
                 onOpenVoiceCall = onOpenVoiceCall,
+                onHoldStart = onHoldStart,
+                onHoldRelease = onHoldRelease,
+                holdActive = holdActive,
+                recognizing = recognizing,
+                voiceTranscribed = voiceTranscribed,
+                onVoiceTranscribedConsumed = onVoiceTranscribedConsumed,
+            )
+        }
+
+        // ── F1 长按操作弹窗(与手机聊天页共用 ui.chat 组件,行为同源)──
+        longPressTarget?.let { msgId ->
+            val found = state.bubbleItems
+                .flatMap { group -> group.bubbles.map { group.fromUser to it } }
+                .firstOrNull { it.second.id == msgId }
+            if (found == null) {
+                longPressTarget = null
+            } else {
+                val (fromUser, item) = found
+                MessageActionsDialog(
+                    fromUser = fromUser,
+                    targetText = rewindSnippetShared(item.content),
+                    onDismiss = { longPressTarget = null },
+                    onCopy = {
+                        clipboard.setText(AnnotatedString(item.content))
+                        android.widget.Toast.makeText(
+                            context,
+                            "已复制",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                        longPressTarget = null
+                    },
+                    onRewind = {
+                        rewindTarget = item.id
+                        rewindTargetText = rewindSnippetShared(item.content)
+                        longPressTarget = null
+                    },
+                    onRegenerate = {
+                        if (!fromUser) onRegenerate(item.turnId)
+                        longPressTarget = null
+                    },
+                )
+            }
+        }
+        rewindTarget?.let { msgId ->
+            RewindConfirmDialog(
+                targetText = rewindTargetText,
+                onDismiss = { rewindTarget = null },
+                onConfirm = {
+                    onRewind(msgId)
+                    rewindTarget = null
+                    android.widget.Toast.makeText(
+                        context,
+                        "因为回溯，聊天记录已发生变化",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                },
             )
         }
     }
@@ -376,20 +469,21 @@ private fun ActionItem(
 
 /** 一组连发气泡:assistant 白泡靠左,用户粉泡靠右。 */
 @Composable
-private fun BubbleGroup(group: BubbleItem) {
+private fun BubbleGroup(group: BubbleItem, onLongPress: (Long) -> Unit = {}) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (group.fromUser) Alignment.End else Alignment.Start,
     ) {
         group.bubbles.forEachIndexed { index, bubble ->
             Spacer(Modifier.height(if (index == 0) 0.dp else 6.dp))
-            SingleBubble(bubble, fromUser = group.fromUser)
+            SingleBubble(bubble, fromUser = group.fromUser, onLongPress = onLongPress)
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SingleBubble(bubble: ChatBubble, fromUser: Boolean) {
+private fun SingleBubble(bubble: ChatBubble, fromUser: Boolean, onLongPress: (Long) -> Unit) {
     val shape = RoundedCornerShape(
         topStart = 4.dp,
         topEnd = 18.dp,
@@ -397,10 +491,19 @@ private fun SingleBubble(bubble: ChatBubble, fromUser: Boolean) {
         bottomEnd = 18.dp,
     )
     val bg = if (fromUser) Color(0xFFE84D8A) else Color.White
+    val longPress: (() -> Unit)? = bubble.id?.let { id -> ({ onLongPress(id) }) }
     Box(
         Modifier
             .widthIn(max = 280.dp)
             .background(bg, shape)
+            // F1 长按操作:与手机聊天页同款 combinedClickable(单击无动作,
+            // 长按弹复制/回溯/重新生成菜单);id 为空(测试构造)不可长按。
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+                onLongClick = { longPress?.invoke() },
+            )
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         when {
@@ -484,8 +587,11 @@ private fun VoiceContent(text: String, fromUser: Boolean) {
 // ── 输入条 ──────────────────────────────────────────────────────────
 
 /**
- * 输入条:电话图标 / 按住说话(语音态,点击切文字态) / 键盘 / + / 发送。
+ * 输入条:电话图标 / 按住说话(语音态,真录音) / 键盘 / + / 发送。
  * 键盘图标切换 语音 ↔ 文字 两种形态;文字态尾部出粉色发送圆钮。
+ * 「按住说话」F4 落地:按下开录(F6 同款 WAV 管线)、松手 ASR 转写填草稿
+ * (不直接发送,对齐猫箱「转写可改」);轻点(不足录音阈值)与识别失败
+ * 都落「没听清」提示,不再降级切文字态 —— 切文字态只走键盘图标,单一职责。
  * [sending] = 回合进行中:发送钮禁用(不丢弃草稿;发送被接受才清空 draft,
  * 与手机聊天页输入条同语义,避免 ViewModel sending 拦截静默吞掉草稿)。
  */
@@ -494,9 +600,24 @@ private fun InputBar(
     sending: Boolean,
     onSend: (String) -> Unit,
     onOpenVoiceCall: () -> Unit = {},
+    onHoldStart: () -> Unit = {},
+    onHoldRelease: () -> Unit = {},
+    holdActive: Boolean = false,
+    recognizing: Boolean = false,
+    voiceTranscribed: String = "",
+    onVoiceTranscribedConsumed: () -> Unit = {},
 ) {
     var textMode by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
+    // F4 转写落草稿:松手识别完成 → 填入草稿框(切到文字态让用户可见可改),
+    // 对齐猫箱「转写可改」;填完即消费事件,再次按住说话不重复填。
+    LaunchedEffect(voiceTranscribed) {
+        if (voiceTranscribed.isNotBlank()) {
+            textMode = true
+            draft = voiceTranscribed
+            onVoiceTranscribedConsumed()
+        }
+    }
 
     Row(
         modifier = Modifier
@@ -543,15 +664,45 @@ private fun InputBar(
             )
         } else {
             Spacer(Modifier.width(10.dp))
-            // 「按住说话」占位(语音输入为后续功能):点击切到文字输入
+            // 「按住说话」F4:按下开录/松手转写(pointerInput 按压手势,
+            // waitForUpOrCancellation 取消=滑动移出即丢,与通话页语义一致);
+            // 识别中显示状态,防重入
             Box(
                 Modifier
                     .weight(1f)
                     .height(40.dp)
-                    .clickable { textMode = true },
+                    .background(
+                        if (holdActive) Color(0xFFE84D8A).copy(alpha = 0.15f) else Color.Transparent,
+                        RoundedCornerShape(20.dp),
+                    )
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            down.consume()
+                            onHoldStart()
+                            val up = waitForUpOrCancellation()
+                            if (up != null) {
+                                up.consume()
+                                onHoldRelease()
+                            } else {
+                                // 滑出取消:停录丢弃(与通话页 holdRelease 短录音
+                                // 丢弃同路;VM 侧 active 未置位时是 no-op)
+                                onHoldRelease()
+                            }
+                        }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
-                Text("按住说话", color = Color(0xFF3A3A3A), fontSize = 17.sp)
+                Text(
+                    when {
+                        holdActive -> "松开 转写"
+                        recognizing -> "识别中…"
+                        else -> "按住说话"
+                    },
+                    color = if (holdActive) Color(0xFFE84D8A) else Color(0xFF3A3A3A),
+                    fontSize = 17.sp,
+                    fontWeight = if (holdActive) FontWeight.Bold else FontWeight.Normal,
+                )
             }
         }
         Spacer(Modifier.width(8.dp))

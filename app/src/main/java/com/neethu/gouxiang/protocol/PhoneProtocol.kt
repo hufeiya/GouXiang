@@ -61,6 +61,17 @@ data class CardPayload(
             if (title.isBlank()) "[${kind.label}]" else "[${kind.label}] $title"
     }
 
+    /**
+     * 卡片可发送判定(F2 金额非空校验):转账/代付的主字段是金额,空金额卡
+     * 发出去渲染成「转账 ¥0」,数据脏且观感坏 —— 这两型必须金额非空才能发;
+     * 其余类型字段均可选(标题/描述留空降级为类型名占位),不受限。
+     */
+    val sendable: Boolean
+        get() = when (kind) {
+            PhoneCardKind.TRANSFER, PhoneCardKind.PAY_FOR -> title.isNotBlank()
+            else -> true
+        }
+
     fun encode(): String = CardJson.encode(this)
 
     companion object {

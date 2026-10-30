@@ -126,6 +126,37 @@ class MainActivity : ComponentActivity() {
         // 聊天历史页 11(F7)
         val historyId by vm.historyConversationId.collectAsState()
         val historyUi by vm.historyUi.collectAsState()
+        // 按住说话·语音输入(F4-P1:录音→ASR 转写→填草稿,不直接发送)
+        val voiceInputActive by vm.voiceInputActive.collectAsState()
+        val voiceInputRecognizing by vm.voiceInputRecognizing.collectAsState()
+        val voiceInputTranscribed by vm.voiceInputTranscribed.collectAsState()
+        val voiceInputNotice by vm.voiceInputNotice.collectAsState()
+        // F4 语音输入失败/没听清:Toast 兜底(事件流消费,报告 §5.2 方案口径)
+        val toastContext = androidx.compose.ui.platform.LocalContext.current
+        LaunchedEffect(voiceInputNotice) {
+            if (voiceInputNotice.isNotBlank()) {
+                android.widget.Toast.makeText(
+                    toastContext,
+                    voiceInputNotice,
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+                vm.consumeVoiceInputNotice()
+            }
+        }
+        // F4 麦克风权限懒申请:首按「按住说话/🎤」未授权时弹系统弹窗,授权后
+        // 需再按一次开录(与 VoiceCallScreen 进页即申请不同,聊天页不主动打扰)。
+        val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+        ) { }
+        val holdStartWithPermission: () -> Unit = {
+            if (toastContext.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+            ) {
+                vm.voiceInputStart()
+            } else {
+                micLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+            }
+        }
 
         // 角色头像:一次生成缓存本地(火山→硅基→占位兜底在 provider 内)
         LaunchedEffect(feed) {
@@ -169,6 +200,10 @@ class MainActivity : ComponentActivity() {
                         cards = feed,
                         avatarFiles = avatarFiles,
                         introBarText = "本地版 · 角色形象由 AI 生成",
+                        // F3(P1):「名字 >」/「历史」与 im 聊天页同款接线;
+                        // feed 卡片对应 im 会话,历史页同理
+                        onOpenCharacterHome = { vm.openCharacterHome(it) },
+                        onOpenHistory = { vm.openHistory(it) },
                     )
                     BottomTab.DISCOVER -> PlaceholderPage("发现", PlaceholderIcons.Discover)
                     BottomTab.CREATE -> PlaceholderPage("创作AI+", PlaceholderIcons.Create)
@@ -216,6 +251,14 @@ class MainActivity : ComponentActivity() {
                         chatId?.let { vm.openHistory(it) }
                     },
                     onRetryFailedTurn = { vm.retryFailedTurn() },
+                    onRewind = { vm.rewindToMessage(it) },
+                    onRegenerate = { vm.regenerateTurn(it) },
+                    onHoldStart = holdStartWithPermission,
+                    onHoldRelease = { vm.voiceInputRelease() },
+                    holdActive = voiceInputActive,
+                    recognizing = voiceInputRecognizing,
+                    voiceTranscribed = voiceInputTranscribed,
+                    onVoiceTranscribedConsumed = { vm.consumeVoiceInputTranscribed() },
                 )
             }
         }
@@ -244,6 +287,12 @@ class MainActivity : ComponentActivity() {
                     playingVoiceId = playingVoiceId,
                     streamDraft = streamDraft,
                     onRetryFailedTurn = { vm.retryFailedTurn() },
+                    onHoldStart = holdStartWithPermission,
+                    onHoldRelease = { vm.voiceInputRelease() },
+                    holdActive = voiceInputActive,
+                    recognizing = voiceInputRecognizing,
+                    voiceTranscribed = voiceInputTranscribed,
+                    onVoiceTranscribedConsumed = { vm.consumeVoiceInputTranscribed() },
                 )
             }
         }

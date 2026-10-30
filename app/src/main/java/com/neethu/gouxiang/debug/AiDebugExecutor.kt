@@ -228,6 +228,13 @@ private suspend fun cmdSendCard(vm: MainViewModel, command: AiDebugCommand): Str
         "No card type matches '${body.take(8)}'. Options: ${PhoneCardKindLabels.joinToString("|")}.",
     )
     val payload = CardPayload(kind = kindEntry, title = body.removePrefix(kindEntry.label).trim(), note = note)
+    // F2 金额校验(与 UI/VM 同一 sendable 口径):转账/代付空金额被 VM 兜底
+    // 静默拦截会误判成功,这里显式 FAIL
+    if (!payload.sendable) {
+        throw IllegalArgumentException(
+            "${kindEntry.label} requires a non-blank amount (e.g. send_card 转账 520|备注)",
+        )
+    }
     val line = with(payload) { toProtocolLine() }
     vm.sendCard(payload)
     return "queued card $line (verify kind=card via msgs)"

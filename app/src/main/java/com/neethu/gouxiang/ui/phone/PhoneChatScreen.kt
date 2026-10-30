@@ -5,7 +5,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -100,6 +104,17 @@ fun PhoneChatScreen(
     streamDraft: String = "",
     /** 失败回合重试条点击(02 文档 §3.5:按原用户文本重跑回复侧)。 */
     onRetryFailedTurn: () -> Unit = {},
+    /** F4 语音输入:🎤 按下开录 / 松手转写(转写结果填草稿,不直接发送)。 */
+    onHoldStart: () -> Unit = {},
+    onHoldRelease: () -> Unit = {},
+    /** F4 语音输入状态:按住录音中。 */
+    holdActive: Boolean = false,
+    /** F4 语音输入状态:松手识别中。 */
+    recognizing: Boolean = false,
+    /** F4 转写结果(非空=待填入草稿框;消费后由调用方清空)。 */
+    voiceTranscribed: String = "",
+    /** F4 转写填入草稿后回调(VM 清事件)。 */
+    onVoiceTranscribedConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler { onBack() }
@@ -181,6 +196,12 @@ fun PhoneChatScreen(
                 sending = state.sending,
                 onSend = onSend,
                 onTogglePanel = { panelOpen = !panelOpen },
+                onHoldStart = onHoldStart,
+                onHoldRelease = onHoldRelease,
+                holdActive = holdActive,
+                recognizing = recognizing,
+                voiceTranscribed = voiceTranscribed,
+                onVoiceTranscribedConsumed = onVoiceTranscribedConsumed,
             )
         }
 
@@ -209,7 +230,7 @@ fun PhoneChatScreen(
                 longPressTarget = null
             } else {
                 val (fromUser, item) = found
-                RewindDialog(
+                com.neethu.gouxiang.ui.chat.MessageActionsDialog(
                     fromUser = fromUser,
                     targetText = rewindSnippet(item.content),
                     onDismiss = { longPressTarget = null },
@@ -236,25 +257,19 @@ fun PhoneChatScreen(
             }
         }
         rewindTarget?.let { msgId ->
-            AlertDialog(
-                onDismissRequest = { rewindTarget = null },
-                title = { Text("回溯这段对话?", fontSize = 17.sp) },
-                text = { Text("回溯后「$rewindTargetText」及其之后的消息会从记录里删掉,无法恢复。", fontSize = 14.sp) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        onRewind(msgId)
-                        rewindTarget = null
-                        // 回溯成功提示(附录 C-G2:此前静默删除无感知;文档 §2.1
-                        // parallel_phone_restart_toast 口径的本地落地)
-                        android.widget.Toast.makeText(
-                            context,
-                            "因为回溯，聊天记录已发生变化",
-                            android.widget.Toast.LENGTH_SHORT,
-                        ).show()
-                    }) { Text("回溯", color = Color(0xFFE8A93D)) }
-                },
-                dismissButton = {
-                    TextButton(onClick = { rewindTarget = null }) { Text("取消") }
+            com.neethu.gouxiang.ui.chat.RewindConfirmDialog(
+                targetText = rewindTargetText,
+                onDismiss = { rewindTarget = null },
+                onConfirm = {
+                    onRewind(msgId)
+                    rewindTarget = null
+                    // 回溯成功提示(附录 C-G2:此前静默删除无感知;文档 §2.1
+                    // parallel_phone_restart_toast 口径的本地落地)
+                    android.widget.Toast.makeText(
+                        context,
+                        "因为回溯，聊天记录已发生变化",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
                 },
             )
         }
@@ -602,14 +617,30 @@ private fun String.takeLastCodePoints(n: Int): String {
 
 /** 输入条:自由输入 + 😊 + 🎤 + 「+」(对齐 dump edit_view/entrance_* 三件)。
  * [sending] = 回合进行中:发送钮禁用(不丢弃草稿;发送被接受才清空 draft)。
+ * F4:🎤 从装饰改为真「按住说话」——按下开录(F6 同款 WAV 管线)、松手 ASR
+ * 转写填草稿(不直接发送,对齐猫箱「转写可改」);识别中禁重入。
  */
 @Composable
 private fun InputBar(
     sending: Boolean,
     onSend: (String) -> Unit,
     onTogglePanel: () -> Unit,
+    onHoldStart: () -> Unit = {},
+    onHoldRelease: () -> Unit = {},
+    holdActive: Boolean = false,
+    recognizing: Boolean = false,
+    voiceTranscribed: String = "",
+    onVoiceTranscribedConsumed: () -> Unit = {},
 ) {
     var draft by remember { mutableStateOf("") }
+    // F4 转写落草稿:松手识别完成 → 填入草稿框(用户可见可改),填完即消费
+    // 事件,再次按住说话不重复填。
+    LaunchedEffect(voiceTranscribed) {
+        if (voiceTranscribed.isNotBlank()) {
+            draft = voiceTranscribed
+            onVoiceTranscribedConsumed()
+        }
+    }
 
     Column(
         Modifier
@@ -645,7 +676,30 @@ private fun InputBar(
             Spacer(Modifier.width(10.dp))
             Text("😊", fontSize = 20.sp)
             Spacer(Modifier.width(10.dp))
-            Text("🎤", fontSize = 20.sp)
+            // F4:🎤 = 按住说话(pointerInput 按压手势;按下开录,松手转写,
+            // 滑出取消停录丢弃;识别中禁重入)。文案态视觉反馈对齐 im 页。
+            Text(
+                when {
+                    holdActive -> "🔴"
+                    recognizing -> "⏳"
+                    else -> "🎤"
+                },
+                fontSize = 20.sp,
+                modifier = Modifier.pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown()
+                        down.consume()
+                        onHoldStart()
+                        val up = waitForUpOrCancellation()
+                        if (up != null) {
+                            up.consume()
+                            onHoldRelease()
+                        } else {
+                            onHoldRelease()
+                        }
+                    }
+                },
+            )
             Spacer(Modifier.width(10.dp))
             Icon(
                 Icons.Filled.Add,
@@ -854,6 +908,18 @@ private fun CardComposer(
             )
         }
         Spacer(Modifier.height(10.dp))
+        // F2 金额校验:转账/代付主字段=金额,空值不可发送(红提示明示原因;
+        // 其余类型字段可选,行为不变)
+        val amountRequired = kind == PhoneCardKind.TRANSFER || kind == PhoneCardKind.PAY_FOR
+        val amountMissing = amountRequired && field1.isBlank()
+        if (amountMissing) {
+            Text(
+                "请输入${if (kind == PhoneCardKind.TRANSFER) "转账" else "代付"}金额",
+                color = Color(0xFFE5484D),
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(6.dp))
+        }
         Box(
             Modifier
                 .fillMaxWidth()
@@ -866,51 +932,23 @@ private fun CardComposer(
                 .padding(vertical = 9.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Text("发送", color = Color(0xFF1A1A1A), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(
+                if (amountMissing) "请输入金额后发送" else "发送",
+                color = if (amountMissing) Color(0xFF9A9A9A) else Color(0xFF1A1A1A),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
     }
 }
 
-/** 长按操作弹窗:复制/回溯 +(角色侧)重新生成(13c 功能说明的本地实现)。 */
-@Composable
-private fun RewindDialog(
-    fromUser: Boolean,
-    targetText: String,
-    onDismiss: () -> Unit,
-    onCopy: () -> Unit,
-    onRewind: () -> Unit,
-    onRegenerate: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("消息操作", fontSize = 17.sp) },
-        text = {
-            Text(
-                if (fromUser) "回溯会删掉「$targetText」及其之后的消息。"
-                else "可选择回溯「$targetText」这段对话,或让 Ta 重新说一次。",
-                fontSize = 14.sp,
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onRewind) { Text("回溯", color = Color(0xFFE8A93D)) }
-        },
-        dismissButton = {
-            // 复制与取消/重新生成同置左侧(复制为中性操作,不着强调色;
-            // 回溯/重新生成才是会改记录的动作)
-            Row {
-                TextButton(onClick = onCopy) { Text("复制") }
-                if (!fromUser) {
-                    TextButton(onClick = onRegenerate) { Text("重新生成", color = Color(0xFFE8A93D)) }
-                } else {
-                    TextButton(onClick = onDismiss) { Text("取消") }
-                }
-            }
-        },
-    )
-}
+/** 长按操作弹窗:复制/回溯 +(角色侧)重新生成(13c 功能说明的本地实现)。
+ * F1 抽公共组件后两页共用(im 聊天页同款);函数体在 ui.chat.MessageActionsDialog。
+ */
 
-/** 回溯弹窗点名目标消息:压平空白后截前 12 字(长按误触相邻泡时肉眼可辨)。 */
-internal fun rewindSnippet(text: String): String {
-    val flat = text.trim().replace(Regex("\\s+"), " ")
-    return if (flat.length > 12) flat.take(12) + "…" else flat
-}
+/** 回溯弹窗点名目标消息:压平空白后截前 12 字(长按误触相邻泡时肉眼可辨)。
+ * F1 上提为聊天域公共工具(见 ui.chat.rewindSnippetShared),此处保留同名
+ * 委托以稳住既有单测 import。
+ */
+internal fun rewindSnippet(text: String): String =
+    com.neethu.gouxiang.ui.chat.rewindSnippetShared(text)

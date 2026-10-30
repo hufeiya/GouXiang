@@ -3,6 +3,8 @@ package com.neethu.gouxiang.ui.home
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -47,6 +50,11 @@ import com.neethu.gouxiang.data.HomeFeedCard
  * 首页·推荐流(基准 01-home-feed.png):
  * 沉浸式 AI 剧卡(全屏图 + 介绍条 + 开场白气泡 + 名字> + 点赞/分享/评论/历史),
  * 顶部「AI 剧/推荐」双 tab。左右滑动切换剧卡。
+ *
+ * F3 接线(P1):「名字 >」= openCharacterHome、互动列「历史」= openHistory
+ * (与 im 聊天页同款入口,审计报告 §4-3/§5.2);开场白气泡点击进聊天。
+ * 有意裁剪(报告 §5.3,无计费/无社交后端红线):点赞/分享/评论/⚡ 为静态
+ * 装饰不接行为;硬编码互动数列(361/5/28)整列移除,避免「看起来坏」。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -54,6 +62,10 @@ fun HomeFeedScreen(
     cards: List<HomeFeedCard>,
     avatarFiles: Map<Long, String?>,
     introBarText: String,
+    /** F3:点「名字 >」进角色主页(回调带对应会话 id;无会话=-1 不响应)。 */
+    onOpenCharacterHome: (Long) -> Unit = {},
+    /** F3:点互动列「历史」进聊天历史页(回调带对应会话 id;无会话=-1 不响应)。 */
+    onOpenHistory: (Long) -> Unit = {},
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
         if (cards.isEmpty()) {
@@ -64,7 +76,13 @@ fun HomeFeedScreen(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
             ) { page ->
-                FeedCard(card = cards[page], avatarFile = avatarFiles[cards[page].character.id], introBarText = introBarText)
+                FeedCard(
+                    card = cards[page],
+                    avatarFile = avatarFiles[cards[page].character.id],
+                    introBarText = introBarText,
+                    onOpenCharacterHome = onOpenCharacterHome,
+                    onOpenHistory = onOpenHistory,
+                )
             }
         }
         // 顶部 tab 行(沉浸式,叠在图上)
@@ -141,7 +159,13 @@ private fun TopTabsRow(modifier: Modifier = Modifier) {
 
 /** 单张剧卡:全屏头像 + 底部信息叠层。 */
 @Composable
-private fun FeedCard(card: HomeFeedCard, avatarFile: String?, introBarText: String) {
+private fun FeedCard(
+    card: HomeFeedCard,
+    avatarFile: String?,
+    introBarText: String,
+    onOpenCharacterHome: (Long) -> Unit = {},
+    onOpenHistory: (Long) -> Unit = {},
+) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -240,9 +264,20 @@ private fun FeedCard(card: HomeFeedCard, avatarFile: String?, introBarText: Stri
                 }
             }
             Spacer(Modifier.height(14.dp))
-            // 名字行 + 互动列
+            // 名字行 + 互动列。F3:「名字 >」接 openCharacterHome(与 im 聊天页
+            // 同款入口);点赞/分享/评论为有意裁剪的静态装饰(报告 §5.3),
+            // 硬编码数字列移除 —— 「历史」保留为活入口(聊天页同款接线)。
             Row(verticalAlignment = Alignment.Bottom) {
-                Column(Modifier.weight(1f)) {
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) {
+                            if (card.conversationId > 0) onOpenCharacterHome(card.conversationId)
+                        },
+                ) {
                     Text(
                         card.character.name + " >",
                         color = Color.White,
@@ -258,10 +293,16 @@ private fun FeedCard(card: HomeFeedCard, avatarFile: String?, introBarText: Stri
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                ActionItem(Icons.Filled.Favorite, "361")
-                ActionItem(Icons.Filled.Share, "5")
-                ActionItem(Icons.Filled.ChatBubble, "28")
-                ActionItem(Icons.Filled.History, "历史")
+                ActionItem(
+                    Icons.Filled.History,
+                    "历史",
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {
+                        if (card.conversationId > 0) onOpenHistory(card.conversationId)
+                    },
+                )
             }
             Spacer(Modifier.height(14.dp))
         }
@@ -270,10 +311,14 @@ private fun FeedCard(card: HomeFeedCard, avatarFile: String?, introBarText: Stri
 
 /** 右侧互动列:图标 + 数字(历史无数字)。 */
 @Composable
-private fun ActionItem(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
+private fun ActionItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(start = 18.dp),
+        modifier = modifier.padding(start = 18.dp),
     ) {
         Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(26.dp))
         Spacer(Modifier.height(4.dp))
