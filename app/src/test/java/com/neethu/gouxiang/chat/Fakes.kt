@@ -29,4 +29,13 @@ class FakeMemorySource(initial: List<MemoryEntity> = emptyList()) : MemorySource
     override suspend fun deleteById(id: Long) {
         rows.removeAll { it.id == id }
     }
+
+    override suspend fun deleteSince(characterId: Long, categories: Set<String>, sinceMs: Long): Int {
+        // 与 Room SQL 同语义:该角色 + 分类命中 + at >= sinceMs 的行删除,返回条数。
+        val doomed = rows.filter {
+            it.characterId == characterId && it.category in categories && it.at >= sinceMs
+        }
+        rows.removeAll(doomed)
+        return doomed.size
+    }
 }

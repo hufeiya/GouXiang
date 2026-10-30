@@ -13,10 +13,13 @@ import com.neethu.gouxiang.chat.DialogMode
 import com.neethu.gouxiang.chat.InnerVoiceChannel
 import com.neethu.gouxiang.chat.InnerVoiceGenerator
 import com.neethu.gouxiang.chat.MemoryBook
+import com.neethu.gouxiang.chat.MemoryCategories
 import com.neethu.gouxiang.chat.MemoryExtractor
 import com.neethu.gouxiang.chat.ReplyLength
 import com.neethu.gouxiang.chat.StatusRule
+import com.neethu.gouxiang.protocol.conversationSummary
 import com.neethu.gouxiang.protocol.toProtocolLine
+import com.neethu.gouxiang.data.CharacterEntity
 import com.neethu.gouxiang.data.ChatDaoAccess
 import com.neethu.gouxiang.data.ConversationRow
 import com.neethu.gouxiang.data.GouXiangRepo
@@ -139,7 +142,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             _characterHomeUi.value = _characterHomeUi.value.copy(character = character, loading = false)
-            ensureAvatars(listOf(character.id to character.appearance))
+            ensureAvatars(listOf(character))
             // 心声/朋友圈占位卡尾注(F8「Ta 的心声 · 全部 N」/F9「Ta 的朋友圈 · 全部 N」;
             // 页面打开后再走流刷新)
             _characterHomeUi.value = _characterHomeUi.value.copy(
@@ -174,6 +177,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var messagesJob: Job? = null
     private var draftJob: Job? = null
 
+    /** 在联回合协程(发消息/主动连发/重新生成共用一个槽):回溯时打断它,
+     * 防止已回溯回合的后续泡继续落库(新 id 恒大于删除点,成幽灵残尾)。 */
+    private var roundJob: Job? = null
+
     /**
      * 从消息列表进入聊天主页:载入全量历史并订阅 Room 流(新增消息自动上屏)。
      *
@@ -185,6 +192,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (_chatConversationId.value == conversationId) return
         _chatConversationId.value = conversationId
         _isPhoneChat.value = phoneMode
+        // 重建整态:上一会话遗留的失败回合条(failedTurn)一并清空
         _chatUi.value = ChatUiState(conversationId = conversationId, loading = true)
         messagesJob?.cancel()
         messagesJob = viewModelScope.launch {
@@ -196,7 +204,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             _chatUi.value = _chatUi.value.copy(character = character, loading = false)
             // 形象缓存兜底(与首页/消息页同一 provider,命中即返回)
-            ensureAvatars(listOf(character.id to character.appearance))
+            ensureAvatars(listOf(character))
             val all = repo.allMessages(conversationId)
             _chatUi.value = _chatUi.value.copy(
                 bubbleItems = toBubbleItems(all),
@@ -231,6 +239,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         stopVoicePlayback()
         _chatConversationId.value = null
         _isPhoneChat.value = false
+        // 重建整态:离开聊天页即清空失败回合条(failedTurn)
         _chatUi.value = ChatUiState()
     }
 
@@ -239,7 +248,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * 上屏靠 Room 流:任何一条入库都会推 [chatUi] 更新。
      *
      * [phoneMode] = 手机聊天(F4):连发区间放宽 2~4 条、每条更短(≤24 字);
-     * 用户消息里的卡片行由 UI 侧 [sendCard] 编码,这里仍按纯文本上屏。
+     * 用户消息里的卡片行([sendCard] 编码的 [卡片:…] 标记)按 kind=card +
+     * 载荷落库(见 [buildUserMessageEntity]),其余按纯文本上屏。
      */
     fun sendChatMessage(text: String, phoneMode: Boolean = false) {
         val state = _chatUi.value
@@ -248,32 +258,62 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val body = text.trim()
         if (body.isEmpty() || state.sending) return
         _chatUi.value = state.copy(sending = true)
-        viewModelScope.launch {
+        roundJob = viewModelScope.launch {
             try {
                 // 用户消息先落库(单写者约定:编排器只管回复侧)
-                val userMsg = MessageEntity(
-                    conversationId = conversationId,
-                    turnId = "turn-user-${System.currentTimeMillis()}",
-                    role = "user",
-                    kind = "text",
-                    content = body,
-                    at = System.currentTimeMillis(),
-                )
+                val userMsg = buildUserMessageEntity(conversationId, body, System.currentTimeMillis())
                 repo.insertMessage(userMsg)
-                repo.touchConversation(conversationId, body, userMsg.at)
-                runRound(conversationId, character.id, body, phoneMode)
+                // 会话行摘要按泡型降级(附录 C-I3):用户卡片行 kind=card,摘要走
+                // 载荷摘要,防 [卡片:…] 原始标记泄露;纯文本摘要仍=原文。
+                repo.touchConversation(
+                    conversationId,
+                    conversationSummary(userMsg.kind, userMsg.content, userMsg.actionsJson),
+                    userMsg.at,
+                )
+                // 回合失败显式化(02 文档 §3.5):失败记 failedTurn 出重试条,
+                // 成功清 failedTurn(失败后另发新消息成功同样撤旧条)
+                _chatUi.value = _chatUi.value.afterTurnResult(runRound(conversationId, character.id, body, phoneMode))
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // 编排器内部已兜底,这里仅防数据库层异常把协程吞掉
+                // 编排器内已显式失败,这里防数据库层等硬异常把协程吞掉;
+                // 同样置失败态,发送不再静默无反馈
                 android.util.Log.e("ChatOrchestrator", "round failed", e)
+                _chatUi.value = _chatUi.value.copy(failedTurn = FailedTurn(conversationId, body))
             } finally {
                 _chatUi.value = _chatUi.value.copy(sending = false)
             }
         }
     }
 
-    /** 手机聊天「+」面板提交的卡片:编码为行内协议标记后按普通文本发送。 */
+    /**
+     * 失败回合重试(02 文档 §3.5:失败条「消息发送失败,请点击重试」):
+     * 点击即清 failedTurn 转发送中态,按原用户文本重跑回复侧 —— 用户消息
+     * 已在库,不重复落库;重试成功撤条,再失败重新记失败态等待再次重试。
+     */
+    fun retryFailedTurn() {
+        val state = _chatUi.value
+        val failed = state.failedTurn ?: return
+        val character = state.character ?: return
+        if (state.sending) return
+        _chatUi.value = state.copy(sending = true, failedTurn = null)
+        roundJob = viewModelScope.launch {
+            try {
+                _chatUi.value = _chatUi.value.afterTurnResult(
+                    runRound(failed.conversationId, character.id, failed.userText, phoneMode = _isPhoneChat.value),
+                )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("ChatOrchestrator", "retry failed", e)
+                _chatUi.value = _chatUi.value.copy(failedTurn = failed)
+            } finally {
+                _chatUi.value = _chatUi.value.copy(sending = false)
+            }
+        }
+    }
+
+    /** 手机聊天「+」面板提交的卡片:编码为行内协议标记发送,入库侧自动落 kind=card。 */
     fun sendCard(payload: com.neethu.gouxiang.protocol.CardPayload) {
         if (isPhoneChat.value.not()) return
         sendChatMessage(payload.toProtocolLine(), phoneMode = true)
@@ -312,8 +352,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         at = System.currentTimeMillis(),
                     )
                     repo.insertMessage(userMsg)
-                    repo.touchConversation(convId, userText, userMsg.at)
-                    runRound(convId, character.id, userText, phoneMode = false)
+                    // 同 sendChatMessage:摘要走降级纯函数(语音回合 ASR 文本
+                    // kind=text,原样返回,行为不变)。
+                    repo.touchConversation(
+                        convId,
+                        conversationSummary(userMsg.kind, userMsg.content, userMsg.actionsJson),
+                        userMsg.at,
+                    )
+                    // 回合失败显式化(02 文档 §3.5):语音回合失败同样记
+                    // failedTurn(同会话守卫,挂断回聊天页即见「消息发送失败,
+                    // 请点击重试」,按原 ASR 文本重试、用户消息已在库不重复落);
+                    // 本轮无泡可念,返回空列表不播 TTS。
+                    val result = runRound(convId, character.id, userText, phoneMode = false)
+                    _chatUi.value = _chatUi.value.applyVoiceRoundResult(convId, result)
+                    (result as? com.neethu.gouxiang.chat.TurnResult.Completed)?.bubbles
+                        ?: emptyList()
                 },
             )
         }
@@ -460,9 +513,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 回合执行公共体(陪伴/手机共用,仅形态参数不同)。
-     * 返回本轮全部回复泡(语音通话 F6 的 TTS 念稿来源;IM 调用方不消费)。
+     * 返回回合结果(02 文档 §3.5):完成携带全部回复泡(语音通话 F6 的 TTS
+     * 念稿来源);失败(流错误/首 delta 超时)显式上抛,由调用侧置 failedTurn。
      */
-    private suspend fun runRound(conversationId: Long, characterId: Long, userText: String, phoneMode: Boolean): List<com.neethu.gouxiang.protocol.Bubble> {
+    private suspend fun runRound(conversationId: Long, characterId: Long, userText: String, phoneMode: Boolean): com.neethu.gouxiang.chat.TurnResult {
         // 对话风格(F5):每回合现读持久化选择(弹层改完立即生效,无需重建编排器),
         // 经 BurstParams 映射为连发参数;默认组合与 F2/F4 既定 prompt 逐字节一致。
         val app = getApplication<Application>()
@@ -478,7 +532,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         draftJob = viewModelScope.launch {
             orchestrator.streamDraft.collect { _streamDraft.value = it }
         }
-        val bubbles = ChatContextBuilder.withPhoneStyle(phoneMode) {
+        val result = ChatContextBuilder.withPhoneStyle(phoneMode) {
             orchestrator.respondTo(
                 conversationId = conversationId,
                 characterId = characterId,
@@ -494,7 +548,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         draftJob?.cancel()
         draftJob = null
         _streamDraft.value = ""
-        return bubbles
+        return result
     }
 
     // ── 手机聊天 F4:主动消息/长按回溯/重生成/语音 ────────────────────
@@ -527,7 +581,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val character = state.character ?: return
         if (state.sending) return
         _chatUi.value = state.copy(sending = true)
-        viewModelScope.launch {
+        roundJob = viewModelScope.launch {
             try {
                 draftJob?.cancel()
                 draftJob = viewModelScope.launch {
@@ -560,15 +614,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * 长按泡「回溯」:删除该条消息及其之后的所有消息,回到该点(F4 收尾轮
      * 明确语义:回溯=删除该消息及之后消息并回到该点;此前实现只删整个回合,
      * 长按较早的泡会留下后续回合残尾)。删后刷新会话行摘要/时间。
+     *
+     * 在联回合一并打断:回复连发/流式草稿若继续跑,会往已回溯点之后继续
+     * 落库(新 id 恒大于删除点)并顶动列表,形成回溯不掉的幽灵残尾。
+     *
+     * 联动删记忆(03 任务 7):锚点时刻起的事件记忆一并删除(画像/关系类
+     * 不动),避免回溯后已总结的事件成为「幽灵记忆」继续注入。
      */
     fun rewindToMessage(messageId: Long) {
         val conversationId = _chatUi.value.conversationId
         if (conversationId == 0L || messageId == 0L) return
         viewModelScope.launch {
+            // 先打断在联回合与草稿(取消是协作式的:连发泡间的 delay 即断点,
+            // 后续泡不再落库),再走删除。
+            roundJob?.cancel()
+            draftJob?.cancel()
+            _streamDraft.value = ""
+            // 删除前先取锚点(查不到=并发已删,只走消息删除既有语义);
+            // characterId 按 simulateOfflineReturn 同款经会话行 byId 解析。
+            val anchor = repo.messageById(messageId)
+            val conv = repo.db.conversationDao().byId(conversationId)
             repo.deleteFromMessage(conversationId, messageId)
             // 回溯用户触发消息:该条起 turn-user-* 与整个回复回合一并删除;
             // 主动消息回合同样整删(它只有自己一个 turnId,且位于该条之后)。
             repo.refreshConversationTail(conversationId)
+            // 回溯联动删记忆:只删 event 且 at >= 锚点时间;锚点查不到或归属
+            // 会话对不上时跳过,防重复回溯/并发下误删。
+            if (anchor != null && anchor.conversationId == conversationId && conv != null) {
+                repo.deleteMemoriesSince(
+                    characterId = conv.characterId,
+                    categories = setOf(MemoryCategories.EVENT),
+                    sinceMs = anchor.at,
+                )
+            }
         }
     }
 
@@ -582,7 +660,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val conversationId = state.conversationId
         val character = state.character ?: return
         if (state.sending || conversationId == 0L) return
-        viewModelScope.launch {
+        roundJob = viewModelScope.launch {
             // 找该回合起点,取其之前(不含该回合)的最后一条用户输入作为重生成语境
             val all = repo.allMessages(conversationId)
             val turnStartIndex = all.indexOfFirst { it.turnId == turnId }
@@ -620,11 +698,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             _chatUi.value = _chatUi.value.copy(sending = true)
             try {
-                runRound(conversationId, character.id, lastUser.content, phoneMode = true)
+                // 重新生成失败(02 文档 §3.5)同样显式化:原用户输入仍在库,
+                // 记 failedTurn 出重试条,避免「删了旧泡又没新回复」的空窗
+                _chatUi.value = _chatUi.value.afterTurnResult(
+                    runRound(conversationId, character.id, lastUser.content, phoneMode = true),
+                )
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e("ChatOrchestrator", "regenerate failed", e)
+                _chatUi.value = _chatUi.value.copy(failedTurn = FailedTurn(conversationId, lastUser.content))
             } finally {
                 _chatUi.value = _chatUi.value.copy(sending = false)
             }
@@ -684,18 +767,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 角色头像一次生成落盘(范围说明);失败留在 map 外=UI 占位。 */
-    fun ensureAvatars(appearanceByCard: List<Pair<Long, String>>) {
+    /** 角色头像一次生成落盘(范围说明);失败留在 map 外=UI 占位。
+     *  生图 prompt 在这里拼好再交给 provider(ImageGenAdapter 契约:
+     * prompt = appearance + 风格词缀,由调用方拼好),与心声/朋友圈配图
+     * 同一拼法 —— 修复前头像只喂 appearance、风格词缀缺失。 */
+    fun ensureAvatars(characters: List<CharacterEntity>) {
         viewModelScope.launch {
             val provider = com.neethu.gouxiang.ai.image.AvatarImageProvider(getApplication<Application>().filesDir)
             val updated = _avatarFiles.value.toMutableMap()
-            for ((characterId, appearance) in appearanceByCard) {
-                if (updated.containsKey(characterId)) continue
+            for (character in characters) {
+                if (updated.containsKey(character.id)) continue
                 val file = provider.getOrGenerate(
-                    characterKey = "character-$characterId",
-                    prompt = appearance,
+                    characterKey = "character-${character.id}",
+                    prompt = buildAvatarPrompt(character.appearance, character.appearanceStyle),
                 )
-                updated[characterId] = file?.absolutePath
+                updated[character.id] = file?.absolutePath
                 _avatarFiles.value = updated.toMap()
             }
         }
@@ -887,7 +973,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             _momentsUi.value = _momentsUi.value.copy(characterId = character.id, characterName = character.name)
-            ensureAvatars(listOf(character.id to character.appearance))
+            ensureAvatars(listOf(character))
             var autoGenerated = false
             // 动态流:倒序时间线;首进无动态自动补一条(范围 3,只触发一次防循环)
             // ;每条动态单独订阅评论流(新动态出现即挂,旧订阅随 closeMoments 清)。
@@ -1203,6 +1289,15 @@ data class CharacterHomeUiState(
 )
 
 /**
+ * 失败回合记录(02 文档 §3.5「回合失败显式化」):重试条展示文案与重试
+ * 入参的依据;用户消息已在库,重试只重跑回复侧、不重复落库。
+ */
+data class FailedTurn(
+    val conversationId: Long,
+    val userText: String,
+)
+
+/**
  * 聊天页渲染状态:数据库消息 → 气泡组(一轮回复 = 一组,组内 1~4 泡)。
  */
 data class ChatUiState(
@@ -1215,9 +1310,32 @@ data class ChatUiState(
     val status: com.neethu.gouxiang.chat.StatusLine = com.neethu.gouxiang.chat.StatusLine("", ""),
     /** 回合进行中(输入区防重入 + 角色正在输入观感)。 */
     val sending: Boolean = false,
+    /** 最近一次用户回合失败(null=无):列表尾渲染失败条;openChat/closeChat 重建本态即清空。 */
+    val failedTurn: FailedTurn? = null,
     val loading: Boolean = false,
     val loadFailed: Boolean = false,
 )
+
+/**
+ * 回合结果 → 聊天页状态迁移(send/retry 共用;纯函数,JVM 单测锁住失败显式化):
+ * 失败 → 记 failedTurn 等重试条;完成 → 清 failedTurn(重试成功撤条;失败后
+ * 另发新消息成功同样撤陈旧条,避免重试到过期回合)。
+ */
+internal fun ChatUiState.afterTurnResult(result: com.neethu.gouxiang.chat.TurnResult): ChatUiState =
+    when (result) {
+        is com.neethu.gouxiang.chat.TurnResult.Completed -> copy(failedTurn = null)
+        is com.neethu.gouxiang.chat.TurnResult.Failed ->
+            copy(failedTurn = FailedTurn(conversationId = conversationId, userText = result.userText))
+    }
+
+/**
+ * 语音通话回合结果应用(02 文档 §3.5):语音引擎在聊天页之上后台跑回合,
+ * 聊天页可能已被关闭/切走;仅当聊天页仍停留在同一会话才按 [afterTurnResult]
+ * 迁移(失败→记 failedTurn,挂断回页即见重试条;成功→清旧条),不同会话
+ * 不污染当前页状态(纯函数,JVM 单测锁守卫语义)。
+ */
+internal fun ChatUiState.applyVoiceRoundResult(conversationId: Long, result: com.neethu.gouxiang.chat.TurnResult): ChatUiState =
+    if (conversationId == this.conversationId) afterTurnResult(result) else this
 
 /**
  * 一组连发气泡(同一 turnId 的 assistant 消息合并;渲染层按"首泡带尖角、
@@ -1258,6 +1376,25 @@ data class ChatBubble(
         fun durationFor(text: String): Int =
             com.neethu.gouxiang.protocol.voiceDurationSec(text)
     }
+}
+
+/**
+ * 用户消息行构造(卡片消息端到端打通的用户侧):「+」面板经 [MainViewModel.sendCard]
+ * 编码出的 `[卡片:…]` 行内标记识别为卡片——kind="card"、content 保留原行、
+ * actionsJson 存解码载荷,渲染层([toBubbleItems] → CardBody)直接出卡片;
+ * 普通文本 / 解析失败仍按纯文本落库,不崩。
+ */
+internal fun buildUserMessageEntity(conversationId: Long, body: String, at: Long): MessageEntity {
+    val card = com.neethu.gouxiang.protocol.parseCardLine(body)
+    return MessageEntity(
+        conversationId = conversationId,
+        turnId = "turn-user-$at",
+        role = "user",
+        kind = if (card != null) "card" else "text",
+        content = body,
+        actionsJson = card?.encode() ?: "[]",
+        at = at,
+    )
 }
 
 /**
@@ -1313,6 +1450,15 @@ internal fun toBubbleItems(messages: List<MessageEntity>): List<BubbleItem> {
     }
     return items
 }
+
+/**
+ * 头像生图 prompt 组装(纯函数,单测锁行为):appearance 后拼生图风格词缀,
+ * 与心声/朋友圈配图的拼接方式一致(ImageGenAdapter 契约:prompt = appearance +
+ * 风格词缀,由调用方拼好)。风格词缀为空/纯空白时不加分隔符,避免 prompt 尾部
+ * 挂一个孤立的「。」。
+ */
+internal fun buildAvatarPrompt(appearance: String, style: String): String =
+    if (style.isNotBlank()) "$appearance。$style" else appearance
 
 /**
  * 聊天历史页 11 的渲染状态:按日期分组的消息历史流(范围 3:本地分段,

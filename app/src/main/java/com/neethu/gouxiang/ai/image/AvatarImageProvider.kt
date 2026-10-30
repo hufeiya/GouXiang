@@ -99,20 +99,50 @@ class AvatarImageProvider(
 
     private suspend fun downloadTo(url: String, target: File): Boolean = withContext(kotlinx.coroutines.Dispatchers.IO) {
         try {
+            if (url.startsWith("data:")) {
+                // b64_json 兼容兜底(07 文档 §3.3 双响应形态):伪 URL 不走 HTTP,
+                // 直接本地 Base64 解码写盘;失败返回 false 走占位兜底。
+                return@withContext decodeDataUrl(url, target) != null
+            }
             val req = Request.Builder().url(url).get().build()
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@use false
                 val bytes = resp.body?.bytes() ?: return@use false
-                val tmp = File(target.parentFile, target.name + ".tmp")
-                tmp.writeBytes(bytes)
-                if (!tmp.renameTo(target)) {
-                    tmp.copyTo(target, overwrite = true)
-                    tmp.delete()
-                }
+                writeAtomically(target, bytes)
                 true
             }
         } catch (_: Exception) {
             false
+        }
+    }
+
+    /**
+     * `data:<mime>;base64,<payload>` 伪 URL → 解码写入 [target](沿用 .tmp+rename
+     * 原子写惯例)。成功返回 [target],payload 为空/base64 非法/写盘失败返回 null,
+     * 由调用方映射为 false 走占位兜底。internal 供单测直接驱动该分支。
+     */
+    internal fun decodeDataUrl(dataUrl: String, target: File): File? {
+        if (!dataUrl.startsWith("data:")) return null
+        // mime 段不校验:parseUrls 只产出 base64 形态,解码只认逗号后的 payload
+        val payload = dataUrl.substringAfter(',', missingDelimiterValue = "")
+        if (payload.isBlank()) return null
+        return try {
+            writeAtomically(target, java.util.Base64.getDecoder().decode(payload))
+            target
+        } catch (_: IllegalArgumentException) {
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /** .tmp 先写后 rename 的原子落盘(原 downloadTo 内联惯例,两条写入路径共用)。 */
+    private fun writeAtomically(target: File, bytes: ByteArray) {
+        val tmp = File(target.parentFile, target.name + ".tmp")
+        tmp.writeBytes(bytes)
+        if (!tmp.renameTo(target)) {
+            tmp.copyTo(target, overwrite = true)
+            tmp.delete()
         }
     }
 
@@ -124,3 +154,9 @@ class AvatarImageProvider(
         const val SILICONFLOW_IMAGE_MODEL = "Kwai-Kolors/Kolors"
     }
 }
+
+/**
+ * parseUrls 产出的 b64_json 伪 URL 前缀,与 downloadTo 的本地解码分支共用,
+ * 避免两处字面量漂移。
+ */
+internal const val DATA_URL_PREFIX = "data:image/png;base64,"

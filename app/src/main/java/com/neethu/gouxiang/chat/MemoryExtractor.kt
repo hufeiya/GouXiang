@@ -143,6 +143,12 @@ interface MemorySource {
     suspend fun insert(memory: MemoryEntity): Long
 
     suspend fun deleteById(id: Long)
+
+    /**
+     * 回溯联动删除(03 任务 7):删某角色指定分类、时间不早于 [sinceMs] 的记忆行,
+     * 返回删除条数。回溯语义 [categories] 只传 event(画像/关系类不动)。
+     */
+    suspend fun deleteSince(characterId: Long, categories: Set<String>, sinceMs: Long): Int
 }
 
 /**
@@ -228,6 +234,13 @@ class MemoryBook(private val source: MemorySource) {
 
     /** 遗忘一条(确认弹窗三连后调用)。 */
     suspend fun forget(id: Long) = source.deleteById(id)
+
+    /**
+     * 回溯联动删除(03 任务 7):删指定分类、时间不早于 [sinceMs] 的记忆行,
+     * 返回删除条数(回溯语义 categories 只传 event;画像/关系类不动)。
+     */
+    suspend fun deleteSinceByCategories(characterId: Long, categories: Set<String>, sinceMs: Long): Int =
+        source.deleteSince(characterId, categories, sinceMs)
 
     /** 全清(角色主页「清空对话与记忆」语义预留)。 */
     suspend fun clearAll(characterId: Long) {

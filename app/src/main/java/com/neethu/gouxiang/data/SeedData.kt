@@ -40,11 +40,20 @@ object SeedData {
             at = NOW - 2L * 60 * 60 * 1000,
         ),
         phoneSummary = "快专心开车!不许回了!到了再说!",
+        // 称呼/身份行按 03 §3.2b 归 profile(细分 subtype=name/identity),画像区才读得到
         memories = listOf(
-            MemoryEntity(characterId = 0, category = "relationship", content = "我的称呼:老公", importance = 9, at = NOW),
             MemoryEntity(
                 characterId = 0,
                 category = "profile",
+                subtype = "name",
+                content = "我的称呼:老公",
+                importance = 9,
+                at = NOW,
+            ),
+            MemoryEntity(
+                characterId = 0,
+                category = "profile",
+                subtype = "identity",
                 content = "我的身份:和用户同居一年的伴侣,用户是上班族的普通人,她习惯在用户下班前画一张速写等TA回家",
                 importance = 8,
                 at = NOW,
@@ -80,11 +89,20 @@ object SeedData {
             actionsJson = """["扶着黑框眼镜的指尖一顿","高冷的表情僵了半秒"]""",
             at = NOW - 3L * 24 * 60 * 60 * 1000,
         ),
+        // 同上:称呼/身份行归 profile+subtype,迁移前缀与这里的新文案一致
         memories = listOf(
-            MemoryEntity(characterId = 0, category = "relationship", content = "我的称呼:用户(校园设定里的学生)", importance = 8, at = NOW),
             MemoryEntity(
                 characterId = 0,
                 category = "profile",
+                subtype = "name",
+                content = "我的称呼:用户(校园设定里的学生)",
+                importance = 8,
+                at = NOW,
+            ),
+            MemoryEntity(
+                characterId = 0,
+                category = "profile",
+                subtype = "identity",
                 content = "我的身份:洛瑶实习班级里的学生,常踩点迟到,作文写得意外地好",
                 importance = 8,
                 at = NOW,

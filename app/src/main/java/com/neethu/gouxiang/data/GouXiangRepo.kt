@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.shareIn
 import kotlinx.coroutines.launch
+import com.neethu.gouxiang.protocol.conversationSummary
 
 /**
  * 数据底座门面:单例库 + 首启播种 + UI 用流。
@@ -25,6 +26,7 @@ class GouXiangRepo private constructor(context: Context) {
         GouXiangDatabase.MIGRATION_1_2,
         GouXiangDatabase.MIGRATION_2_3,
         GouXiangDatabase.MIGRATION_3_4,
+        GouXiangDatabase.MIGRATION_4_5,
     ).build()
 
     init {
@@ -108,6 +110,10 @@ class GouXiangRepo private constructor(context: Context) {
     suspend fun deleteMemory(id: Long) = db.memoryDao().deleteById(id)
 
     suspend fun insertMemory(memory: MemoryEntity): Long = db.memoryDao().insert(memory)
+
+    /** 回溯联动删除(03 任务 7):删该角色晚于回溯点且分类命中的记忆行,返回删除条数。 */
+    suspend fun deleteMemoriesSince(characterId: Long, categories: Set<String>, sinceMs: Long): Int =
+        db.memoryDao().deleteSince(characterId, categories, sinceMs)
 
     /** 手动管理路径的批量写入(全部 REPLACE 语义)。 */
     suspend fun insertMemories(memories: List<MemoryEntity>) {
@@ -202,16 +208,18 @@ class GouXiangRepo private constructor(context: Context) {
 
     /**
      * 删除后刷新会话行:取剩余最后一条消息回填摘要/时间;会话空了摘要清空、
-     * 时间保持不动(列表仍按旧时间排序,避免行消失跳位)。
+     * 时间保持不动(列表仍按旧时间排序,避免行消失跳位)。摘要与发送路径
+     * 同源按泡型降级(附录 C-I3):回溯/重新生成后剩余尾条为语音/贴纸/卡片
+     * 泡时,转写全文/占位描述/行内标记不重回消息列表。
      */
     suspend fun refreshConversationTail(conversationId: Long) {
         val latest = db.messageDao().latestForConversation(conversationId)
         val conv = db.conversationDao().byId(conversationId) ?: return
-        if (latest != null) {
-            db.conversationDao().touch(conversationId, latest.content, latest.at)
-        } else {
-            db.conversationDao().touch(conversationId, "", conv.lastAt)
-        }
+        db.conversationDao().touch(
+            conversationId,
+            conversationTailSummary(latest),
+            latest?.at ?: conv.lastAt,
+        )
     }
 
     /** 消息行时间格式化:2小时前 / 2天前(对齐 02 截图节奏)。 */
@@ -224,6 +232,15 @@ class GouXiangRepo private constructor(context: Context) {
             }
     }
 }
+
+/**
+ * 会话尾条 → 行摘要(纯函数,PhoneChatTest 锁定):回溯/重新生成后的会话行
+ * ([GouXiangRepo.refreshConversationTail])与发送路径(ChatOrchestrator/
+ * MainViewModel)共用同一降级规则(附录 C-I3)——尾条为语音/贴纸/卡片泡时,
+ * 转写全文/占位描述/行内标记不重回消息列表;尾条为 null(整会话删空)返回空串。
+ */
+internal fun conversationTailSummary(latest: MessageEntity?): String =
+    if (latest == null) "" else conversationSummary(latest.kind, latest.content, latest.actionsJson)
 
 /** 首页推荐流卡片。 */
 data class HomeFeedCard(

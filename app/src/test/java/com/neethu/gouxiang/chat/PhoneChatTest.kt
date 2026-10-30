@@ -7,10 +7,12 @@ import com.neethu.gouxiang.ai.adapter.LlmStreamEvent
 import com.neethu.gouxiang.data.CharacterEntity
 import com.neethu.gouxiang.data.MemoryEntity
 import com.neethu.gouxiang.data.MessageEntity
+import com.neethu.gouxiang.data.conversationTailSummary
 import com.neethu.gouxiang.protocol.CardJson
 import com.neethu.gouxiang.protocol.CardPayload
 import com.neethu.gouxiang.protocol.PhoneCardKind
 import com.neethu.gouxiang.protocol.ProactiveMessages
+import com.neethu.gouxiang.protocol.conversationSummary
 import com.neethu.gouxiang.protocol.toProtocolLine
 import com.neethu.gouxiang.protocol.voiceDurationLabel
 import com.neethu.gouxiang.protocol.voiceDurationSec
@@ -132,8 +134,8 @@ class PhoneChatTest {
         assertEquals(3, store.inserted.size)
         assertEquals("刚画完一张速写", store.inserted[0].content)
         assertEquals("得意", store.inserted[2].content)
-        // 会话行摘要刷到最后一泡
-        assertEquals("得意", store.lastSummary)
+        // 会话行摘要刷到最后一泡,且按泡型降级(附录 C-I3):贴纸泡摘要=「[表情]」
+        assertEquals("[表情]", store.lastSummary)
         assertEquals(collected, store.inserted)
         assertFalse(orch.running.value)
     }
@@ -146,6 +148,23 @@ class PhoneChatTest {
         val assistants = store.inserted.filter { it.role == "assistant" }
         assertEquals(1, assistants.size)
         assertEquals(ChatOrchestrator.PROACTIVE_FALLBACK_TEXT, assistants[0].content)
+    }
+
+    @Test
+    fun `proactive round stream error keeps proactive fallback`() = runTest {
+        // 02 文档 §3.5 失败显式化只作用用户回合:主动回合流 Error 不判失败,
+        // 保留「兜底一条」现状,且文案用主动语感(不借用用户回合兜底文案)。
+        val store = FakeStore(char, memories)
+        val llm = object : ChatOrchestrator.Llm {
+            override fun streamChat(messages: List<ChatMessage>, config: LlmConfig): Flow<LlmStreamEvent> =
+                flow { emit(LlmStreamEvent.Error(IllegalStateException("boom"))) }
+        }
+        val orch = ChatOrchestrator(store, llm, bubbleGapMs = 0)
+        orch.respondProactively(1L, 1L, "场景指令", {})
+        val assistants = store.inserted.filter { it.role == "assistant" }
+        assertEquals(1, assistants.size)
+        assertEquals(ChatOrchestrator.PROACTIVE_FALLBACK_TEXT, assistants[0].content)
+        assertTrue("主动回合 turnId 应带 proactive- 前缀", assistants[0].turnId.startsWith("proactive-"))
     }
 
     // ── 卡片(范围 3)───────────────────────────────────────────────
@@ -188,6 +207,92 @@ class PhoneChatTest {
     fun `card summary degrades to kind label when blank`() {
         assertEquals("[转账]", CardPayload(PhoneCardKind.TRANSFER).summary())
         assertEquals("[图片] 自拍", CardPayload(PhoneCardKind.IMAGE, "自拍").summary())
+    }
+
+    // ── 卡片落库(端到端打通:解析 → 落库 → 解码回读)──────────────────
+
+    @Test
+    fun `assistant card line persists as card with decodable payload`() = runTest {
+        val store = FakeStore(char, memories)
+        val llm = fakeLlm(listOf("给你转了个零花钱\n[卡片:转账 520|给你买奶茶]"))
+        val orch = ChatOrchestrator(store, llm, bubbleGapMs = 0)
+        orch.respondTo(1L, 1L, "在吗", {})
+        // 卡片行落库:kind=card、content 保留整行、actionsJson 经 CardPayload.decode 回读
+        val cards = store.inserted.filter { it.role == "assistant" && it.kind == "card" }
+        assertEquals(1, cards.size)
+        assertEquals("[卡片:转账 520|给你买奶茶]", cards[0].content)
+        val payload = CardPayload.decode(cards[0].actionsJson)
+        assertEquals(PhoneCardKind.TRANSFER, payload?.kind)
+        assertEquals("520", payload?.title)
+        assertEquals("给你买奶茶", payload?.note)
+        // 同回合非卡片泡不受影响,仍按纯文本落库
+        assertEquals(
+            "text",
+            store.inserted.first { it.role == "assistant" && it.kind != "card" }.kind,
+        )
+    }
+
+    @Test
+    fun `user card line persists as card kind with payload`() {
+        // 用户侧(手机「+」面板 sendCard → 行内标记 → 用户消息入库):同样落 kind=card
+        val line = CardPayload(PhoneCardKind.TRANSFER, "520", "给你买奶茶").toProtocolLine()
+        val m = com.neethu.gouxiang.ui.buildUserMessageEntity(1L, line, at = now)
+        assertEquals("card", m.kind)
+        assertEquals("user", m.role)
+        assertEquals(line, m.content)
+        val payload = CardPayload.decode(m.actionsJson)
+        assertEquals(PhoneCardKind.TRANSFER, payload?.kind)
+        assertEquals("520", payload?.title)
+        // 普通文本不受影响,仍按纯文本落库
+        val plain = com.neethu.gouxiang.ui.buildUserMessageEntity(1L, "在吗", at = now)
+        assertEquals("text", plain.kind)
+        assertEquals("在吗", plain.content)
+    }
+
+    // ── 会话行摘要按泡型降级(附录 C-I3 四件套)──────────────────────
+
+    @Test
+    fun `conversation summary degrades by bubble kind`() {
+        // 语音/表情/图片:摘要只出类型标签,不泄露转写全文或占位描述
+        assertEquals("[语音]", conversationSummary("voice", "今天真的好累啊,想你了"))
+        assertEquals("[表情]", conversationSummary("sticker", "得意"))
+        assertEquals("[图片]", conversationSummary("img", "一张随手拍"))
+        // 卡片:actionsJson 载荷优先,空字段降级类型名,均不可得降级「[卡片]」
+        val card = CardPayload(PhoneCardKind.TRANSFER, "520", "给你买奶茶")
+        assertEquals("[转账] 520", conversationSummary("card", card.toProtocolLine(), CardJson.encode(card)))
+        assertEquals("[转账]", conversationSummary("card", "任意", CardJson.encode(CardPayload(PhoneCardKind.TRANSFER))))
+        assertEquals("[卡片]", conversationSummary("card", "普通文本", ""))
+        // actionsJson 解不出时回退按 content 行内标记解
+        assertEquals("[位置] 中央公园", conversationSummary("card", "[卡片:位置 中央公园]", ""))
+        // 其余(含 TEXT)摘要仍=原文
+        assertEquals("刚煮了奶茶", conversationSummary("text", "刚煮了奶茶"))
+    }
+
+    @Test
+    fun `text ending round keeps raw summary`() = runTest {
+        // 既有口径「TEXT 泡摘要仍=文本」在编排器通路的显式锁定:最后一泡为
+        // 文本时,会话行摘要原样(降级只作用于非文本泡)。
+        val store = FakeStore(char, memories)
+        val orch = ChatOrchestrator(store, fakeLlm(listOf("刚煮了奶茶\n给你留了一杯")), bubbleGapMs = 0)
+        orch.respondTo(1L, 1L, "在忙吗", {})
+        assertEquals("给你留了一杯", store.lastSummary)
+    }
+
+    @Test
+    fun `rewind tail summary degrades by bubble kind`() {
+        // 回溯/重新生成后的会话行(GouXiangRepo.refreshConversationTail)与
+        // 发送路径同源降级:回合 [文本,语音,贴纸] 中删到尾条=语音泡时,摘要
+        // 不被回写成转写全文;贴纸/卡片尾条同理;整会话删空摘要清空。
+        fun row(kind: String, content: String, actionsJson: String = "[]") = MessageEntity(
+            conversationId = 1, turnId = "t", role = "assistant",
+            kind = kind, content = content, actionsJson = actionsJson, at = now,
+        )
+        assertEquals("[语音]", conversationTailSummary(row("voice", "今天真的好累啊,想你了")))
+        assertEquals("[表情]", conversationTailSummary(row("sticker", "得意")))
+        val card = CardPayload(PhoneCardKind.TRANSFER, "520", "给你买奶茶")
+        assertEquals("[转账] 520", conversationTailSummary(row("card", card.toProtocolLine(), CardJson.encode(card))))
+        assertEquals("刚煮了奶茶", conversationTailSummary(row("text", "刚煮了奶茶")))
+        assertEquals("", conversationTailSummary(null))
     }
 
     // ── 语音条时长(范围 1「•)N″」)────────────────────────────────

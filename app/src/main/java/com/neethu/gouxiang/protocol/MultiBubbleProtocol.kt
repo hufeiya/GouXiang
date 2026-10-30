@@ -7,21 +7,24 @@ import kotlinx.serialization.json.Json
  * 多泡输出协议 · 消息段(对齐 maoxiang-feature-analysis.md §6.3)。
  *
  * 一次回复 = [MultiBubbleReply](1~4 条 [Bubble]),段类型:
- * - [Bubble.Kind.TEXT]    普通文本气泡(动作文字已剥离为 [Bubble.actions])
+ * - [Bubble.Kind.TEXT]    普通文本气泡(白名单命中的动作文字剥离为 [Bubble.actions],
+ *                         非白名单括号文本保留正文)
  * - [Bubble.Kind.STICKER] 表情包占位(渲染为贴图占位卡)
  * - [Bubble.Kind.IMAGE]   图片占位(渲染为图片占位卡,后续接生图)
  * - [Bubble.Kind.VOICE]   语音条占位((语音:…) / [语音:…] 均收,→ 语音条 UI)
+ * - [Bubble.Kind.CARD]    卡片整行([卡片:类型 参数|备注] 六型,content 保留
+ *                         原行,落库侧解析为 [CardPayload] 存 actionsJson)
  */
 @Serializable
 data class Bubble(
     val kind: Kind,
-    /** 文本内容:TEXT=正文;STICKER/IMAGE=占位描述;VOICE=语音条转写文本。 */
+    /** 文本内容:TEXT=正文;STICKER/IMAGE=占位描述;VOICE=语音条转写文本;CARD=整行卡片标记。 */
     val text: String,
     /** TEXT 段内嵌的 () 场景动作(顺序保留,渲染时以淡色斜体/小字展示)。 */
     val actions: List<String> = emptyList(),
 ) {
     @Serializable
-    enum class Kind { TEXT, STICKER, IMAGE, VOICE }
+    enum class Kind { TEXT, STICKER, IMAGE, VOICE, CARD }
 }
 
 /** 一次 LLM 回复解析出的完整分段结果。 */
@@ -51,7 +54,7 @@ data class MultiBubbleReply(
  * 顶层也可为对象 `{"bubbles":[…],"proactivity":{…}}`。
  *
  * B. 分隔符兜底(模型没按 JSON 时):换行或 `|||` 分段 + 行内约定
- * `[sticker:描述]` `[img:描述]` `(动作)`。
+ * `[sticker:描述]` `[img:描述]` `[卡片:类型 参数|备注]` `(动作)`。
  *
  * 解析永不抛异常:畸形 JSON → 回落 B 通路;解析结果超 4 泡 → 截断保留前 4
  * (§6.3 「禁长段落」的硬约束);kind 不识别 → 当 TEXT。
@@ -63,8 +66,37 @@ object MultiBubbleParser {
 
     // ── 行内占位约定正则(JSON 通路与分隔符兜底共用;整行匹配)─────────
 
-    /** 动作行/文本行的 () 动作提取(全/半角括号)。 */
+    /**
+     * 动作行/文本行的 () 内容匹配(全/半角括号)。是否剥离为 Action 由
+     * [actionWhitelist] 白名单判定(02 文档 §3.3 规则4),正则本身只负责圈出括号。
+     */
     internal val actionRegex = Regex("[（(]([^（）()]{1,40})[)）]")
+
+    /**
+     * () 动作白名单(02 文档 §3.3 规则4:白名单动作转 Action 段,非白名单保留
+     * 为文本——照 SDK StageDirectionFilter.kt:27 起的有限精确清单语义,避免
+     * 误伤普通括号内容)。词源两批:
+     * 1. 文档通用短动作(SDK 清单同款 + 叹气/抬头/歪头);
+     * 2. 本工程 prompt few-shot 与兜底文案动作(保既有单测与教学样例不回归)。
+     */
+    internal val actionWhitelist: Set<String> = setOf(
+        // 文档通用短动作(歪头:实机高频动作词,few-shot 贴纸「歪头撒娇」同源词)
+        "点头", "摇头", "微笑", "眨眼", "挥手", "叹气", "低头", "抬头", "鞠躬",
+        "害羞地低头", "轻轻点头", "歪头",
+        // 本工程兜底文案动作(ChatOrchestrator.FALLBACK_TEXT / PROACTIVE_FALLBACK_TEXT)
+        "戳了戳你", "抱着手机等了好一会儿",
+        // 本工程输出协议 few-shot(ChatContextBuilder)
+        "凑过来瞄你的屏幕",
+        // 解析器示例 / SeedData 开场白 / 既有单测锁定的动作词
+        "靠在你肩头", "凑近你耳边", "低头轻笑", "轻轻拍你的背", "瘫在你身上",
+    )
+
+    /**
+     * 02 文档 §3.3 规则5「空段/纯标点段丢弃」:段内含字母/数字/汉字才算有效
+     * 内容,纯标点/纯符号/空白段不成泡。
+     */
+    internal fun hasValidContent(seg: String): Boolean =
+        seg.any { it.isLetterOrDigit() || it.code in 0x4E00..0x9FFF }
 
     /** [sticker:描述] / [sticker：描述]。 */
     internal val stickerLineRegex = Regex("^\\[sticker[:：]\\s*(.+?)\\]$", RegexOption.DOT_MATCHES_ALL)
@@ -87,6 +119,16 @@ object MultiBubbleParser {
     internal val stickerBareRegex = Regex("^sticker[:：]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
     internal val imgBareRegex = Regex("^img[:：]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
     internal val voiceBareRegex = Regex("^语音[:：]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
+
+    /**
+     * 卡片整行 `[卡片:类型 参数|备注]`(与 [parseCardLine] 同构,全/半角冒号都收)。
+     * 与 sticker/img/voice 不同:CARD 泡的 text 保留整行原样(落库侧再由
+     * [parseCardLine] 解出载荷存 actionsJson),不做剥离。
+     */
+    internal val cardLineRegex = Regex("^\\s*\\[卡片[:：]\\s*(.+?)\\]\\s*$")
+
+    /** 方括号被 lenient JSON 数组定界符消费后的裸串形态(「卡片:…」开头)。 */
+    internal val cardBareRegex = Regex("^卡片[:：]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
 
     fun parse(raw: String): MultiBubbleReply {
         val trimmed = raw.trim().trimPrefix("```json").trimPrefix("```").trimSuffix("```").trim()
@@ -150,6 +192,15 @@ object MultiBubbleParser {
             imgBareRegex.find(text)?.let {
                 return Bubble(Bubble.Kind.IMAGE, it.groupValues[1].trim())
             }
+            // 卡片(端到端打通):方括号仍在的形态保留整行原样;裸串形态(方括号
+            // 已被 JSON 数组定界符消费)补回方括号,与整行形态统一,保证落库侧
+            // parseCardLine 一定能从 text 解出载荷。
+            cardLineRegex.find(text)?.let {
+                return Bubble(Bubble.Kind.CARD, text.trim())
+            }
+            cardBareRegex.find(text)?.let {
+                return Bubble(Bubble.Kind.CARD, "[卡片:${it.groupValues[1].trim()}]")
+            }
             return Bubble(Bubble.Kind.TEXT, text)
         }
         val obj = el
@@ -157,6 +208,7 @@ object MultiBubbleParser {
             "sticker" -> Bubble.Kind.STICKER
             "img", "image" -> Bubble.Kind.IMAGE
             "voice" -> Bubble.Kind.VOICE
+            "card" -> Bubble.Kind.CARD
             else -> Bubble.Kind.TEXT
         }
         val text = (obj["text"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
@@ -170,8 +222,9 @@ object MultiBubbleParser {
 
     /**
      * 按换行或 `|||` 切段;行内解析 [sticker:…] / [img:…] / (语音:…) / (动作) 约定。
-     * `(动作)` 支持全角(())与半角(())括号;动作行(整行只有动作)不产泡,
-     * 归并进下一文本泡的 actions。
+     * `(动作)` 支持全角(())与半角(())括号,且按 02 文档 §3.3 规则4 只剥白名单
+     * ([actionWhitelist])命中词为 Action,非白名单括号文本保留正文;动作行
+     * (整行只有动作)不产泡,归并进下一文本泡的 actions。
      */
     internal fun parseFallback(raw: String): MultiBubbleReply {
         val segments = raw.split("\n", "|||").map { it.trim() }.filter { it.isNotEmpty() }
@@ -180,11 +233,13 @@ object MultiBubbleParser {
         var proactivity: Bubble? = null
 
         for (seg in segments) {
-            // 行内占位约定优先判定([sticker:]/[img:]/(语音:)在动作剥离前识别,
-            // 否则 (语音:…) 会被 (动作) 规则误吞)
+            // 行内占位约定优先判定([sticker:]/[img:]/[卡片:]/(语音:)在动作剥离前
+            // 识别,否则 (语音:…) 会被 (动作) 规则误吞、[卡片:位置 原地(东门)]
+            // 这类带括号载荷会被剥掉)
             val stickerMatch = stickerLineRegex.find(seg)
             val imgMatch = imgLineRegex.find(seg)
             val voiceMatch = voiceLineRegex.find(seg)
+            val cardMatch = cardLineRegex.find(seg)
             if (stickerMatch != null || imgMatch != null || voiceMatch != null) {
                 val kind: Bubble.Kind
                 val text: String
@@ -198,13 +253,34 @@ object MultiBubbleParser {
                 bubbles += Bubble(kind, text, carried)
                 continue
             }
+            // 卡片整行:text 保留原行(与上方占位泡同层,先于动作剥离),载荷在
+            // 落库侧由 parseCardLine 解出
+            if (cardMatch != null) {
+                val carried = pendingActions.toList()
+                pendingActions = mutableListOf()
+                bubbles += Bubble(Bubble.Kind.CARD, seg, carried)
+                continue
+            }
             var work = seg
             val actions = mutableListOf<String>()
-            // 提取全部 (动作)
-            for (m in actionRegex.findAll(work)) actions += m.groupValues[1].trim()
-            work = actionRegex.replace(work, "").trim()
+            // 提取白名单命中的 (动作);非白名单括号文本保留正文不再剥离
+            // (02 文档 §3.3 规则4,照 StageDirectionFilter 有限清单语义防误伤)
+            for (m in actionRegex.findAll(work)) {
+                val name = m.groupValues[1].trim()
+                if (name in actionWhitelist) actions += name
+            }
+            work = actionRegex.replace(work) {
+                if (it.groupValues[1].trim() in actionWhitelist) "" else it.value
+            }.trim()
             // 动作行(剥完动作后空)→ 归并进下一泡
             if (work.isEmpty()) {
+                pendingActions += actions
+                continue
+            }
+            // 纯标点段丢弃(02 文档 §3.3 规则5):剥完动作后无字母/数字/汉字的
+            // 残段不成泡;占位行/动作行已先于本判定识别不受影响,段内已剥出的
+            // 动作照动作行语义归并进下一泡(不随段丢弃)。
+            if (!hasValidContent(work)) {
                 pendingActions += actions
                 continue
             }

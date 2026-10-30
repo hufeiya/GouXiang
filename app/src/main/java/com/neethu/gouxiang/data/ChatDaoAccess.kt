@@ -39,6 +39,9 @@ class RoomMemorySource(private val repo: GouXiangRepo) : MemorySource {
     override suspend fun insert(memory: MemoryEntity): Long = repo.insertMemory(memory)
 
     override suspend fun deleteById(id: Long) = repo.deleteMemory(id)
+
+    override suspend fun deleteSince(characterId: Long, categories: Set<String>, sinceMs: Long): Int =
+        repo.deleteMemoriesSince(characterId, categories, sinceMs)
 }
 
 /** [MemoryWindowStore] 的 Room 实现(pending_memory_window 单行表)。 */

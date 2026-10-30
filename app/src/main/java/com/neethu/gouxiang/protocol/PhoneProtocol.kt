@@ -112,6 +112,28 @@ fun parseCardLine(line: String): CardPayload? {
     return CardPayload(kind = kind, title = title, note = note)
 }
 
+// ── 会话行摘要按泡型降级(04 文档 §2.1 降级文案组;附录 C-I3 四件套)──
+
+/**
+ * 会话列表摘要按泡型降级:会话行不再直接刷最后一泡裸文本 —— 语音泡的
+ * 转写全文、表情/图片泡的占位描述、卡片行内标记都不进消息列表。
+ * voice→「[语音]」、sticker→「[表情]」、img→「[图片]」;card 取载荷摘要
+ * (actionsJson 反序列化优先,失败再按 content 行内标记 [卡片:…] 解,
+ * 均不可得降级「[卡片]」,见 [CardPayload.summary]);其余(含 text)原样返回。
+ * 纯函数,PhoneChatTest 直接锁定;[CardPayload.summary] 由此获得首个生产消费方。
+ */
+fun conversationSummary(kind: String, text: String, actionsJson: String = ""): String =
+    when (kind) {
+        "voice" -> "[语音]"
+        "sticker" -> "[表情]"
+        "img" -> "[图片]"
+        "card" ->
+            CardPayload.decode(actionsJson)?.summary()
+                ?: parseCardLine(text)?.summary()
+                ?: "[卡片]"
+        else -> text
+    }
+
 // ── 语音条时长(04 §1.3 AudioVoiceContent.voiceDuration 的本地化)────────
 
 /**

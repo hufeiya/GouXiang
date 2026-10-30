@@ -36,6 +36,7 @@ import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.LocationOn
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -50,6 +51,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -68,11 +72,12 @@ import com.neethu.gouxiang.ui.ChatBubble
 /**
  * 手机聊天页 14(基准 14-phone-chat.png / 14-phone-chat.xml,iMessage 风):
  *
- * - 顶栏:✕ + 名字 +「由 AI 生成」+ 右侧「…」(进 13c 说明页;长按 = 调试
+ * - 顶栏:✕ + 名字 +「由 AI 生成」+ 记忆图标(记忆页 05)+ 右侧「…」(进 13c 说明页;长按 = 调试
  *   「模拟离线回归」主动消息,范围 5 的验收入口);
  * - 消息流:左侧白泡(每组首泡带头像)+ 右侧黄泡;语音条「•)N″」点击 TTS
- *   播放(TTS 不可用保持占位);卡片按 13b 六型渲染;长按即时弹回溯/重新生成
- *   (回溯=删除该条及之后消息回到该点);新消息到达自动滚到底部;
+ *   播放(TTS 不可用保持占位);卡片按 13b 六型渲染;长按即时弹复制/回溯/重新生成
+ *   (复制=04 §3.2.F 本地 v1 最小项;回溯=删除该条及之后消息回到该点,成功后
+ *   Toast 提示记录已变化);新消息到达自动滚到底部;
  * - 输入条:自由输入 + 😊 + 🎤 + 「+」(扩展面板 13b 六宫格)。
  * - dump 对照:new_tv_name(名字)/new_iv_ai_generated(「由 AI 生成」)/
  *   edit_view(hint=自由输入...)/entrance_sticker/voice_mode/ext_panel。
@@ -87,17 +92,27 @@ fun PhoneChatScreen(
     onSendCard: (CardPayload) -> Unit,
     onOpenGuide: () -> Unit,
     onSimulateOfflineReturn: () -> Unit,
+    onOpenMemory: () -> Unit = {},
     onRewind: (messageId: Long) -> Unit,
     onRegenerate: (turnId: String) -> Unit,
     onPlayVoice: (messageId: Long, text: String) -> Unit,
     playingVoiceId: Long? = null,
     streamDraft: String = "",
+    /** 失败回合重试条点击(02 文档 §3.5:按原用户文本重跑回复侧)。 */
+    onRetryFailedTurn: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler { onBack() }
     var panelOpen by remember { mutableStateOf(false) }
     var longPressTarget by remember { mutableStateOf<Long?>(null) }
     var rewindTarget by remember { mutableStateOf<Long?>(null) }
+    // 回溯确认弹窗点名的目标消息(长按落点在回合在途/草稿顶动列表时可能
+    // 偏到相邻泡,点名内容让误触在确认前肉眼可辨)。
+    var rewindTargetText by remember { mutableStateOf("") }
+    // 长按「复制」与回溯成功提示共用:剪贴板写文本 + Toast(纯 UI 一次性反馈,
+    // 不走 ViewModel 事件流)。
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
     // 自动滚动(F4 验收 low 修复):reverseLayout 下 index 0 = 最新内容,
     // 新消息落库时若用户本来就停在底部(或刚开始回合计数变化)则滚到 index 0,
     // 保证新泡/「正在输入」条到达即贴底可见;用户上滑翻历史时不打扰。
@@ -118,6 +133,7 @@ fun PhoneChatScreen(
                 onBack = onBack,
                 onOpenGuide = onOpenGuide,
                 onSimulateOfflineReturn = onSimulateOfflineReturn,
+                onOpenMemory = onOpenMemory,
             )
             LazyColumn(
                 modifier = Modifier
@@ -128,10 +144,18 @@ fun PhoneChatScreen(
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(
                     start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp,
                 ),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                // 组间距(04 号文档「组间距>组内距」):回合组之间留 10dp,
+                // 大于组内 2dp,连发组在视觉上抱团、组与组之间分明
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 if (state.sending) {
                     item(key = "typing") { TypingHint(streamDraft) }
+                }
+                // 回合失败显式化(02 文档 §3.5):失败条贴在消息区最底部
+                // (reverseLayout 下先发射=视觉最底),点击按原用户文本重试;
+                // 重试开始即撤条转「正在输入」态,失败回合不落任何假回复泡。
+                state.failedTurn?.let {
+                    item(key = "failed-turn") { FailedTurnBar(onRetry = onRetryFailedTurn) }
                 }
                 items(state.bubbleItems.asReversed()) { group ->
                     PhoneBubbleGroup(
@@ -154,6 +178,7 @@ fun PhoneChatScreen(
                 item(key = "bottom-pad") { Spacer(Modifier.height(8.dp)) }
             }
             InputBar(
+                sending = state.sending,
                 onSend = onSend,
                 onTogglePanel = { panelOpen = !panelOpen },
             )
@@ -173,8 +198,9 @@ fun PhoneChatScreen(
             )
         }
 
-        // 长按操作弹窗(回溯/重新生成,13c 说明的功能更新条目):长按即弹
-        // (即时反馈,F4 验收 low);回溯=删除该条及其后消息回到该点(收尾轮语义)。
+        // 长按操作弹窗(复制/回溯/重新生成,13c 说明的功能更新条目):长按即弹
+        // (即时反馈,F4 验收 low);复制=04 §3.2.F 长按操作条本地 v1 最小项;
+        // 回溯=删除该条及其后消息回到该点(收尾轮语义)。
         longPressTarget?.let { msgId ->
             val found = state.bubbleItems
                 .flatMap { group -> group.bubbles.map { group.fromUser to it } }
@@ -185,9 +211,21 @@ fun PhoneChatScreen(
                 val (fromUser, item) = found
                 RewindDialog(
                     fromUser = fromUser,
+                    targetText = rewindSnippet(item.content),
                     onDismiss = { longPressTarget = null },
+                    onCopy = {
+                        // 复制原泡全文到剪贴板,Toast 即刻确认后收起菜单
+                        clipboard.setText(AnnotatedString(item.content))
+                        android.widget.Toast.makeText(
+                            context,
+                            "已复制",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                        longPressTarget = null
+                    },
                     onRewind = {
                         rewindTarget = item.id
+                        rewindTargetText = rewindSnippet(item.content)
                         longPressTarget = null
                     },
                     onRegenerate = {
@@ -201,11 +239,18 @@ fun PhoneChatScreen(
             AlertDialog(
                 onDismissRequest = { rewindTarget = null },
                 title = { Text("回溯这段对话?", fontSize = 17.sp) },
-                text = { Text("回溯后这条及之后的消息会从记录里删掉,无法恢复。", fontSize = 14.sp) },
+                text = { Text("回溯后「$rewindTargetText」及其之后的消息会从记录里删掉,无法恢复。", fontSize = 14.sp) },
                 confirmButton = {
                     TextButton(onClick = {
                         onRewind(msgId)
                         rewindTarget = null
+                        // 回溯成功提示(附录 C-G2:此前静默删除无感知;文档 §2.1
+                        // parallel_phone_restart_toast 口径的本地落地)
+                        android.widget.Toast.makeText(
+                            context,
+                            "因为回溯，聊天记录已发生变化",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
                     }) { Text("回溯", color = Color(0xFFE8A93D)) }
                 },
                 dismissButton = {
@@ -216,13 +261,14 @@ fun PhoneChatScreen(
     }
 }
 
-/** 顶栏:✕ + 名字 +「由 AI 生成」+ 右侧「…」。 */
+/** 顶栏:✕ + 名字 +「由 AI 生成」+ 记忆图标 + 右侧「…」。 */
 @Composable
 private fun TopBar(
     name: String,
     onBack: () -> Unit,
     onOpenGuide: () -> Unit,
     onSimulateOfflineReturn: () -> Unit,
+    onOpenMemory: () -> Unit = {},
 ) {
     // 长按即时反馈(F4 验收 low 修复):主动消息生成要 20~90s,
     // 没有即时的可视确认时用户会反复长按;Toast 即刻确认触发成功。
@@ -257,6 +303,20 @@ private fun TopBar(
             )
             Text("由 AI 生成", color = Color(0xFFB9B9B9), fontSize = 12.sp)
         }
+        // 记忆入口(F3):与普通聊天页顶栏同款图标;手机聊天页(mode=phone 会话)
+        // 此前无任何记忆入口,真机验收无法从回溯流程直达记忆页。
+        Icon(
+            Icons.Outlined.Psychology,
+            contentDescription = "记忆",
+            tint = Color(0xFF1A1A1A),
+            modifier = Modifier
+                .size(24.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onOpenMemory() },
+        )
+        Spacer(Modifier.width(14.dp))
         Text(
             "…",
             color = Color(0xFF1A1A1A),
@@ -308,7 +368,9 @@ private fun PhoneBubbleGroup(
             modifier = if (group.fromUser) Modifier else Modifier.weight(1f, fill = false),
         ) {
             group.bubbles.forEachIndexed { index, bubble ->
-                Spacer(Modifier.height(if (index == 0) 2.dp else 5.dp))
+                // 组内距(04 号文档「组间距>组内距」):首泡 0dp(组间距已由列表
+                // spacedBy 10dp 提供)、后续 2dp,保证组间 10dp > 组内 2dp
+                Spacer(Modifier.height(if (index == 0) 0.dp else 2.dp))
                 PhoneBubble(
                     bubble = bubble,
                     fromUser = group.fromUser,
@@ -514,6 +576,21 @@ private fun TypingHint(streamDraft: String) {
     }
 }
 
+/** 回合失败条(02 文档 §3.5):「消息发送失败,请点击重试」,点击整行触发重试。 */
+@Composable
+private fun FailedTurnBar(onRetry: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onRetry)
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("消息发送失败，请点击重试", color = Color(0xFFE5484D), fontSize = 13.sp)
+    }
+}
+
 /** 按 Unicode 码点取尾部(不劈代理对;F2 实锤惯例)。 */
 private fun String.takeLastCodePoints(n: Int): String {
     if (length <= n) return this
@@ -523,9 +600,12 @@ private fun String.takeLastCodePoints(n: Int): String {
 
 // ── 输入条 + 扩展面板 ────────────────────────────────────────────────
 
-/** 输入条:自由输入 + 😊 + 🎤 + 「+」(对齐 dump edit_view/entrance_* 三件)。 */
+/** 输入条:自由输入 + 😊 + 🎤 + 「+」(对齐 dump edit_view/entrance_* 三件)。
+ * [sending] = 回合进行中:发送钮禁用(不丢弃草稿;发送被接受才清空 draft)。
+ */
 @Composable
 private fun InputBar(
+    sending: Boolean,
     onSend: (String) -> Unit,
     onTogglePanel: () -> Unit,
 ) {
@@ -577,20 +657,22 @@ private fun InputBar(
             )
             if (draft.isNotBlank()) {
                 Spacer(Modifier.width(10.dp))
+                // 发送中不丢草稿:发送中禁用而非丢弃草稿;仅在点击被接受时清空
+                // (ViewModel 侧 sending 拦截保留为最后防线,UI 不再无条件清空)。
                 Box(
                     Modifier
                         .size(30.dp)
                         .background(
-                            if (draft.isNotBlank()) Color(0xFFFAE14C) else Color(0xFFE3E3E3),
+                            if (draft.isNotBlank() && !sending) Color(0xFFFAE14C) else Color(0xFFE3E3E3),
                             CircleShape,
                         )
-                        .clickable {
+                        .clickable(enabled = !sending) {
                             onSend(draft)
                             draft = ""
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("↑", color = Color(0xFF1A1A1A), fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    Text("↑", color = if (!sending) Color(0xFF1A1A1A) else Color(0xFFB9B9B9), fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -789,27 +871,46 @@ private fun CardComposer(
     }
 }
 
-/** 回溯/重新生成操作弹窗(长按泡;13c 功能说明的本地实现)。 */
+/** 长按操作弹窗:复制/回溯 +(角色侧)重新生成(13c 功能说明的本地实现)。 */
 @Composable
 private fun RewindDialog(
     fromUser: Boolean,
+    targetText: String,
     onDismiss: () -> Unit,
+    onCopy: () -> Unit,
     onRewind: () -> Unit,
     onRegenerate: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("消息操作", fontSize = 17.sp) },
-        text = { Text(if (fromUser) "回溯会删掉从这里开始的消息。" else "可选择回溯这段对话,或让 Ta 重新说一次。", fontSize = 14.sp) },
+        text = {
+            Text(
+                if (fromUser) "回溯会删掉「$targetText」及其之后的消息。"
+                else "可选择回溯「$targetText」这段对话,或让 Ta 重新说一次。",
+                fontSize = 14.sp,
+            )
+        },
         confirmButton = {
             TextButton(onClick = onRewind) { Text("回溯", color = Color(0xFFE8A93D)) }
         },
         dismissButton = {
-            if (!fromUser) {
-                TextButton(onClick = onRegenerate) { Text("重新生成", color = Color(0xFFE8A93D)) }
-            } else {
-                TextButton(onClick = onDismiss) { Text("取消") }
+            // 复制与取消/重新生成同置左侧(复制为中性操作,不着强调色;
+            // 回溯/重新生成才是会改记录的动作)
+            Row {
+                TextButton(onClick = onCopy) { Text("复制") }
+                if (!fromUser) {
+                    TextButton(onClick = onRegenerate) { Text("重新生成", color = Color(0xFFE8A93D)) }
+                } else {
+                    TextButton(onClick = onDismiss) { Text("取消") }
+                }
             }
         },
     )
+}
+
+/** 回溯弹窗点名目标消息:压平空白后截前 12 字(长按误触相邻泡时肉眼可辨)。 */
+internal fun rewindSnippet(text: String): String {
+    val flat = text.trim().replace(Regex("\\s+"), " ")
+    return if (flat.length > 12) flat.take(12) + "…" else flat
 }

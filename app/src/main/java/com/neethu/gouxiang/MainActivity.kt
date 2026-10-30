@@ -85,7 +85,7 @@ class MainActivity : ComponentActivity() {
 
         // 角色头像:一次生成缓存本地(火山→硅基→占位兜底在 provider 内)
         LaunchedEffect(feed) {
-            val need = feed.map { it.character.id to it.character.appearance }
+            val need = feed.map { it.character }
             if (need.isNotEmpty()) vm.ensureAvatars(need)
         }
 
@@ -154,6 +154,7 @@ class MainActivity : ComponentActivity() {
                     onOpenHistory = {
                         chatId?.let { vm.openHistory(it) }
                     },
+                    onRetryFailedTurn = { vm.retryFailedTurn() },
                 )
             }
         }
@@ -173,11 +174,15 @@ class MainActivity : ComponentActivity() {
                     onSendCard = { vm.sendCard(it) },
                     onOpenGuide = { vm.openPhoneGuide() },
                     onSimulateOfflineReturn = { vm.simulateOfflineReturn() },
+                    onOpenMemory = {
+                        chatId?.let { vm.openMemory(it) }
+                    },
                     onRewind = { vm.rewindToMessage(it) },
                     onRegenerate = { vm.regenerateTurn(it) },
                     onPlayVoice = { id, text -> vm.playVoice(id, text) },
                     playingVoiceId = playingVoiceId,
                     streamDraft = streamDraft,
+                    onRetryFailedTurn = { vm.retryFailedTurn() },
                 )
             }
         }

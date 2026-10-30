@@ -19,7 +19,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MomentEntity::class,
         MomentCommentEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -98,6 +98,25 @@ abstract class GouXiangDatabase : RoomDatabase() {
                         "`at` INTEGER NOT NULL)",
                 )
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_moment_comments_postId` ON `moment_comments` (`postId`)")
+            }
+        }
+
+        /**
+         * 种子画像分类迁移(v4→v5,纯 UPDATE,照既有先例):
+         * 旧版种子把「我的称呼」行错归 relationship、「我的身份」行漏了 subtype,
+         * 画像区(MemoryBook.profile 只认 profile+subtype)读不到。存量安装经
+         * seedIfAbsent 不会重播种子,按内容前缀就地修正(与 SeedData 新文案前缀一致)。
+         */
+        val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "UPDATE memories SET category='profile', subtype='name' " +
+                        "WHERE category='relationship' AND content LIKE '我的称呼%'",
+                )
+                db.execSQL(
+                    "UPDATE memories SET subtype='identity' " +
+                        "WHERE category='profile' AND subtype='' AND content LIKE '我的身份%'",
+                )
             }
         }
     }

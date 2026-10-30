@@ -3,6 +3,7 @@ package com.neethu.gouxiang.chat
 import com.neethu.gouxiang.data.CharacterEntity
 import com.neethu.gouxiang.data.MemoryEntity
 import com.neethu.gouxiang.data.MemoryTurn
+import com.neethu.gouxiang.data.SeedData
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -298,6 +299,69 @@ class MemorySystemTest {
         assertEquals(1, turns.size)
         assertEquals("用户说的话", turns[0].user)
         assertEquals("角色的回复", turns[0].assistant)
+    }
+
+    // ── 回溯联动删除(03 任务 7)───────────────────────────────────
+
+    @Test
+    fun `deleteSinceByCategories removes only events at or after sinceMs`() = runTest {
+        val source = FakeMemorySource(
+            listOf(
+                profileRow("我的称呼:老公"),
+                eventRow(1L, at = 10), // sinceMs 之前的事件:保留
+                eventRow(2L, at = 50), // 命中:删除
+                eventRow(3L, at = 50), // 边界 at=sinceMs 同样删除(>= 语义)
+                MemoryEntity(
+                    id = 4L, characterId = 1L, category = "relationship",
+                    content = "关系升温", importance = 5, at = 60,
+                ),
+                MemoryEntity(
+                    id = 5L, characterId = 2L, category = "event",
+                    content = "别的角色的事件", importance = 5, at = 60,
+                ),
+            ),
+        )
+        val book = bookOf(source)
+        val removed = book.deleteSinceByCategories(
+            char.id,
+            setOf(MemoryCategories.EVENT),
+            sinceMs = 50,
+        )
+        assertEquals(2, removed) // 只删命中两条
+        val rest = source.rows
+        // 画像/关系行与 sinceMs 之前的事件保留;其他角色行不触碰
+        assertEquals(setOf(0L, 1L, 4L, 5L), rest.map { it.id }.toSet())
+        assertTrue(rest.any { it.id == 0L && it.category == "profile" && it.content == "我的称呼:老公" })
+        assertTrue(rest.any { it.id == 1L && it.category == "event" && it.at == 10L })
+        assertTrue(rest.any { it.id == 4L && it.category == "relationship" })
+        assertTrue(rest.none { it.at >= 50L && it.characterId == char.id && it.category == "event" })
+    }
+
+    // ── 种子形状(称呼/身份行须可读入画像区,迁移前缀同源)──────────
+
+    @Test
+    fun `seed name and identity rows are profile with name and identity subtypes`() {
+        fun assertProfileShape(name: MemoryEntity, identity: MemoryEntity) {
+            assertEquals("profile", name.category)
+            assertEquals("name", name.subtype)
+            assertEquals("profile", identity.category)
+            assertEquals("identity", identity.subtype)
+            // content 前缀不变(MIGRATION_4_5 的 LIKE 条件与之同源)
+            assertTrue(name.content.startsWith("我的称呼:"))
+            assertTrue(identity.content.startsWith("我的身份:"))
+        }
+        // 苏馨玥
+        val su = SeedData.SU_XINYUE.memories
+        assertProfileShape(
+            su.single { it.content.startsWith("我的称呼") },
+            su.single { it.content.startsWith("我的身份") },
+        )
+        // 洛瑶
+        val luo = SeedData.LUO_YAO.memories
+        assertProfileShape(
+            luo.single { it.content.startsWith("我的称呼") },
+            luo.single { it.content.startsWith("我的身份") },
+        )
     }
 
     // ── 基建 ────────────────────────────────────────────────────────

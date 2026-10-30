@@ -158,6 +158,13 @@ interface MemoryDao {
 
     @Query("DELETE FROM memories WHERE characterId = :characterId")
     suspend fun deleteForCharacter(characterId: Long)
+
+    /**
+     * 回溯联动删除(03 任务 7):删该角色指定分类、时间不早于回溯点的记忆行,
+     * 返回删除条数(回溯语义只传 event;画像/关系类不动)。
+     */
+    @Query("DELETE FROM memories WHERE characterId = :characterId AND category IN (:categories) AND at >= :sinceMs")
+    suspend fun deleteSince(characterId: Long, categories: Set<String>, sinceMs: Long): Int
 }
 
 @Dao

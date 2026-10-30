@@ -89,6 +89,8 @@ fun ChatMainScreen(
     onOpenVoiceCall: () -> Unit = {},
     /** 右侧互动列末位「历史」(F7:聊天历史页 11,对照 11-history.xml tv_im)。 */
     onOpenHistory: () -> Unit = {},
+    /** 失败回合重试条点击(02 文档 §3.5:IM 用户回合失败也显式出条,按原文本重试)。 */
+    onRetryFailedTurn: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler { onBack() }
@@ -150,6 +152,11 @@ fun ChatMainScreen(
                 if (state.sending) {
                     item(key = "typing") { TypingHint(streamDraft) }
                 }
+                // 回合失败显式化(02 文档 §3.5):IM 用户回合失败同样出重试条,
+                // 贴在消息区最底部(reverseLayout 下先发射=视觉最底),点击重试。
+                state.failedTurn?.let {
+                    item(key = "failed-turn") { FailedTurnBar(onRetry = onRetryFailedTurn) }
+                }
                 items(state.bubbleItems.asReversed()) { group ->
                     BubbleGroup(group)
                 }
@@ -189,7 +196,11 @@ fun ChatMainScreen(
                 onOpenHistory = onOpenHistory,
             )
             Spacer(Modifier.height(12.dp))
-            InputBar(onSend = onSend, onOpenVoiceCall = onOpenVoiceCall)
+            InputBar(
+                sending = state.sending,
+                onSend = onSend,
+                onOpenVoiceCall = onOpenVoiceCall,
+            )
         }
     }
 }
@@ -475,9 +486,15 @@ private fun VoiceContent(text: String, fromUser: Boolean) {
 /**
  * 输入条:电话图标 / 按住说话(语音态,点击切文字态) / 键盘 / + / 发送。
  * 键盘图标切换 语音 ↔ 文字 两种形态;文字态尾部出粉色发送圆钮。
+ * [sending] = 回合进行中:发送钮禁用(不丢弃草稿;发送被接受才清空 draft,
+ * 与手机聊天页输入条同语义,避免 ViewModel sending 拦截静默吞掉草稿)。
  */
 @Composable
-private fun InputBar(onSend: (String) -> Unit, onOpenVoiceCall: () -> Unit = {}) {
+private fun InputBar(
+    sending: Boolean,
+    onSend: (String) -> Unit,
+    onOpenVoiceCall: () -> Unit = {},
+) {
     var textMode by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
 
@@ -571,14 +588,15 @@ private fun InputBar(onSend: (String) -> Unit, onOpenVoiceCall: () -> Unit = {})
         }
         if (textMode) {
             Spacer(Modifier.width(10.dp))
+            // 发送中不丢草稿:发送中禁用而非丢弃草稿;仅在点击被接受时清空。
             Box(
                 Modifier
                     .size(36.dp)
                     .background(
-                        if (draft.isNotBlank()) Color(0xFFE84D8A) else Color(0xFFD9D9D9),
+                        if (draft.isNotBlank() && !sending) Color(0xFFE84D8A) else Color(0xFFD9D9D9),
                         CircleShape,
                     )
-                    .clickable {
+                    .clickable(enabled = !sending) {
                         if (draft.isNotBlank()) {
                             onSend(draft)
                             draft = ""
@@ -628,6 +646,21 @@ private fun TypingHint(streamDraft: String) {
                 )
             }
         }
+    }
+}
+
+/** 回合失败条(02 文档 §3.5):「消息发送失败,请点击重试」,点击整行触发重试(暗底配色)。 */
+@Composable
+private fun FailedTurnBar(onRetry: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onRetry)
+            .padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("消息发送失败，请点击重试", color = Color.White.copy(alpha = 0.85f), fontSize = 13.sp)
     }
 }
 

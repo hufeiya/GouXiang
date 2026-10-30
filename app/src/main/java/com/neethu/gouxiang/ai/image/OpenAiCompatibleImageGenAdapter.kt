@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import okhttp3.MediaType.Companion.toMediaType
@@ -22,7 +23,10 @@ import java.util.concurrent.TimeUnit
  * - 火山 Ark(doubao-seedream-5-0-flash-260915):请求尺寸键 `size`,响应 `data[].url`;
  * - 硅基流动(Kwai-Kolors/Kolors):请求尺寸键 `image_size`,响应 `images[].url`。
  * 两个尺寸键都发(未识别的键服务商忽略),两种响应形态都解析——实测双方对
- * 未知键宽容,避免维护两份实现。
+ * 未知键宽容,避免维护两份实现。另外,即使请求固定 `response_format="url"`,
+ * 兼容服务商也可能不理会返回 `b64_json`:解析时 url 优先,无 url 则把
+ * `b64_json` 包装成 `data:image/png;base64,<payload>` 伪 URL(07 文档 §3.3
+ * 的 b64_json/url 双响应形态兼容,下载方识别 `data:` 前缀直接本地解码)。
  *
  * 非 2xx 返回 [ImageGenResult.Failure] 带响应预览(调用方走本地占位图兜底,
  * 不抛异常——头像生成失败是可预期的降级路径,不是崩溃路径)。
@@ -83,10 +87,23 @@ class OpenAiCompatibleImageGenAdapter(
         val arr = (root as? JsonObject)?.get("data") as? JsonArray
             ?: (root as? JsonObject)?.get("images") as? JsonArray
             ?: return emptyList()
+        // 逐元素统一解析:url 优先;无 url 但有 b64_json 时产出 data: 伪 URL,
+        // 下载方(AvatarImageProvider)识别前缀直接本地解码,不发起 HTTP。
         arr.mapNotNull { el ->
-            (el as? JsonObject)?.get("url")?.jsonPrimitive?.content
+            val obj = el as? JsonObject ?: return@mapNotNull null
+            obj.urlString() ?: obj.b64DataUrl()
         }
     } catch (_: Exception) {
         emptyList()
+    }
+
+    /** 元素内 `url` 字段(非空字符串),否则 null。 */
+    private fun JsonObject.urlString(): String? =
+        this["url"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
+
+    /** 元素内 `b64_json` 字段(非空字符串),包装成 [DATA_URL_PREFIX] 伪 URL。 */
+    private fun JsonObject.b64DataUrl(): String? {
+        val payload = this["b64_json"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return null
+        return "$DATA_URL_PREFIX$payload"
     }
 }

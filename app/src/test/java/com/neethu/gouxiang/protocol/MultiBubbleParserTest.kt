@@ -69,6 +69,7 @@ class MultiBubbleParserTest {
         val raw = "[{not json at all\n老公,(靠在你肩头)吃饭了吗?\n[sticker:哼]"
         val r = MultiBubbleParser.parse(raw)
         // 兜底通路:第一段是不合法 JSON 残片当文本,第二段带动作,第三段贴纸
+        // (输入词「靠在你肩头」在 actionWhitelist 白名单内,照常剥离为 Action)
         assertEquals(Bubble.Kind.STICKER, r.bubbles.last().kind)
         assertEquals("哼", r.bubbles.last().text)
         assertTrue(r.bubbles.any { it.actions.contains("靠在你肩头") })
@@ -143,6 +144,8 @@ class MultiBubbleParserTest {
 
     @Test
     fun `fullwidth and halfwidth parens both parsed as actions`() {
+        // 输入词「凑近你耳边」「低头轻笑」均在 actionWhitelist 白名单内,
+        // 全/半角括号照常剥离为 Action(白名单机制不改变本用例)
         val r = MultiBubbleParser.parse("(凑近你耳边)嘘——\n(低头轻笑)")
         // 第二段是纯动作行,按设计归并进最后一泡
         assertEquals(1, r.bubbles.size)
@@ -152,6 +155,7 @@ class MultiBubbleParserTest {
 
     @Test
     fun `action-only lines merge into next bubble`() {
+        // 输入词「轻轻拍你的背」在 actionWhitelist 白名单内,动作行照旧归并
         val r = MultiBubbleParser.parse("(轻轻拍你的背)\n别难过了")
         assertEquals(1, r.bubbles.size)
         assertEquals("别难过了", r.bubbles[0].text)
@@ -160,9 +164,62 @@ class MultiBubbleParserTest {
 
     @Test
     fun `trailing action-only line attaches to last bubble`() {
+        // 输入词「瘫在你身上」在 actionWhitelist 白名单内,收尾动作行照旧挂末泡
         val r = MultiBubbleParser.parse("今天也好累啊\n(瘫在你身上)")
         assertEquals(1, r.bubbles.size)
         assertEquals(listOf("瘫在你身上"), r.bubbles[0].actions)
+    }
+
+    // ── () 动作白名单 + 纯标点段丢弃(02 文档 §3.3 规则4/规则5)────────
+
+    @Test
+    fun `non whitelist parens keep as text without actions`() {
+        // 规则4:「转了个圈」不在 actionWhitelist 白名单内,保留正文、不产 actions
+        val r = MultiBubbleParser.parse("(转了个圈)哈哈,被你抓到了")
+        assertEquals(1, r.bubbles.size)
+        assertEquals("(转了个圈)哈哈,被你抓到了", r.bubbles[0].text)
+        assertTrue(r.bubbles[0].actions.isEmpty())
+        // 同段混合:白名单内「点头」照常剥离,白名单外保留
+        val mixed = MultiBubbleParser.parse("(点头)(转了个圈)你好呀")
+        assertEquals("(转了个圈)你好呀", mixed.bubbles[0].text)
+        assertEquals(listOf("点头"), mixed.bubbles[0].actions)
+    }
+
+    @Test
+    fun `pure punctuation segments are dropped`() {
+        // 规则5:纯标点段(无字母/数字/汉字)不成泡
+        val r = MultiBubbleParser.parse("老公\n。。。")
+        assertEquals(1, r.bubbles.size)
+        assertEquals("老公", r.bubbles[0].text)
+        val r2 = MultiBubbleParser.parse("！！\n想你了")
+        assertEquals(1, r2.bubbles.size)
+        assertEquals("想你了", r2.bubbles[0].text)
+    }
+
+    @Test
+    fun `voice special case still wins over action whitelist`() {
+        // (语音:…) 整行特判先于 () 动作白名单识别,白名单机制下不回归
+        val r = MultiBubbleParser.parse("老公我先睡了\n(语音:晚安,帮你留门)")
+        assertEquals(2, r.bubbles.size)
+        assertEquals(Bubble.Kind.TEXT, r.bubbles[0].kind)
+        assertEquals(Bubble.Kind.VOICE, r.bubbles[1].kind)
+        assertEquals("晚安,帮你留门", r.bubbles[1].text)
+    }
+
+    @Test
+    fun `action whitelist is testable and contains project keywords`() {
+        // 白名单为 object 内可测常量:兜底文案与既有用例关键词必须在内,
+        // 防白名单漏配导致兜底/教学样例动作被当正文
+        listOf(
+            "戳了戳你", "靠在你肩头", "凑近你耳边", "低头轻笑",
+            "轻轻拍你的背", "瘫在你身上", "凑过来瞄你的屏幕",
+        ).forEach { assertTrue("白名单应含「$it」", it in MultiBubbleParser.actionWhitelist) }
+        // 文档通用短动作抽查(歪头:实机高频动作词)
+        assertTrue("点头" in MultiBubbleParser.actionWhitelist)
+        assertTrue("微笑" in MultiBubbleParser.actionWhitelist)
+        assertTrue("歪头" in MultiBubbleParser.actionWhitelist)
+        // 非动作词不在白名单内(防全量剥离回归)
+        assertTrue("转了个圈" !in MultiBubbleParser.actionWhitelist)
     }
 
     @Test
@@ -184,5 +241,39 @@ class MultiBubbleParserTest {
         assertEquals(1, r.bubbles.size)
         assertEquals("收到!", r.bubbles[0].text)
         assertEquals(Bubble.Kind.TEXT, r.bubbles[0].kind)
+    }
+
+    // ── 卡片行(卡片消息端到端打通)────────────────────────────────
+
+    @Test
+    fun `card line in fallback path keeps original line as text`() {
+        // 换行兜底通路:整行 [卡片:…] 识别为 CARD,text 保留原行(落库侧再解析载荷)
+        val r = MultiBubbleParser.parse("给你转了个零花钱\n[卡片:转账 520|给你买奶茶]")
+        assertEquals(2, r.bubbles.size)
+        assertEquals(Bubble.Kind.CARD, r.bubbles[1].kind)
+        assertEquals("[卡片:转账 520|给你买奶茶]", r.bubbles[1].text)
+    }
+
+    @Test
+    fun `json bare string and object forms both produce card`() {
+        // 裸串:lenient JSON 把方括号消费成数组定界符(全角冒号、无空格时走 JSON
+        // 通路),裸串只剩「卡片:…」前缀——解析侧补回方括号,与整行形态统一
+        val bare = MultiBubbleParser.parse("[卡片：转账520]")
+        assertEquals(1, bare.bubbles.size)
+        assertEquals(Bubble.Kind.CARD, bare.bubbles[0].kind)
+        assertEquals("[卡片:转账520]", bare.bubbles[0].text)
+        // 对象形态:{"kind":"card","text":…} → 同样产出 CARD
+        val obj = MultiBubbleParser.parse("""[{"kind":"card","text":"[卡片:位置 中央公园]"}]""")
+        assertEquals(1, obj.bubbles.size)
+        assertEquals(Bubble.Kind.CARD, obj.bubbles[0].kind)
+        assertEquals("[卡片:位置 中央公园]", obj.bubbles[0].text)
+    }
+
+    @Test
+    fun `plain text mentioning card is not misread as card`() {
+        // 没有 [卡片:…] 整行标记的普通文本(即便含「卡片」二字)不误判
+        val r = MultiBubbleParser.parse("我发你一张卡片看看\n这张卡片做得真好")
+        assertEquals(2, r.bubbles.size)
+        assertTrue(r.bubbles.all { it.kind == Bubble.Kind.TEXT })
     }
 }
