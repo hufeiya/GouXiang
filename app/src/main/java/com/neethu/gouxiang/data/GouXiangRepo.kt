@@ -35,6 +35,7 @@ class GouXiangRepo private constructor(context: Context) {
         GouXiangDatabase.MIGRATION_5_6,
         GouXiangDatabase.MIGRATION_6_7,
         GouXiangDatabase.MIGRATION_7_8,
+        GouXiangDatabase.MIGRATION_8_9,
     ).build()
 
     init {
@@ -192,6 +193,19 @@ class GouXiangRepo private constructor(context: Context) {
     /** 消息落库后刷新会话行摘要(最近时间/预览文案,消息列表 02 同步可见)。 */
     suspend fun touchConversation(conversationId: Long, summary: String, at: Long) =
         db.conversationDao().touch(conversationId, summary, at)
+
+    // ── 主动消息账本(D 工作包 D1-D4)────────────────────────────────
+
+    /** 事务收口层单例(挂在 repo 生命周期;服务层与 VM 共用同一实例)。 */
+    val proactiveLedger: ProactiveLedger by lazy { ProactiveLedger(db) }
+
+    /** 回溯联动清账(VM.rewindToMessage / regenerateTurn 调):见 [ProactiveLedger.rewindFrom]。 */
+    suspend fun rewindProactiveLedger(conversationId: Long, anchorMessageId: Long): Int =
+        proactiveLedger.rewindFrom(conversationId, anchorMessageId)
+
+    /** 用户消息落库后回写会话活跃时间(D1;解除调试覆盖,消息表仍是写入源头)。 */
+    suspend fun noteUserActivity(conversationId: Long, characterId: Long, at: Long) =
+        proactiveLedger.noteUserActivity(conversationId, characterId, at)
 
     // ── 手机聊天(F4):回溯/重生成的数据路径 ─────────────────────────
 

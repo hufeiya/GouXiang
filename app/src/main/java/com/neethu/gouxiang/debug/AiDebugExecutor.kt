@@ -51,6 +51,9 @@ internal suspend fun executeAiCommand(
             "rewind" -> cmdRewind(vm, command)
             "proactive" -> cmdProactive(vm)
             "proactive_fire" -> cmdProactiveFire(vm, command)
+            "proactive_backdate" -> cmdProactiveBackdate(vm, command)
+            "proactive_scan" -> vm.debugProactiveScan()
+            "proactive_state" -> cmdProactiveState(vm)
             "memory_list" -> cmdMemoryList(context, vm, command)
             "memory_stats" -> cmdMemoryStats(context, vm)
             "memory_forget" -> cmdMemoryForget(context, vm, command)
@@ -320,16 +323,7 @@ private suspend fun cmdRewind(vm: MainViewModel, command: AiDebugCommand): Strin
 
 // ── 5.3 主动消息 ─────────────────────────────────────────────────────
 
-private suspend fun cmdProactive(vm: MainViewModel): String {
-    val conversationId = vm.debugConversationId
-        ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
-    val conv = vm.conversations.value.firstOrNull { it.conversation.id == conversationId }?.conversation
-        ?: throw IllegalStateException("conversation $conversationId not found")
-    val trigger = vm.pickProactiveTrigger(conversationId)
-    val age = System.currentTimeMillis() - conv.lastAt
-    val verdict = trigger?.let { "${it.name.lowercase()} (would fire on phone-chat entry)" } ?: "null (no trigger)"
-    return "last message age=${ProactiveMessages.offlineMsDescription(age)} trigger=$verdict"
-}
+private suspend fun cmdProactive(vm: MainViewModel): String = vm.debugProactiveDecision()
 
 private suspend fun cmdProactiveFire(vm: MainViewModel, command: AiDebugCommand): String {
     val conversationId = vm.debugConversationId
@@ -358,6 +352,18 @@ private suspend fun cmdProactiveFire(vm: MainViewModel, command: AiDebugCommand)
     vm.sendProactiveMessages(kind, offlineMs = null)
     return "fired ${kind.name.lowercase()} (poll msgs)"
 }
+
+/**
+ * D 工作包验收口:回拨当前会话的用户活跃时间(ai_x=毫秒,默认 2h),只动
+ * 账本不碰消息数据;随后 `proactive_scan` 即可按「离线回归」判定命中。
+ */
+private suspend fun cmdProactiveBackdate(vm: MainViewModel, command: AiDebugCommand): String {
+    val offlineMs = command.x?.toLong() ?: ProactiveMessages.DEFAULT_OFFLINE_THRESHOLD_MS
+    return vm.debugProactiveBackdate(offlineMs)
+}
+
+/** D 工作包观测口:当前会话的账本状态行 + 批次清单(状态/未读/通知幂等门)。 */
+private suspend fun cmdProactiveState(vm: MainViewModel): String = vm.debugProactiveState()
 
 // ── 5.4 记忆 ─────────────────────────────────────────────────────────
 

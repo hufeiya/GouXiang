@@ -230,71 +230,43 @@ internal class DerivativeExecutor(private val app: Context) {
         return com.neethu.gouxiang.chat.DurableMemoryProcessor(repo.db, extractor).run(character, conversationId)
     }
 
-    // ── 离线主动消息 outbox(B9;§4 M1.2)────────────────────────────
+    // ── 离线主动消息 outbox(D 工作包 D2/D3/D4;§4 M1.2 语义升级)────
 
     /**
-     * 扫全部会话 `pickTrigger`,命中的会话直接生成主动消息落库(与进页判定
-     * 共用 orchestrator.respondProactively 链路;生成落库即上屏),后发通道二
-     * 通知。生成失败(单会话)继续扫其余会话,整体返回 false 触发 retry。
+     * 主动消息扫描一轮(D2):开关关 → 直接跳过(不烧请求不重试);否则走
+     * [ProactiveOutboxService.scanOnce] —— 轮转分页防多会话漏扫、逐会话
+     * 共用「预约→生成→收口」链路、失败可重试。单会话失败继续扫其余会话,
+     * 整体返回 false 触发 Worker retry。
      */
     private suspend fun executeProactiveOutbox(): Boolean {
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(app)
-        val conversations = repo.db.conversationDao().latest(50)
-        var hitCount = 0
-        var anyFailed = false
-        var firstHitConvId = 0L
-        var firstHitName = ""
-        for (conv in conversations) {
-            val character = repo.characterById(conv.characterId) ?: continue
-            val msgs = repo.allMessages(conv.id)
-            val everProactive = msgs.any { it.turnId.startsWith("proactive-") }
-            val kind = com.neethu.gouxiang.protocol.ProactiveMessages.pickTrigger(
-                everProactive = everProactive,
-                lastActivityAt = conv.lastAt,
-                now = System.currentTimeMillis(),
-            ) ?: continue
-            val ok = runCatching {
-                // 手机聊天形态会话按手机 burst 语义生成;IM 会话同理。
-                val phone = conv.mode == "phone"
-                val burst = com.neethu.gouxiang.chat.BurstParams.resolve(
-                    com.neethu.gouxiang.chat.ReplyLength.MEDIUM, phone, com.neethu.gouxiang.chat.DialogMode.DEFAULT,
-                )
-                buildOutboxOrchestrator().respondProactively(
-                        conversationId = conv.id,
-                        characterId = character.id,
-                        sceneLine = com.neethu.gouxiang.protocol.ProactiveMessages.sceneLine(
-                            kind, System.currentTimeMillis() - conv.lastAt,
-                        ),
-                        onAssistantSaved = { },
-                        burst = burst,
-                        mode = com.neethu.gouxiang.chat.DialogMode.DEFAULT,
-                        phoneStyle = phone,
-                    )
-            }.onFailure { Log.w(TAG, "outbox round failed conv=${conv.id}: ${it.message}") }
-                .isSuccess
-            if (ok) {
-                hitCount++
-                if (firstHitConvId == 0L) {
-                    firstHitConvId = conv.id
-                    firstHitName = character.name
-                }
-            } else anyFailed = true
+        val service = proactiveService(repo)
+        val report = service.scanOnce()
+        for (r in report.reports) {
+            when (r) {
+                is com.neethu.gouxiang.proactive.ProactiveOutboxService.Report.Generated ->
+                    Log.i(TAG, "outbox generated conv=${r.conversationId} kind=${r.kind} count=${r.count} degraded=${r.degraded}")
+                is com.neethu.gouxiang.proactive.ProactiveOutboxService.Report.Failed ->
+                    Log.w(TAG, "outbox failed conv=${r.conversationId}: ${r.reason}")
+                is com.neethu.gouxiang.proactive.ProactiveOutboxService.Report.Blocked ->
+                    Log.i(TAG, "outbox blocked conv=${r.conversationId}: ${r.reason}")
+                is com.neethu.gouxiang.proactive.ProactiveOutboxService.Report.Skipped ->
+                    Log.i(TAG, "outbox skipped conv=${r.conversationId}: ${r.reason}")
+            }
         }
-        if (hitCount > 0 && firstHitName.isNotBlank()) {
-            NotificationPoster.proactive(app, firstHitName, firstHitConvId, hitCount)
-        }
-        return !anyFailed
+        return !report.anyFailed
     }
 
-    /** outbox 会话的编排器实例(每会话独立 LLM 配置现取;与 UI 通道同缝)。 */
-    private fun buildOutboxOrchestrator() = ChatOrchestrator(
-        com.neethu.gouxiang.data.ChatDaoAccess(com.neethu.gouxiang.data.GouXiangRepo.get(app)),
-        llm = ChatOrchestrator.defaultLlm(),
-        llmEndpointSource = {
-            com.neethu.gouxiang.ai.config.AiConfigStore.load(app).llmEndpoint()
-        },
-        bubbleGapMs = 0L, // 后台无 UI 连发节奏,直接落库
-    )
+    /** 主动消息服务(生产装配:账本 = repo 单例的;生成 = orchestrator 包装;通知 = 通道二)。 */
+    internal fun proactiveService(repo: com.neethu.gouxiang.data.GouXiangRepo) =
+        com.neethu.gouxiang.proactive.ProactiveOutboxService(
+            context = app,
+            db = repo.db,
+            ledger = repo.proactiveLedger,
+            generate = com.neethu.gouxiang.proactive.ProactiveGeneration.production(app),
+            notify = { n -> NotificationPoster.proactive(app, n.characterName, n.conversationId, n.count) },
+            switch = { com.neethu.gouxiang.ai.GenerationPrefs.proactiveOutbox(app) },
+        )
 
     // ── 通道(与 VM 同款懒单例)──────────────────────────────────────
 

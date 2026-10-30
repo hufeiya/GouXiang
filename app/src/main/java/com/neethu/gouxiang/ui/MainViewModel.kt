@@ -264,35 +264,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _chatUi.value = _chatUi.value.copy(character = character, loading = false)
             // 形象缓存兜底(与首页/消息页同一 provider,命中即返回)
             ensureAvatars(listOf(character))
+            // D 工作包 D4(进页消费先行):未读主动批次 → 已读 + 会话角标清零,
+            // 返回的批次决定「离线分隔」锚点;随后手机形态按与后台扫描同一条
+            // 链路(频控/预约/幂等门)尝试补一批。开关关闭只消费不生成(验收 #1)。
+            val consumed = runCatching {
+                proactiveService().onConversationOpened(conversationId, generateIfAllowed = phoneMode)
+            }.getOrElse {
+                android.util.Log.w("ProactiveOutbox", "entry consume failed: ${it.message}")
+                emptyList()
+            }
             val all = repo.allMessages(conversationId)
             _chatUi.value = _chatUi.value.copy(
-                bubbleItems = toBubbleItems(all),
+                bubbleItems = toBubbleItems(all, offlineSeparators(consumed)),
+                separatorTurnIds = offlineSeparators(consumed),
                 status = StatusRule.generate(character, all),
             )
-            // F4 主动消息(F4 范围 5 + §4 M1.3 outbox 优先):进入手机聊天页时
-            // 先查离线 outbox(离线期 Worker 已生成的 proactive 轮次——判据:
-            // 存在晚于最后一条用户消息的 proactive 轮,即离线期间角色先发了话);
-            // 无 outbox 才按阈值判定现场生成(既有行为降级为兜底路径)。
-            if (phoneMode) {
-                val all = repo.allMessages(conversationId)
-                val lastUserAt = all.lastOrNull { it.role == "user" }?.at ?: 0L
-                val hasOutbox = all.any {
-                    it.turnId.startsWith("proactive-") && it.at > lastUserAt
-                }
-                if (!hasOutbox) {
-                    pickProactiveTrigger(conversationId)?.let { trigger ->
-                        sendProactiveMessages(
-                            trigger,
-                            offlineMs = System.currentTimeMillis() - conv.lastAt,
-                        )
-                    }
-                }
-                // outbox 消费:气泡照常经 Room 流上屏,无需额外动作(§2.3
-                // 聊天页红点属于 M1 后续,当前通知直跳即达)。
-            }
             repo.observeMessages(conversationId).collect { messages ->
                 _chatUi.value = _chatUi.value.copy(
-                    bubbleItems = toBubbleItems(messages),
+                    bubbleItems = toBubbleItems(messages, _chatUi.value.separatorTurnIds),
                     status = StatusRule.generate(character, messages),
                 )
             }
@@ -334,6 +323,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // 用户消息先落库(单写者约定:编排器只管回复侧)
                 val userMsg = buildUserMessageEntity(conversationId, body, System.currentTimeMillis())
                 userMessageId = repo.insertMessage(userMsg)
+                // D 工作包 D1:用户活跃时间回写账本(在线输入避让的判定源头)
+                runCatching { repo.noteUserActivity(conversationId, character.id, userMsg.at) }
                 // 会话行摘要按泡型降级(附录 C-I3):用户卡片行 kind=card,摘要走
                 // 载荷摘要,防 [卡片:…] 原始标记泄露;纯文本摘要仍=原文。
                 repo.touchConversation(
@@ -629,23 +620,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ── 手机聊天 F4:主动消息/长按回溯/重生成/语音 ────────────────────
 
-    /**
-     * 主动消息触发判定(05 号文档收敛版):首次进入(该会话无 proactive
-     * 回合史)或距上次对话超过阈值(可配,默认 2h)。判定结果由调用方决定
-     * 是否真的发起(仅手机聊天页进入时发起)。
-     */
-    suspend fun pickProactiveTrigger(conversationId: Long): com.neethu.gouxiang.protocol.ProactiveMessages.Kind? {
-        val conv = repo.db.conversationDao().byId(conversationId) ?: return null
-        val msgs = repo.allMessages(conversationId)
-        val everProactive = msgs.any { it.turnId.startsWith("proactive-") }
-        val lastAt = conv.lastAt
-        return com.neethu.gouxiang.protocol.ProactiveMessages.pickTrigger(
-            everProactive = everProactive,
-            lastActivityAt = lastAt,
-            now = System.currentTimeMillis(),
-            offlineThresholdMs = thresholdMs,
-        )
-    }
+    // (D 工作包:进页触发判定升级为账本+频控全链路,见 proactiveService()/
+    //  debugProactiveDecision;旧的 pickProactiveTrigger 单点判定移除,
+    //  调试探针 ai_cmd=proactive 走 debugProactiveDecision 同口径。)
 
     /**
      * 主动消息连发(范围 5):角色先发 1~3 条;[simulateOffline] = 调试入口
@@ -711,6 +688,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (anchor != null && anchor.conversationId == conversationId) {
                 durableMemory.rewind(conversationId, messageId)
                 repo.refreshConversationTail(conversationId)
+                // D 工作包 D4:回溯清账——被删除消息涉及的主动消息批次作废,
+                // 未读数与角标按存活消息重算(不重复回放不复活)。
+                runCatching { repo.rewindProactiveLedger(conversationId, messageId) }
             }
         }
     }
@@ -735,6 +715,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val lastUser = all.subList(0, turnStartIndex).lastOrNull { it.role == "user" }
             durableMemory.rewind(conversationId, all[turnStartIndex].id)
             repo.refreshConversationTail(conversationId)
+            // D 工作包 D4:重生成同样先清账(被删主动批次作废,未读重算)
+            runCatching { repo.rewindProactiveLedger(conversationId, all[turnStartIndex].id) }
             if (lastUser == null) {
                 // 无用户输入可归因(主动消息回合):重新走主动场景
                 _chatUi.value = state.copy(sending = true)
@@ -896,8 +878,130 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 离线回归阈值(PhoneChatPrefs;调试/后续设置页可调)。 */
-    private var thresholdMs: Long = com.neethu.gouxiang.protocol.ProactiveMessages.DEFAULT_OFFLINE_THRESHOLD_MS
+    // ── 主动消息(D 工作包 D2-D4;离线阈值等策略数值走 GenerationPrefs 覆盖键,
+    // 默认值收敛在 ProactivePolicy.Config,不再另存 VM 级可变字段)──────
+
+    /** 主动消息服务(生产装配;账本挂 repo 单例,通知走通道二)。 */
+    private fun proactiveService(): com.neethu.gouxiang.proactive.ProactiveOutboxService {
+        val app = getApplication<Application>()
+        return com.neethu.gouxiang.proactive.ProactiveOutboxService(
+            context = app,
+            db = repo.db,
+            ledger = repo.proactiveLedger,
+            generate = com.neethu.gouxiang.proactive.ProactiveGeneration.production(app),
+            notify = { n ->
+                com.neethu.gouxiang.work.NotificationPoster.proactive(app, n.characterName, n.conversationId, n.count)
+            },
+        )
+    }
+
+    /**
+     * 调试命令 `proactive_backdate`(D2 验收口):把当前会话的用户活跃时间
+     * 回拨到 now-[ms](只动账本,不碰消息数据),供扫描判定模拟「离线回归」。
+     */
+    suspend fun debugProactiveBackdate(ms: Long): String {
+        val conversationId = _chatUi.value.conversationId
+        if (conversationId == 0L) throw IllegalStateException("no open chat")
+        val conv = repo.db.conversationDao().byId(conversationId)
+            ?: throw IllegalStateException("conversation $conversationId not found")
+        val to = System.currentTimeMillis() - ms
+        repo.proactiveLedger.debugBackdateActivity(conversationId, to)
+        return "activity backdated conv=$conversationId to ${com.neethu.gouxiang.protocol.ProactiveMessages.offlineMsDescription(System.currentTimeMillis() - to)} ago (poll proactive_state)"
+    }
+
+    /**
+     * 调试命令 `proactive_scan`(D2/D3 验收口):手动跑一轮后台扫描,与周期
+     * Worker 同一条链路(开关/频控/预约/收口/通知)。入队即返回,结果用
+     * msgs / proactive_state / 系统通知确认。
+     */
+    fun debugProactiveScan(): String {
+        viewModelScope.launch {
+            runCatching {
+                val report = proactiveService().scanOnce()
+                android.util.Log.i("ProactiveOutbox", "manual scan: ${report.reports.size} conversations, ${report.generated.size} generated, anyFailed=${report.anyFailed}")
+                for (r in report.reports) {
+                    when (r) {
+                        is com.neethu.gouxiang.proactive.ProactiveOutboxService.Report.Generated ->
+                            android.util.Log.i("ProactiveOutbox", "scan conv=${r.conversationId} GENERATED kind=${r.kind} count=${r.count} degraded=${r.degraded}")
+                        is com.neethu.gouxiang.proactive.ProactiveOutboxService.Report.Blocked ->
+                            android.util.Log.i("ProactiveOutbox", "scan conv=${r.conversationId} BLOCKED: ${r.reason}")
+                        is com.neethu.gouxiang.proactive.ProactiveOutboxService.Report.Failed ->
+                            android.util.Log.w("ProactiveOutbox", "scan conv=${r.conversationId} FAILED: ${r.reason}")
+                        is com.neethu.gouxiang.proactive.ProactiveOutboxService.Report.Skipped ->
+                            android.util.Log.i("ProactiveOutbox", "scan conv=${r.conversationId} SKIPPED: ${r.reason}")
+                    }
+                }
+            }.onFailure { android.util.Log.w("ProactiveOutbox", "manual scan failed: ${it.message}") }
+        }
+        return "scan started (results per conversation in logcat -s ProactiveOutbox; poll msgs / proactive_state / notifications)"
+    }
+
+    /**
+     * 调试命令 `proactive` 升级版(只读):按与服务/扫描完全相同的入参走一遍
+     * 频控判定(不预约不生成),回显放行场景或拦截原因(D2 验收口)。
+     */
+    suspend fun debugProactiveDecision(): String {
+        val conversationId = _chatUi.value.conversationId
+            ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+        val conv = repo.db.conversationDao().byId(conversationId)
+            ?: throw IllegalStateException("conversation $conversationId not found")
+        val character = repo.characterById(conv.characterId)
+            ?: throw IllegalStateException("character of conversation $conversationId not found")
+        val service = proactiveService()
+        val config = service.policyConfig()
+        val now = System.currentTimeMillis()
+        val snapshot = repo.proactiveLedger.snapshot(conversationId, character.id)
+        val everProactive = repo.db.messageDao().countProactiveTurnMessages(conversationId) > 0
+        val decision = com.neethu.gouxiang.protocol.ProactivePolicy.evaluate(
+            now = now,
+            config = config,
+            snapshot = com.neethu.gouxiang.protocol.ProactivePolicy.Snapshot(
+                conversationId = conversationId,
+                everProactive = everProactive,
+                lastUserActivityAt = snapshot.lastUserActivityAt,
+                lastProactiveAt = snapshot.lastProactiveAt,
+                dailyCount = snapshot.dailyCount,
+                dailyStamp = snapshot.dailyStamp,
+                unseenCount = snapshot.unseenCount,
+            ),
+            localDay = com.neethu.gouxiang.proactive.ProactiveOutboxService.localDayOf(now),
+            localHour = com.neethu.gouxiang.proactive.ProactiveOutboxService.hourOf(now),
+        )
+        val age = snapshot.lastUserActivityAt?.let {
+            com.neethu.gouxiang.protocol.ProactiveMessages.offlineMsDescription(now - it)
+        } ?: "从未发言"
+        val verdict = when (decision) {
+            is com.neethu.gouxiang.protocol.ProactivePolicy.Decision.Fire ->
+                "${decision.kind.name.lowercase()} would fire (batchMax=${decision.batchMax}; ${decision.reason})"
+            is com.neethu.gouxiang.protocol.ProactivePolicy.Decision.Block -> "blocked: ${decision.reason}"
+        }
+        return "last user activity=$age unseen=${snapshot.unseenCount} verdict=$verdict"
+    }
+
+    /** 调试命令 `proactive_state`(只读):当前会话的账本状态行 + 未读批次。 */
+    suspend fun debugProactiveState(): String {
+        val conversationId = _chatUi.value.conversationId
+            ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+        val ledger = repo.proactiveLedger
+        val state = repo.db.proactiveDao().stateFor(conversationId)
+        val rows = repo.db.proactiveDao().forConversation(conversationId)
+        val conv = repo.db.conversationDao().byId(conversationId)
+        fun fmt(at: Long) = if (at <= 0) "-" else
+            java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.US).format(java.util.Date(at))
+        val stateLine = if (state == null) {
+            "(no ledger state yet)"
+        } else {
+            "activity=${fmt(state.lastUserActivityAt)} lastProactive=${fmt(state.lastProactiveAt)} " +
+                "lastBatch(count=${state.lastBatchCount}) unseen=${state.unseenCount} " +
+                "today(${state.dailyStamp})=${state.dailyCount} override=${state.activityOverride}"
+        }
+        val rowsLine = if (rows.isEmpty()) "(no batches)" else rows.joinToString("\n") {
+            "${it.batchId.take(8)} ${it.kind.lowercase()} ${it.state.lowercase()} count=${it.count} " +
+                "notified=${it.notified} seen=${it.seen} msgIds=${it.messageIds.ifBlank { "-" }}" +
+                (if (it.failureReason.isNotBlank()) " 「${it.failureReason.take(24)}」" else "")
+        }
+        return "conv=$conversationId unread=${conv?.unread ?: 0}\n$stateLine\n$rowsLine"
+    }
 
     /** 任务历史页一次载入的行数上限(本地全量有限,非真分页)。 */
     private val TASK_HISTORY_LIMIT = 100
@@ -1954,6 +2058,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 通知直跳入口:聊天页(手机形态,与消息列表角标入口同参)。 */
     fun openChatFromNotification(conversationId: Long) {
+        if (_chatConversationId.value == conversationId) {
+            // 同会话通知点入:openChat 幂等早退不会重放进页消费,这里补一次
+            // 未读消费(角标清零;新批次消息经 Room 流照常上屏)。
+            viewModelScope.launch {
+                runCatching { repo.proactiveLedger.consumeConversation(conversationId, System.currentTimeMillis()) }
+            }
+            return
+        }
         openChat(conversationId, phoneMode = true)
     }
 
@@ -1995,6 +2107,12 @@ data class ChatUiState(
     val conversationId: Long = 0,
     val character: com.neethu.gouxiang.data.CharacterEntity? = null,
     val bubbleItems: List<BubbleItem> = emptyList(),
+    /**
+     * 离线回归分隔(D 工作包 D4):turnId → 分隔文案。进页消费的未读主动
+     * 批次按其 turnId 定位,对应气泡组上方渲染「离线期间发来了 N 条消息」;
+     * 空表 = 无离线回归展示。openChat 重建整态时清空。
+     */
+    val separatorTurnIds: Map<String, String> = emptyMap(),
     /**
      * 状态条「emoji+在做什么」(emoji/text 分字段,严禁对字符串按位切 emoji)。
      */
@@ -2038,6 +2156,11 @@ data class BubbleItem(
     val fromUser: Boolean,
     /** 组内气泡(顺序即连发顺序)。 */
     val bubbles: List<ChatBubble>,
+    /**
+     * 离线回归分隔(D 工作包 D4):非空 = 本组上方渲染该文案的居中灰字
+     * (「离线期间发来了 N 条消息」)。仅进页消费的主动批次组携带。
+     */
+    val separator: String? = null,
 )/**
  * 单个气泡。
  *
@@ -2091,8 +2214,13 @@ internal fun buildUserMessageEntity(conversationId: Long, body: String, at: Long
 /**
  * 消息行 → 气泡组。user 消息一组一条;assistant 消息按 turnId 聚组。
  * kind 未知/内容为空的行跳过(整组无内容 → 降级为一条占位文本,不产生空泡)。
+ *
+ * [separators](turnId → 分隔文案,D 工作包 D4):命中的组在上渲染离线分隔。
  */
-internal fun toBubbleItems(messages: List<MessageEntity>): List<BubbleItem> {
+internal fun toBubbleItems(
+    messages: List<MessageEntity>,
+    separators: Map<String, String> = emptyMap(),
+): List<BubbleItem> {
     val items = mutableListOf<BubbleItem>()
     var i = 0
     while (i < messages.size) {
@@ -2136,11 +2264,22 @@ internal fun toBubbleItems(messages: List<MessageEntity>): List<BubbleItem> {
                 turnId = m.turnId,
                 fromUser = false,
                 bubbles = bubbles.dropLast(1) + bubbles.last().copy(lastInGroup = true),
+                separator = separators[m.turnId],
             )
         }
     }
     return items
 }
+
+/**
+ * 进页消费的主动批次 → 离线分隔映射(D 工作包 D4,纯函数单测锁文案):
+ * turnId → 「离线期间发来了 N 条消息」;空 turnId(生成中/作废)不产生分隔。
+ */
+internal fun offlineSeparators(
+    consumed: List<com.neethu.gouxiang.proactive.ProactiveOutboxService.ConsumedBatch>,
+): Map<String, String> =
+    consumed.filter { it.turnId.isNotBlank() }
+        .associate { it.turnId to "离线期间发来了 ${it.count} 条消息" }
 
 /**
  * 头像生图 prompt 组装(纯函数,单测锁行为):appearance 后拼生图风格词缀,

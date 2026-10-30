@@ -118,6 +118,12 @@ fun aiDebugHelp(): String = """
     |  proactive                只读探针: 最近消息年龄 + pickTrigger 判定(kind|null)
     |  proactive_fire <arg>     hello | check_in | share;arg=offline 时 ai_x=模拟
     |                           离线毫秒(默认2h)
+    |  proactive_backdate       回拨当前会话活跃时间(ai_x=毫秒,默认2h;只动账本,
+    |                           供 proactive_scan 模拟「离线回归」命中)
+    |  proactive_scan           手动跑一轮后台扫描(与周期任务同链路:开关/频控/
+    |                           预约/收口/通知;命中即生成+通知,入队即 OK)
+    |  proactive_state          只读: 当前会话账本(活跃时间/最近批次/未读/今日计数/
+    |                           批次清单的状态机与通知幂等门)
     |Memory:
     |  memory_list [arg]        当前角色记忆: id [分类] 内容前60字 (时间);arg=过滤词
     |  memory_stats             总数/分类分布/当前角色

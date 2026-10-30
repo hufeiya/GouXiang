@@ -158,8 +158,11 @@ FAIL load_xxx: No XXX matches 'foo'. Send ai_cmd=help to see options.
 
 | 命令 | 参数 | 分期 | 作用 |
 |---|---|---|---|
-| `proactive` | — | P0 | 触发探针(只读):输出当前会话最近消息年龄 / `pickProactiveTrigger()`(`MainViewModel.kt:573`)判定的 kind(null=不触发)与理由行 |
+| `proactive` | — | P0 | 触发探针(只读,D 工作包升级):按与扫描/进页完全同口径的频控判定(`debugProactiveDecision()`,账本快照 + `ProactivePolicy`)回显放行场景或拦截原因;另附用户活跃年龄与未读数 |
 | `proactive_fire` | `ai_arg`=hello \| check_in \| share \| offline;`offline` 时 `ai_x`=模拟离线毫秒(默认 2h) | P0 | 直接触发 `sendProactiveMessages(kind)`(`MainViewModel.kt:590`);`offline` 走 `simulateOfflineReturn()`(`MainViewModel.kt:768`)。等价长按「…」手势,绕过 UI 等待 2h 的验收死路 |
+| `proactive_backdate` | 可选 `ai_x`=回拨毫秒(默认 2h) | D | D 工作包:回拨当前会话的用户活跃时间(只动 `proactive_conversation_state` 账本,不碰消息数据),使 `proactive_scan` 能按「离线回归」命中频控判定 |
+| `proactive_scan` | — | D | D 工作包:手动跑一轮后台扫描(与周期任务 `ProactiveOutboxWorker` 同链路:开关自查→频控→会话级事务预约→生成→事务收口→通知)。命中即生成并投通知;入队即 OK,结果用 `msgs`/`proactive_state`/系统通知确认 |
+| `proactive_state` | — | D | D 工作包:只读输出当前会话账本——活跃时间/最近批次/未读数/今日批次计数/批次清单(状态机 PENDING→READY\|FALLBACK\|FAILED 与通知幂等门 notified、已读 seen) |
 
 ### 5.4 记忆(03 号文档域)
 

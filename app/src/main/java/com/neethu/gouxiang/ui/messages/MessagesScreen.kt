@@ -271,6 +271,24 @@ private fun ConversationItem(row: ConversationRow, avatarFile: String?, onClick:
             )
         }
         Spacer(Modifier.width(8.dp))
+        // 未读角标(D 工作包 D1/D4:主动消息未读的应用内查看路径——通知权限
+        // 关闭时消息仍落库,红点计数在消息列表可见,进会话即清零)
+        if (row.conversation.unread > 0) {
+            Box(
+                Modifier
+                    .background(Color(0xFFE84D8A), CircleShape)
+                    .padding(horizontal = 7.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    row.conversation.unread.toString(),
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+        }
         Text(
             formatRelativeTime(row.conversation.lastAt),
             color = Color(0xFFB9B9B9),

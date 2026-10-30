@@ -370,32 +370,36 @@ private fun PhoneBubbleGroup(
     onPlayVoice: (Long, String) -> Unit,
     onLongPress: (Long) -> Unit,
 ) {
-    Row(Modifier.fillMaxWidth()) {
-        if (!group.fromUser) {
-            Spacer(Modifier.width(4.dp))
-            Avatar(avatarFile)
-            Spacer(Modifier.width(10.dp))
-        } else {
-            Spacer(Modifier.weight(1f))
-        }
-        Column(
-            horizontalAlignment = if (group.fromUser) Alignment.End else Alignment.Start,
-            modifier = if (group.fromUser) Modifier else Modifier.weight(1f, fill = false),
-        ) {
-            group.bubbles.forEachIndexed { index, bubble ->
-                // 组内距(04 号文档「组间距>组内距」):首泡 0dp(组间距已由列表
-                // spacedBy 10dp 提供)、后续 2dp,保证组间 10dp > 组内 2dp
-                Spacer(Modifier.height(if (index == 0) 0.dp else 2.dp))
-                PhoneBubble(
-                    bubble = bubble,
-                    fromUser = group.fromUser,
-                    playing = bubble.id != null && bubble.id == playingVoiceId,
-                    onPlayVoice = onPlayVoice,
-                    onLongPress = onLongPress,
-                )
+    Column(Modifier.fillMaxWidth()) {
+        // 离线回归分隔(D 工作包 D4):进页消费的主动批次组上方居中灰字
+        group.separator?.let { com.neethu.gouxiang.ui.chat.OfflineSeparator(it) }
+        Row(Modifier.fillMaxWidth()) {
+            if (!group.fromUser) {
+                Spacer(Modifier.width(4.dp))
+                Avatar(avatarFile)
+                Spacer(Modifier.width(10.dp))
+            } else {
+                Spacer(Modifier.weight(1f))
             }
+            Column(
+                horizontalAlignment = if (group.fromUser) Alignment.End else Alignment.Start,
+                modifier = if (group.fromUser) Modifier else Modifier.weight(1f, fill = false),
+            ) {
+                group.bubbles.forEachIndexed { index, bubble ->
+                    // 组内距(04 号文档「组间距>组内距」):首泡 0dp(组间距已由列表
+                    // spacedBy 10dp 提供)、后续 2dp,保证组间 10dp > 组内 2dp
+                    Spacer(Modifier.height(if (index == 0) 0.dp else 2.dp))
+                    PhoneBubble(
+                        bubble = bubble,
+                        fromUser = group.fromUser,
+                        playing = bubble.id != null && bubble.id == playingVoiceId,
+                        onPlayVoice = onPlayVoice,
+                        onLongPress = onLongPress,
+                    )
+                }
+            }
+            if (group.fromUser) Spacer(Modifier.width(4.dp)) else Spacer(Modifier.weight(1f))
         }
-        if (group.fromUser) Spacer(Modifier.width(4.dp)) else Spacer(Modifier.weight(1f))
     }
 }
 

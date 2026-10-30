@@ -141,7 +141,7 @@ class ChatOrchestrator(
         _running.value = true
         _streamDraft.value = ""
         try {
-            return respondToInternal(conversationId, characterId, userText, onAssistantSaved, burst = burst, mode = mode, phoneStyle = phoneStyle, userMessageId = userMessageId)
+            return respondToInternal(conversationId, characterId, userText, onAssistantSaved, burst = burst, mode = mode, phoneStyle = phoneStyle, userMessageId = userMessageId).result
         } finally {
             _running.value = false
             _streamDraft.value = ""
@@ -153,6 +153,11 @@ class ChatOrchestrator(
      * 先开口(05 号文档「角色先连发 1~3 条主动消息」)。落库/回调语义与
      * [respondTo] 完全一致;[sceneLine] 不进消息库、不进上下文(与用户消息
      * 同为"触发器",仅出现在当轮 USER 槽)。
+     *
+     * D 工作包 D3:返回 [ProactiveTurnResult] 区分**真实生成成功**与**模板
+     * 降级**(流失败/空输出的兜底文本仍照旧落库,但 [ProactiveTurnResult.
+     * Completed.degraded] = true,调用方不得记作真实成功);硬异常照旧上抛,
+     * 由调用方记「网络失败可重试」。
      */
     suspend fun respondProactively(
         conversationId: Long,
@@ -162,16 +167,23 @@ class ChatOrchestrator(
         burst: BurstParams = BurstParams.resolve(ReplyLength.DEFAULT, phone = true, DialogMode.DEFAULT),
         mode: DialogMode = DialogMode.DEFAULT,
         phoneStyle: Boolean = true,
-    ) {
+    ): ProactiveTurnResult {
         _running.value = true
         _streamDraft.value = ""
         try {
-            respondToInternal(conversationId, characterId, sceneLine, onAssistantSaved, proactive = true, burst = burst, mode = mode, phoneStyle = phoneStyle, userMessageId = null)
+            val outcome = respondToInternal(conversationId, characterId, sceneLine, onAssistantSaved, proactive = true, burst = burst, mode = mode, phoneStyle = phoneStyle, userMessageId = null)
+            return when (val result = outcome.result) {
+                is TurnResult.Completed -> ProactiveTurnResult.Completed(result.bubbles, outcome.degraded)
+                is TurnResult.Failed -> ProactiveTurnResult.Failed("流失败(主动回合无内容)")
+            }
         } finally {
             _running.value = false
             _streamDraft.value = ""
         }
     }
+
+    /** 内部回合产出:结果 + 是否模板降级(仅主动回合可能为 true)。 */
+    internal data class RoundOutcome(val result: TurnResult, val degraded: Boolean = false)
 
     private suspend fun respondToInternal(
         conversationId: Long,
@@ -183,10 +195,10 @@ class ChatOrchestrator(
         mode: DialogMode,
         phoneStyle: Boolean,
         userMessageId: Long?,
-    ): TurnResult {
+    ): RoundOutcome {
         val conversationVersion = daoAccess.conversationVersion(conversationId)
         val turnId = if (proactive) "proactive-${UUID.randomUUID()}" else "turn-${UUID.randomUUID()}"
-        val character = daoAccess.character(characterId) ?: return TurnResult.Completed(emptyList())
+        val character = daoAccess.character(characterId) ?: return RoundOutcome(TurnResult.Completed(emptyList()))
         val system = ChatContextBuilder.systemPrompt(
             character = character,
             memories = daoAccess.memories(characterId),
@@ -209,7 +221,8 @@ class ChatOrchestrator(
             // 回合失败(02 文档 §3.5):用户回合不落任何 assistant 泡、不触发
             // 记忆收尾,失败显式上抛交由 UI 出「消息发送失败,请点击重试」;
             // 主动回合无用户输入可归因,维持「兜底一条」的既有行为(文案用
-            // 主动语感的 PROACTIVE_FALLBACK_TEXT,不再借用用户回合兜底)。
+            // 主动语感的 PROACTIVE_FALLBACK_TEXT,不再借用用户回合兜底),
+            // 但以 degraded=true 标记「模板降级」——调用方不得记作真实成功(D3)。
             if (proactive) {
                 val fallback = listOf(Bubble(Bubble.Kind.TEXT, PROACTIVE_FALLBACK_TEXT))
                 val assistantText = "(TA 主动发来)$PROACTIVE_FALLBACK_TEXT"
@@ -217,14 +230,19 @@ class ChatOrchestrator(
                     CompletedMemoryTurn(characterId, "", assistantText, null, "(TA 主动发来)"))
                 memoryHook?.onTurnCompleted(character, "", "(TA 主动发来)$PROACTIVE_FALLBACK_TEXT")
                 detailedMemoryHook?.invoke(character, conversationId, turnId, "", "(TA 主动发来)$PROACTIVE_FALLBACK_TEXT", null)
-                return TurnResult.Completed(fallback)
+                return RoundOutcome(TurnResult.Completed(fallback), degraded = true)
             }
-            return TurnResult.Failed(userText)
+            return RoundOutcome(TurnResult.Failed(userText))
         }
         val reply = MultiBubbleParser.parse(stream.text)
         val parsed = reply.bubbles
+        // 空输出 = 无真实生成内容(模板兜底,主动回合标记降级)
+        var degradedByEmpty = false
         val bubbles = when {
-            parsed.isEmpty() -> listOf(Bubble(Bubble.Kind.TEXT, if (proactive) PROACTIVE_FALLBACK_TEXT else FALLBACK_TEXT))
+            parsed.isEmpty() -> {
+                degradedByEmpty = true
+                listOf(Bubble(Bubble.Kind.TEXT, if (proactive) PROACTIVE_FALLBACK_TEXT else FALLBACK_TEXT))
+            }
             // 单泡长文 = 模型没按连发协议分行(实机 F2 三轮全是单泡长文)。
             // 文档口径(02 号文档):flush 时若全回复无分隔但超长,即 >2×
             // maxBubbleChars(默认 30 字上限即 >60 字),才按标点强制切分;
@@ -256,7 +274,7 @@ class ChatOrchestrator(
         )
         detailedMemoryHook?.invoke(character, conversationId, turnId, if (proactive) "" else userText,
             (if (proactive) "(TA 主动发来)" else "") + withShare.joinToString("\n") { it.text }, userMessageId)
-        return TurnResult.Completed(withShare)
+        return RoundOutcome(TurnResult.Completed(withShare), degraded = degradedByEmpty)
     }
 
     /**
@@ -523,4 +541,17 @@ sealed interface TurnResult {
 
     /** 回合失败(流 Error 无内容 / 首个文本增量超时);[userText] 为本回合用户原文。 */
     data class Failed(val userText: String) : TurnResult
+}
+
+/**
+ * 主动回合生成结果(D 工作包 D3 三态):
+ * - [Completed] 且 `degraded == false` = 真实生成成功(LLM 按协议产出);
+ * - [Completed] 且 `degraded == true` = 有意的模板降级(流失败/空输出的
+ *   兜底文本,已落库可看,但**不是真实生成成功**,不自动重试);
+ * - [Failed] = 生成失败(硬异常/无内容可落),无消息落库,可重试。
+ */
+sealed interface ProactiveTurnResult {
+    data class Completed(val bubbles: List<Bubble>, val degraded: Boolean) : ProactiveTurnResult
+
+    data class Failed(val reason: String) : ProactiveTurnResult
 }

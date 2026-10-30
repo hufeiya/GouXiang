@@ -45,6 +45,25 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations ORDER BY lastAt DESC LIMIT :limit")
     suspend fun latest(limit: Int): List<ConversationEntity>
 
+    /** 会话总数(D2 扫描轮转的分页分母)。 */
+    @Query("SELECT COUNT(*) FROM conversations")
+    suspend fun countAll(): Int
+
+    /**
+     * D2 扫描轮转分页:按最近时间倒序取 [limit] 条、偏移 [offset](各扫描轮
+     * 轮转 offset,会话数超过单轮扫描上限时旧会话不长期漏扫)。
+     */
+    @Query("SELECT * FROM conversations ORDER BY lastAt DESC, id DESC LIMIT :limit OFFSET :offset")
+    suspend fun latestPaged(limit: Int, offset: Int): List<ConversationEntity>
+
+    /** 未读角标累加(主动消息批次收口;负数自减由 setUnread 收口)。 */
+    @Query("UPDATE conversations SET unread = unread + :n WHERE id = :id")
+    suspend fun bumpUnread(id: Long, n: Int)
+
+    /** 未读角标直接设值(进页消费清零/回溯重算)。 */
+    @Query("UPDATE conversations SET unread = :unread WHERE id = :id")
+    suspend fun setUnread(id: Long, unread: Int)
+
     /** Each character's most recently active IM conversation, without a scan limit. */
     @Query("SELECT * FROM conversations AS c WHERE c.mode = 'im' AND NOT EXISTS (" +
         "SELECT 1 FROM conversations AS newer WHERE newer.characterId = c.characterId AND newer.mode = 'im' " +
@@ -123,6 +142,14 @@ interface MessageDao {
     /** 单条消息(长按操作前读取,防并发下 id 失效)。 */
     @Query("SELECT * FROM messages WHERE id = :id")
     suspend fun byId(id: Long): MessageEntity?
+
+    /** 用户活跃时间(D1:最近一条用户消息时刻;null=该会话尚未发言)。 */
+    @Query("SELECT MAX(at) FROM messages WHERE conversationId = :conversationId AND role = 'user'")
+    suspend fun lastUserMessageAt(conversationId: Long): Long?
+
+    /** 是否有过主动消息回合(D1「everProactive」;按 turnId 前缀判)。 */
+    @Query("SELECT COUNT(*) FROM messages WHERE conversationId = :conversationId AND turnId LIKE 'proactive-%'")
+    suspend fun countProactiveTurnMessages(conversationId: Long): Int
 
     @Query("SELECT MIN(id) FROM messages WHERE conversationId = :conversationId AND turnId = :turnId")
     suspend fun firstIdOfTurn(conversationId: Long, turnId: String): Long?

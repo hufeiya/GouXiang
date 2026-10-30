@@ -22,8 +22,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         InnerVoiceEntity::class,
         MomentEntity::class,
         MomentCommentEntity::class,
+        ProactiveOutboxEntity::class,
+        ProactiveConversationStateEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -37,10 +39,59 @@ abstract class GouXiangDatabase : RoomDatabase() {
     abstract fun innerVoiceDao(): InnerVoiceDao
     abstract fun momentDao(): MomentDao
     abstract fun momentCommentDao(): MomentCommentDao
+    abstract fun proactiveDao(): ProactiveDao
     abstract fun seedDao(): SeedDao
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        /**
+         * D 工作包迁移(v8→v9,双表纯增量):新建主动消息账本两张表
+         * `proactive_outbox`(批次行,requestId 唯一幂等)+ `proactive_conversation_state`
+         * (每会话一行频控/未读状态);既有角色/会话/消息不动,存量会话按需
+         * 懒建状态行(ensureState),无需数据迁移。
+         */
+        val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `proactive_outbox` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`conversationId` INTEGER NOT NULL, " +
+                        "`characterId` INTEGER NOT NULL, " +
+                        "`batchId` TEXT NOT NULL, " +
+                        "`requestId` TEXT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, " +
+                        "`turnId` TEXT NOT NULL, " +
+                        "`messageIds` TEXT NOT NULL, " +
+                        "`count` INTEGER NOT NULL, " +
+                        "`state` TEXT NOT NULL, " +
+                        "`failureReason` TEXT NOT NULL, " +
+                        "`notified` INTEGER NOT NULL, " +
+                        "`seen` INTEGER NOT NULL, " +
+                        "`seenAt` INTEGER NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_proactive_outbox_conversationId` ON `proactive_outbox` (`conversationId`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_proactive_outbox_requestId` ON `proactive_outbox` (`requestId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `proactive_conversation_state` (" +
+                        "`conversationId` INTEGER NOT NULL, " +
+                        "`characterId` INTEGER NOT NULL, " +
+                        "`lastUserActivityAt` INTEGER NOT NULL, " +
+                        "`lastProactiveAt` INTEGER NOT NULL, " +
+                        "`lastBatchAt` INTEGER NOT NULL, " +
+                        "`lastBatchCount` INTEGER NOT NULL, " +
+                        "`lastBatchMessageIds` TEXT NOT NULL, " +
+                        "`unseenCount` INTEGER NOT NULL, " +
+                        "`lastSeenAt` INTEGER NOT NULL, " +
+                        "`dailyStamp` TEXT NOT NULL, " +
+                        "`dailyCount` INTEGER NOT NULL, " +
+                        "`activityOverride` INTEGER NOT NULL DEFAULT 0, " +
+                        "PRIMARY KEY(`conversationId`))",
+                )
+            }
+        }
 
         /**
          * C 工作包迁移(v7→v8,单列纯增量):`characters` 加 `avatarVersion`

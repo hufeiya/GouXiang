@@ -60,6 +60,7 @@ class DatabaseMigrationTest {
                 GouXiangDatabase.MIGRATION_5_6,
                 GouXiangDatabase.MIGRATION_6_7,
                 GouXiangDatabase.MIGRATION_7_8,
+                GouXiangDatabase.MIGRATION_8_9,
             )
             .allowMainThreadQueries().build()
         try {
@@ -115,7 +116,7 @@ class DatabaseMigrationTest {
     @Test fun v6TaskHistoryGainsFailureKindColumnAndKeepsRows() {
         createV6FromV5WithTaskHistoryRow()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8)
+            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -143,7 +144,7 @@ class DatabaseMigrationTest {
     @Test fun v7CharactersGainAvatarVersionColumnAndKeepsRows() {
         createV7FromV6()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_7_8)
+            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -157,6 +158,55 @@ class DatabaseMigrationTest {
             // 新列可写(编辑改写形象 → 版本化缓存键的面)
             sql.execSQL("UPDATE characters SET avatarVersion = 3 WHERE id = 1")
             assertEquals(3L, longScalar("SELECT avatarVersion FROM characters WHERE id=1"))
+        } finally { db.close() }
+    }
+
+    /** v8 库 = v7 全部语句 + avatarVersion 列(照 7→8 真实迁移顺序)。 */
+    private fun createV8FromV7() {
+        createV7FromV6()
+        val db = context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null)
+        db.execSQL("ALTER TABLE characters ADD COLUMN avatarVersion INTEGER NOT NULL DEFAULT 0")
+        db.version = 8
+        db.close()
+    }
+
+    /** D 工作包 v8→v9:新建主动消息账本两表,既有角色/会话/消息原样保留。 */
+    @Test fun v8ProactiveLedgerTablesCreatedAndOldDataKept() {
+        createV8FromV7()
+        val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
+            .addMigrations(GouXiangDatabase.MIGRATION_8_9)
+            .allowMainThreadQueries().build()
+        try {
+            val sql = db.openHelper.writableDatabase
+            fun scalar(query: String): String = sql.query(query).use { it.moveToFirst(); it.getString(0) }
+            // 既有数据原样保留
+            assertEquals("角色", scalar("SELECT name FROM characters WHERE id=1"))
+            assertEquals("摘要", scalar("SELECT lastSummary FROM conversations WHERE id=2"))
+            assertEquals("聊天", scalar("SELECT content FROM messages WHERE id=3"))
+            // 新表可写可读(账本预约 + 状态行的落地面)
+            sql.execSQL(
+                "INSERT INTO proactive_outbox (conversationId, characterId, batchId, requestId, kind, " +
+                    "turnId, messageIds, count, state, failureReason, notified, seen, seenAt, createdAt, updatedAt) " +
+                    "VALUES (2, 1, 'batch-1', 'req-1', 'DAILY_SHARE', '', '', 0, 'PENDING', '', 0, 0, 0, 10, 10)",
+            )
+            assertEquals("PENDING", scalar("SELECT state FROM proactive_outbox WHERE requestId='req-1'"))
+            sql.execSQL(
+                "INSERT INTO proactive_conversation_state (conversationId, characterId, lastUserActivityAt, " +
+                    "lastProactiveAt, lastBatchAt, lastBatchCount, lastBatchMessageIds, unseenCount, lastSeenAt, " +
+                    "dailyStamp, dailyCount, activityOverride) VALUES (2, 1, 3, 0, 0, 0, '', 0, 0, '', 0, 0)",
+            )
+            assertEquals(0L, sql.query("SELECT dailyCount FROM proactive_conversation_state WHERE conversationId=2").use { it.moveToFirst(); it.getLong(0) })
+            // requestId 唯一索引生效(重复预约被拒)
+            try {
+                sql.execSQL(
+                    "INSERT INTO proactive_outbox (conversationId, characterId, batchId, requestId, kind, " +
+                        "turnId, messageIds, count, state, failureReason, notified, seen, seenAt, createdAt, updatedAt) " +
+                        "VALUES (2, 1, 'batch-2', 'req-1', 'CHECK_IN', '', '', 0, 'PENDING', '', 0, 0, 0, 11, 11)",
+                )
+                throw AssertionError("requestId 唯一索引应拒绝重复插入")
+            } catch (expected: android.database.sqlite.SQLiteConstraintException) {
+                // 预期:唯一冲突
+            }
         } finally { db.close() }
     }
 }

@@ -50,6 +50,21 @@ object GenerationPrefs {
     /** 主动消息 outbox 通知文案(「离线期间发来 N 条」)。 */
     const val KEY_OUTBOX_COUNT = "gen_outbox_count"
 
+    // ── 主动消息频控参数(D 工作包 D2;本地可配置默认,非任何竞品参数)──
+    // 读写走 long/int 泛化入口,默认值以 ProactivePolicy.Config 为准。
+
+    const val KEY_PROACTIVE_MIN_INTERVAL_MS = "gen_proactive_min_interval_ms"
+    const val KEY_PROACTIVE_DAILY_CAP = "gen_proactive_daily_cap"
+    const val KEY_PROACTIVE_QUIET_START_HOUR = "gen_proactive_quiet_start_hour"
+    const val KEY_PROACTIVE_QUIET_END_HOUR = "gen_proactive_quiet_end_hour"
+    const val KEY_PROACTIVE_BATCH_MAX = "gen_proactive_batch_max"
+    const val KEY_PROACTIVE_SCAN_LIMIT = "gen_proactive_scan_limit"
+    const val KEY_PROACTIVE_USER_ACTIVE_GRACE_MS = "gen_proactive_user_active_grace_ms"
+    const val KEY_PROACTIVE_OFFLINE_THRESHOLD_MS = "gen_proactive_offline_threshold_ms"
+
+    /** 扫描轮转游标(D2:每轮 +1,页序循环防旧会话漏扫)。 */
+    const val KEY_PROACTIVE_SCAN_CURSOR = "gen_proactive_scan_cursor"
+
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -132,4 +147,33 @@ object GenerationPrefs {
 
     fun outboxCount(context: Context): Int =
         runCatching { prefs(context).getInt(KEY_OUTBOX_COUNT, 0) }.getOrDefault(0)
+
+    // ── 主动消息频控参数读写(D2)────────────────────────────────────
+
+    /** 策略显式覆盖值(未写过的键返回 null → 调用方回落 ProactivePolicy.Config 默认)。 */
+    fun proactiveOverrideLong(context: Context, key: String): Long? =
+        runCatching { prefs(context).getLong(key, Long.MIN_VALUE) }
+            .getOrDefault(Long.MIN_VALUE)
+            .takeIf { it != Long.MIN_VALUE }
+
+    fun proactiveOverrideInt(context: Context, key: String): Int? =
+        runCatching { prefs(context).getInt(key, Int.MIN_VALUE) }
+            .getOrDefault(Int.MIN_VALUE)
+            .takeIf { it != Int.MIN_VALUE }
+
+    fun setProactiveOverride(context: Context, key: String, value: Long) {
+        runCatching { prefs(context).edit().putLong(key, value).apply() }
+    }
+
+    fun setProactiveOverride(context: Context, key: String, value: Int) {
+        runCatching { prefs(context).edit().putInt(key, value).apply() }
+    }
+
+    /** 扫描轮转游标(读+推进;轮转算法在 ProactivePolicy.nextScanOffset)。 */
+    fun proactiveScanCursor(context: Context): Int =
+        runCatching { prefs(context).getInt(KEY_PROACTIVE_SCAN_CURSOR, 0) }.getOrDefault(0)
+
+    fun advanceProactiveScanCursor(context: Context) {
+        runCatching { prefs(context).edit().putInt(KEY_PROACTIVE_SCAN_CURSOR, proactiveScanCursor(context) + 1).apply() }
+    }
 }

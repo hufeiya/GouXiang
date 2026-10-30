@@ -30,10 +30,13 @@ object ProactiveMessages {
     /**
      * 回归场景指令(拼进 user 前,模型按它主动开口,不接用户的话茬)。
      * [mark] 一律以()动作描述开场(对齐开场白规范)。
+     *
+     * D 工作包 D5:不再硬编码任何角色名(种子/自建角色同一份指令,人设由
+     * system prompt 的角色卡提供)——首开场景用中性「TA」指代对话者。
      */
     fun sceneLine(kind: Kind, offlineMs: Long?): String = when (kind) {
         Kind.FIRST_HELLO ->
-            "(你刚点开和小唐的手机聊天)" +
+            "(你刚点开和TA的手机聊天)" +
                 "你先主动打招呼:连发 1~3 条开场消息,可以是分享你刚在做的事、想到TA了、" +
                 "随口一句吐槽。这是你的手机聊天开场,不要等待用户先说话。"
         Kind.CHECK_IN ->

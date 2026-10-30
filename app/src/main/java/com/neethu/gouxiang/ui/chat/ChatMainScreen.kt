@@ -54,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
@@ -474,11 +475,27 @@ private fun BubbleGroup(group: BubbleItem, onLongPress: (Long) -> Unit = {}) {
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (group.fromUser) Alignment.End else Alignment.Start,
     ) {
+        // 离线回归分隔(D 工作包 D4):进页消费的主动批次组上方居中灰字
+        group.separator?.let { OfflineSeparator(it) }
         group.bubbles.forEachIndexed { index, bubble ->
             Spacer(Modifier.height(if (index == 0) 0.dp else 6.dp))
             SingleBubble(bubble, fromUser = group.fromUser, onLongPress = onLongPress)
         }
     }
+}
+
+/** 离线分隔条(居中灰字,句式同通知「离线期间发来了 N 条消息」)。 */
+@Composable
+internal fun OfflineSeparator(text: String) {
+    Text(
+        text = text,
+        color = Color(0xFF9A9A9A),
+        fontSize = 12.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp)
+            .wrapContentWidth(Alignment.CenterHorizontally),
+    )
 }
 
 @OptIn(ExperimentalFoundationApi::class)

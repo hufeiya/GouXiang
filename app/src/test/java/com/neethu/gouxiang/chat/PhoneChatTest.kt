@@ -167,6 +167,39 @@ class PhoneChatTest {
         assertTrue("主动回合 turnId 应带 proactive- 前缀", assistants[0].turnId.startsWith("proactive-"))
     }
 
+    @Test
+    fun `proactive result distinguishes real success from template degradation`() = runTest {
+        // D 工作包 D3:真实生成 → degraded=false;流失败兜底 → degraded=true
+        // (兜底文本照旧落库可看,但调用方不得记作真实成功)。
+        run {
+            val store = FakeStore(char, memories)
+            val orch = ChatOrchestrator(store, fakeLlm(listOf("刚画完一张速写\n(把手机举到你面前)你看你看")), bubbleGapMs = 0)
+            val result = orch.respondProactively(1L, 1L, "场景指令", {})
+            assertTrue(result is com.neethu.gouxiang.chat.ProactiveTurnResult.Completed)
+            assertEquals(false, (result as com.neethu.gouxiang.chat.ProactiveTurnResult.Completed).degraded)
+        }
+        run {
+            val store = FakeStore(char, memories)
+            val llm = object : ChatOrchestrator.Llm {
+                override fun streamChat(messages: List<ChatMessage>, config: LlmConfig): Flow<LlmStreamEvent> =
+                    flow { emit(LlmStreamEvent.Error(IllegalStateException("boom"))) }
+            }
+            val orch = ChatOrchestrator(store, llm, bubbleGapMs = 0)
+            val result = orch.respondProactively(1L, 1L, "场景指令", {})
+            assertTrue(result is com.neethu.gouxiang.chat.ProactiveTurnResult.Completed)
+            assertEquals(true, (result as com.neethu.gouxiang.chat.ProactiveTurnResult.Completed).degraded)
+        }
+    }
+
+    @Test
+    fun `scene lines never hardcode a character name`() {
+        // D 工作包 D5:场景指令对种子/自建角色共用,不得出现任何硬编码角色名
+        for (kind in ProactiveMessages.Kind.entries) {
+            val line = ProactiveMessages.sceneLine(kind, 3 * 60 * 60 * 1000L)
+            assertFalse("首开场景不得硬编码「小唐」:$line", line.contains("小唐"))
+        }
+    }
+
     // ── 卡片(范围 3)───────────────────────────────────────────────
 
     @Test
