@@ -96,7 +96,7 @@ object ChatContextBuilder {
             else "[当前形态] 手机聊天模式 | 台词长度 ≤${maxBubbleChars}字/条 | 连发 $hi 条",
         )
         // 对话模式行为段(F5 范围 2:09 弹层选择真实生效;本地版全部免费,
-        // 模式段只改行为不改计费/门槛,且不输出任何计费字样——PhoneChatTest 红线)。
+        // 模式段只改行为不改门槛,且不输出任何敏感商业字样——PhoneChatTest 红线)。
         s.appendLine(mode.promptBlock)
         // 记忆注入(F3):画像/关系行 + 事件 TopN + 容量外「逐渐模糊」降权,
         // 单点走 [MemoryInjection.block](分带在 MemoryCapacity.band 现场算,不落库)。

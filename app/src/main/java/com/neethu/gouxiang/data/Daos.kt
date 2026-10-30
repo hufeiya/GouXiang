@@ -302,6 +302,24 @@ interface MomentCommentDao {
     suspend fun insert(comment: MomentCommentEntity): Long
 }
 
+/** 同名角色冲突(创作保存的语义化失败,C 工作包):调用方映射为可读提示。 */
+class CharacterNameConflictException(val name: String) :
+    Exception("character name conflict: $name")
+
+/**
+ * 角色保存事务的产出:角色 id + 关联的 IM 会话 id(保存后可直接进入续聊)。
+ */
+data class SavedCharacter(
+    val characterId: Long,
+    val conversationId: Long,
+    /** true=本次新建角色行;false=编辑既有角色。 */
+    val created: Boolean,
+    /** 手机聊天会话 id(缺失时本次已补建;不再为 null)。 */
+    val phoneConversationId: Long,
+    /** 事务落库后的头像版本(形象改写时 +1,驱动版本化缓存键)。 */
+    val avatarVersion: Long,
+)
+
 /**
  * 聚合事务:创建会话时一并落种子消息(开场白)与初始记忆,保证原子性。
  */
@@ -321,6 +339,12 @@ abstract class SeedDao {
 
     @Query("SELECT * FROM characters WHERE name = :name LIMIT 1")
     abstract suspend fun characterByName(name: String): CharacterEntity?
+
+    @Query("SELECT * FROM characters WHERE id = :id LIMIT 1")
+    abstract suspend fun characterByIdRow(id: Long): CharacterEntity?
+
+    @Update
+    abstract suspend fun updateCharacter(entity: CharacterEntity)
 
     /** 若同名角色不存在则播种(角色 + 会话 + 开场白消息 + 用户画像记忆)。 */
     @Transaction
@@ -353,6 +377,96 @@ abstract class SeedDao {
         }
         insertMemories(seed.memories.map { it.copy(characterId = charId) })
     }
+
+    /**
+     * 角色创建/编辑的原子保存(C 工作包 C2,单事务收口):
+     *
+     * - 新建([character.id] = 0):插角色行 → 补建 IM 会话 + 开场白消息行 +
+     *   手机聊天会话行(有则跳过,「连续两次保存不产生重复会话」的事务内幂等);
+     * - 编辑(id > 0):更新角色行;会话与其历史一律不动(开场白只在建会话时
+     *   落一次);[appearanceChanged] = 形象描述/风格有改写时把 `avatarVersion`
+     *   +1 并清空 `avatarFile`,驱动版本化缓存键生成新头像;
+     * - 同名冲突(与他人同名)抛 [CharacterNameConflictException],整个事务
+     *   回滚 —— 新建双重保存的第二笔也在此被拦截,不产生半套数据。
+     *
+     * 返回 [SavedCharacter](IM 会话 id 供保存后直接进入续聊)。
+     */
+    @Transaction
+    open suspend fun saveCharacterAtomic(
+        character: CharacterEntity,
+        openingContent: String,
+        openingActions: List<String>,
+        openingAt: Long,
+        appearanceChanged: Boolean,
+    ): SavedCharacter {
+        val byName = characterByName(character.name)
+        if (byName != null && byName.id != character.id) {
+            throw CharacterNameConflictException(character.name)
+        }
+        val existing = if (character.id > 0) characterByIdRow(character.id) else null
+        val charId: Long
+        val created: Boolean
+        var avatarVersion = character.avatarVersion
+        if (existing == null) {
+            charId = insertCharacter(character.copy(id = 0))
+            created = true
+        } else {
+            // 编辑:形象/风格改写 → 版本 +1 并清当前头像文件,让生成链走新缓存键
+            val bumped = if (appearanceChanged) {
+                character.copy(avatarVersion = existing.avatarVersion + 1, avatarFile = "")
+            } else {
+                character
+            }
+            updateCharacter(bumped.copy(id = character.id))
+            charId = character.id
+            created = false
+            avatarVersion = bumped.avatarVersion
+        }
+        // IM 会话:缺失才建(新建必建;编辑兜底补建,不重复)
+        var imConvId = conversationByCharacter(charId, "im")?.id
+        if (imConvId == null) {
+            imConvId = insertConversation(
+                ConversationEntity(
+                    characterId = charId,
+                    mode = "im",
+                    lastSummary = openingContent,
+                    lastAt = openingAt,
+                    createdAt = openingAt,
+                ),
+            )
+            insertMessages(
+                listOf(
+                    MessageEntity(
+                        conversationId = imConvId,
+                        turnId = "turn-open-$openingAt",
+                        role = "assistant",
+                        kind = "text",
+                        content = openingContent,
+                        actionsJson = com.neethu.gouxiang.protocol.ActionsJson.encode(openingActions),
+                        at = openingAt,
+                    ),
+                ),
+            )
+        }
+        // 手机聊天会话(C2 的手机入口路径):缺失才建,行为对齐种子(行先在,
+        // 进入页面时走主动消息开场)
+        var phoneConvId = conversationByCharacter(charId, "phone")?.id
+        if (phoneConvId == null) {
+            phoneConvId = insertConversation(
+                ConversationEntity(
+                    characterId = charId,
+                    mode = "phone",
+                    lastSummary = openingContent,
+                    lastAt = openingAt,
+                    createdAt = openingAt,
+                ),
+            )
+        }
+        return SavedCharacter(charId, imConvId, created, phoneConvId, avatarVersion)
+    }
+
+    @Query("SELECT * FROM conversations WHERE characterId = :characterId AND mode = :mode LIMIT 1")
+    abstract suspend fun conversationByCharacter(characterId: Long, mode: String): ConversationEntity?
 
     companion object {
         /** 手机聊天会话行的时间差(展示层错开,贴近 02 截图「4小时前」节奏)。 */

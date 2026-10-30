@@ -53,7 +53,7 @@ import com.neethu.gouxiang.data.HomeFeedCard
  *
  * F3 接线(P1):「名字 >」= openCharacterHome、互动列「历史」= openHistory
  * (与 im 聊天页同款入口,审计报告 §4-3/§5.2);开场白气泡点击进聊天。
- * 有意裁剪(报告 §5.3,无计费/无社交后端红线):点赞/分享/评论/⚡ 为静态
+ * 有意裁剪(报告 §5.3,无付费/无社交后端红线):点赞/分享/评论/⚡ 为静态
  * 装饰不接行为;硬编码互动数列(361/5/28)整列移除,避免「看起来坏」。
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -94,7 +94,7 @@ fun HomeFeedScreen(
     }
 }
 
-/** 顶部:会员盾 + 「AI 剧 | 推荐」双 tab + 搜索 + 喇叭。 */
+/** 顶部:黄 V 盾 + 「AI 剧 | 推荐」双 tab + 搜索 + 喇叭。 */
 @Composable
 private fun TopTabsRow(modifier: Modifier = Modifier) {
     Row(
@@ -104,10 +104,10 @@ private fun TopTabsRow(modifier: Modifier = Modifier) {
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 会员图标(黄 V 盾形,占位)
+        // 装饰图标(黄 V 盾形,占位)
         Icon(
             Icons.Filled.Favorite,
-            contentDescription = "会员",
+            contentDescription = "装饰",
             tint = Color(0xFFFFC94D),
             modifier = Modifier.size(24.dp),
         )

@@ -131,6 +131,9 @@ class MainActivity : ComponentActivity() {
         val feed by vm.homeFeed.collectAsState()
         val conversations by vm.conversations.collectAsState()
         val avatarFiles by vm.avatarFiles.collectAsState()
+        // 角色创作与管理(C 工作包):创作页列表/头像状态/编辑页
+        val allCharacters by vm.allCharacters.collectAsState()
+        val avatarStates by vm.avatarStates.collectAsState()
         val chatId by vm.chatConversationId.collectAsState()
         val chatUi by vm.chatUi.collectAsState()
         val streamDraft by vm.streamDraft.collectAsState()
@@ -315,7 +318,17 @@ class MainActivity : ComponentActivity() {
                         onOpenHistory = { vm.openHistory(it) },
                     )
                     BottomTab.DISCOVER -> PlaceholderPage("发现", PlaceholderIcons.Discover)
-                    BottomTab.CREATE -> PlaceholderPage("创作AI+", PlaceholderIcons.Create)
+                    BottomTab.CREATE -> com.neethu.gouxiang.ui.character.CharacterStudioScreen(
+                        characters = allCharacters,
+                        conversations = conversations,
+                        avatarFiles = avatarFiles,
+                        avatarStates = avatarStates,
+                        onCreateNew = { vm.openCharacterEditor(null) },
+                        onEdit = { vm.openCharacterEditor(it) },
+                        onOpenChat = { vm.openChat(it) },
+                        onOpenPhoneChat = { vm.openChat(it, phoneMode = true) },
+                        onRetryAvatar = { vm.retryAvatar(it) },
+                    )
                     BottomTab.MESSAGES -> MessagesScreen(
                         rows = conversations,
                         avatarFiles = avatarFiles,
@@ -450,6 +463,18 @@ class MainActivity : ComponentActivity() {
                         characterHomeId?.let { vm.openMoments(it) }
                     },
                     onClose = { vm.closeCharacterHome() },
+                    onEditCharacter = {
+                        // C 工作包:按会话解析角色行进入编辑表单页(主页可触达)
+                        characterHomeId?.let { convId ->
+                            vm.editCharacterForConversation(convId)
+                        }
+                    },
+                    onOpenChat = {
+                        // C 工作包 C2:主页「聊天」直接进入该角色 IM 会话续聊
+                        characterHomeId?.let { convId ->
+                            vm.openChatFromCharacterHome(convId)
+                        }
+                    },
                     innerVoiceCount = characterHomeUi.innerVoiceCount,
                     momentCount = characterHomeUi.momentCount,
                 )
@@ -565,6 +590,47 @@ class MainActivity : ComponentActivity() {
                     onBack = { vm.closeTaskHistory() },
                     onRetry = { vm.retryTask(it) },
                     onCancel = { vm.cancelTask(it) },
+                )
+            }
+        }
+
+        // 角色编辑页(C 工作包 C1~C3):创作页「新建/编辑」进入的全屏覆盖层;
+        // 渲染序置底最后(最后声明者在上,盖住聊天页等所有 overlay —— 保存成功
+        // 即关页并直接进入该角色 IM 续聊)。操作提示走一次性 Toast。
+        val editorOpen by vm.editorOpen.collectAsState()
+        val editorUi by vm.editorUi.collectAsState()
+        val editorGallery by vm.editorGallery.collectAsState()
+        val editorNotice by vm.editorNotice.collectAsState()
+        LaunchedEffect(editorNotice) {
+            if (editorNotice.isNotBlank()) {
+                android.widget.Toast.makeText(toastContext, editorNotice, android.widget.Toast.LENGTH_SHORT).show()
+                vm.consumeEditorNotice()
+            }
+        }
+        LaunchedEffect(editorUi.draftRestored) {
+            if (editorUi.draftRestored) {
+                android.widget.Toast.makeText(
+                    toastContext,
+                    com.neethu.gouxiang.ui.character.CharacterFormCopy.DRAFT_RESTORED,
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+        if (editorOpen) {
+            Box(Modifier.fillMaxSize()) {
+                com.neethu.gouxiang.ui.character.CharacterEditScreen(
+                    ui = editorUi,
+                    gallery = editorGallery,
+                    currentAvatarFile = avatarFiles[editorUi.editingCharacterId],
+                    avatarState = avatarStates[editorUi.editingCharacterId],
+                    onField = { field, value -> vm.updateCharacterField(field, value) },
+                    onTogglePreview = { vm.toggleEditorPreview(it) },
+                    onSave = { vm.saveCharacterFromEditor() },
+                    onClose = { vm.closeCharacterEditor() },
+                    onRetryAvatar = { vm.retryAvatar(it) },
+                    onSetAvatarCurrent = { id, name -> vm.setCharacterAvatar(id, name) },
+                    onDeleteAvatar = { id, name -> vm.deleteCharacterAvatar(id, name) },
+                    onRefreshGallery = { vm.refreshEditorGallery(it) },
                 )
             }
         }

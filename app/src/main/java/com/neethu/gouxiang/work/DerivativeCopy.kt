@@ -2,7 +2,7 @@ package com.neethu.gouxiang.work
 
 /**
  * 衍生任务通知文案(§2.3;常量收敛一处,红线单测扫描全量覆盖——
- * 本地版无计费体系,文案严禁出现计费/猫粮/会员字样)。
+ * 本地版无付费体系,文案严禁出现敏感商业字样(红线清单见 DerivativeTaskTest))。
  */
 internal object DerivativeCopy {
 

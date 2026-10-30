@@ -69,6 +69,10 @@ internal suspend fun executeAiCommand(
                 vm.closeTaskHistory()
                 "task history closed"
             }
+            "chars" -> cmdChars(context)
+            "char_create" -> cmdCharCreate(context, vm, command, create = true)
+            "char_edit" -> cmdCharCreate(context, vm, command, create = false)
+            "avatar_retry" -> cmdAvatarRetry(context, vm, command)
             else -> throw IllegalArgumentException(
                 "unknown command, send ai_cmd=help (see docs/ai-debug-intents.md)",
             )
@@ -174,8 +178,13 @@ private suspend fun cmdOpenTab(vm: MainViewModel, command: AiDebugCommand): Stri
         "home" -> BottomTab.HOME
         "messages" -> BottomTab.MESSAGES
         "profile" -> BottomTab.PROFILE
+        "create" -> {
+            // C 工作包:创作 AI+ tab(角色列表 + 新建入口)
+            vm.selectedTab.value = BottomTab.CREATE
+            return "tab=create"
+        }
         else -> throw IllegalArgumentException(
-            "No tab matches '$arg'. Options: home | messages | profile.",
+            "No tab matches '$arg'. Options: home | messages | profile | create.",
         )
     }
     vm.selectedTab.value = tab
@@ -534,4 +543,110 @@ private suspend fun cmdTaskCancel(context: Context, command: AiDebugCommand): St
     val workId = resolveWorkId(context, prefix)
     val cancelled = com.neethu.gouxiang.work.TaskHistoryController.cancel(context, workId)
     return if (cancelled) "cancelled $workId" else "task $workId already finished (nothing to cancel)"
+}
+
+// ── 5.9 角色创作与管理(C 工作包)────────────────────────────────────
+
+/** 角色清单:`id 名字 来源 avatar=<文件|-> `,验收重启后角色/头像/会话对应用。 */
+private suspend fun cmdChars(context: Context): String {
+    val repo = com.neethu.gouxiang.data.GouXiangRepo.get(context)
+    val characters = repo.db.characterDao().observeAll().first()
+    if (characters.isEmpty()) return "(no characters)"
+    return characters.joinToString("\n") { c ->
+        val avatar = c.avatarFile.ifBlank { "-" }
+        val version = "v${c.avatarVersion}"
+        "${c.id} ${c.name} source=${c.source} avatar=$avatar $version"
+    }
+}
+
+/**
+ * 创建/编辑角色(C1+C2 数据路径):ai_arg = JSON 载荷
+ * `{"name":"..","profile":"..","intro":"..","lines":"..","opening":"(..)台词","appearance":"..","style":".."}`
+ * (编辑需含 `"id":N`)。走 VM.saveCharacter 与 UI 按钮同一校验 + 原子落库;
+ * ai_x=1 时保存成功直接进入该角色 IM 续聊(open_chat 同语义)。
+ */
+private suspend fun cmdCharCreate(
+    context: Context,
+    vm: MainViewModel,
+    command: AiDebugCommand,
+    create: Boolean,
+): String {
+    val payload = requireArg(command)
+    val draft = parseCharacterPayload(payload, create)
+    val openAfter = command.x?.toInt() == 1
+    return when (val outcome = vm.saveCharacter(draft, openChatAfter = openAfter)) {
+        is com.neethu.gouxiang.ui.character.CharacterSaveOutcome.Ok ->
+            (if (outcome.created) "created" else "updated") +
+                " character id=${outcome.characterId} imConv=${outcome.conversationId}" +
+                (if (openAfter) " (chat opened)" else " (poll chars / msgs to confirm)")
+        is com.neethu.gouxiang.ui.character.CharacterSaveOutcome.Invalid ->
+            throw IllegalArgumentException(
+                "validation failed: " + listOfNotNull(
+                    outcome.errors.name?.let { "name: $it" },
+                    outcome.errors.profile?.let { "profile: $it" },
+                    outcome.errors.openingLine?.let { "opening: $it" },
+                    outcome.errors.intro?.let { "intro: $it" },
+                    outcome.errors.exampleLines?.let { "lines: $it" },
+                    outcome.errors.appearance?.let { "appearance: $it" },
+                    outcome.errors.appearanceStyle?.let { "style: $it" },
+                ).joinToString("; "),
+            )
+        is com.neethu.gouxiang.ui.character.CharacterSaveOutcome.Conflict ->
+            throw IllegalStateException(
+                "name conflict: a character named '${draft.name}' already exists (edit it via char_edit instead)",
+            )
+        is com.neethu.gouxiang.ui.character.CharacterSaveOutcome.Failure ->
+            throw IllegalStateException("save failed: ${outcome.reason}")
+    }
+}
+
+/** 头像显式重试(C3:断网失败后的恢复路径);结果用 chars 轮询状态。 */
+private suspend fun cmdAvatarRetry(context: Context, vm: MainViewModel, command: AiDebugCommand): String {
+    val characterId = command.x?.toLong()
+        ?: throw IllegalArgumentException("missing ai_x (character id, see chars)")
+    val repo = com.neethu.gouxiang.data.GouXiangRepo.get(context)
+    if (repo.characterById(characterId) == null) {
+        throw IllegalArgumentException("No character matches id $characterId. Send ai_cmd=chars to see options.")
+    }
+    vm.retryAvatar(characterId)
+    return "avatar retry queued for character $characterId (poll chars for state)"
+}
+
+/** char 载荷容错 JSON 解析(与 MultiBubbleParser 同款 lenient 配置)。 */
+private val charPayloadJson = kotlinx.serialization.json.Json {
+    ignoreUnknownKeys = true; isLenient = true
+}
+
+/**
+ * char 载荷解析(容错:缺省字段为空串;编辑必须带数字 id)。校验仍走
+ * CharacterFormValidator,这里只做结构解析。
+ */
+private fun parseCharacterPayload(payload: String, create: Boolean): com.neethu.gouxiang.ui.character.CharacterDraft {
+    val root = try {
+        charPayloadJson.parseToJsonElement(payload) as? kotlinx.serialization.json.JsonObject
+    } catch (_: Exception) {
+        null
+    } ?: throw IllegalArgumentException(
+        "payload must be a JSON object, e.g. {\"name\":\"..\",\"profile\":\"..\",\"opening\":\"..\"}",
+    )
+
+    fun str(key: String): String =
+        (root[key] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
+    val id = str("id").toLongOrNull()
+    if (!create && id == null) {
+        throw IllegalArgumentException("char_edit payload requires a numeric \"id\" (see chars)")
+    }
+    if (create && id != null && id > 0) {
+        throw IllegalArgumentException("char_create must not carry \"id\"; use char_edit for existing characters")
+    }
+    return com.neethu.gouxiang.ui.character.CharacterDraft(
+        id = id ?: 0L,
+        name = str("name"),
+        profile = str("profile"),
+        intro = str("intro"),
+        exampleLines = str("lines"),
+        openingLine = str("opening"),
+        appearance = str("appearance"),
+        appearanceStyle = str("style"),
+    )
 }

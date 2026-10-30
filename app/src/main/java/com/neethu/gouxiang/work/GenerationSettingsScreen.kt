@@ -36,7 +36,7 @@ import androidx.compose.ui.unit.sp
  * 即时 enqueue/cancel,无中间保存按钮。「完成通知」打开时(≥33)由
  * MainActivity 现场请求 POST_NOTIFICATIONS 运行时权限。
  *
- * 红线:副标题文案纳入计费/猫粮/会员字样单测扫描(§6)。
+ * 红线:副标题文案纳入敏感商业字样单测扫描(§6)。
  */
 @Composable
 fun GenerationSettingsScreen(

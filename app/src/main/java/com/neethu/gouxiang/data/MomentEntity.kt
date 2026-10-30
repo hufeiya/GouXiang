@@ -13,8 +13,8 @@ import androidx.room.PrimaryKey
  *
  * - 配图为可选增强(10 §5 风险 3):文字先行落库,生图失败保持 imageFile 空
  *   (纯文字卡兜底),成功后经 setImageFile 原地回填(UI 走 observe 流自动上屏);
- * - 本地版无计费(范围 5):无 visibility/audienceIds/hidden/safetyState——
- *   锁卡/邀请/猫粮字段不建模,UI 不得出现「待解锁/解锁/猫粮」字样。
+ * - 本地版无付费(范围 5):无 visibility/audienceIds/hidden/safetyState——
+ *   锁卡/邀请字段不建模,UI 不得出现「待解锁/解锁」字样。
  */
 @Entity(
     tableName = "moments",

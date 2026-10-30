@@ -206,6 +206,16 @@ adb shell am start -n $PKG/.MainActivity --es ai_cmd msgs
 
 排查口径:`AIDebug.Queue` 无行=Intent 没进 App(检查 am start 形式/MIUI 权限);有行但无 `OK send_chat`=消费侧问题(把 logcat 全量带回)。注意 `send_chat` 作用于当前打开的聊天,未打开会话时按 §9.6 返回 FAIL,需先 `open_chat`。
 
+### 5.5d 角色创作与管理(C 工作包,2026-10-31 增补)
+
+| 命令 | 参数 | 作用 |
+|---|---|---|
+| `chars` | — | 角色清单:`id 名字 source=来源 avatar=当前头像文件(-=未生成) v<头像版本>`;验收「重启后角色/头像/会话对应不串」的轮询出口 |
+| `char_create` | `ai_arg`=JSON 载荷;`ai_x=1` 保存后进入聊天 | 创建角色:`{"name":"..","profile":"..","intro":"..","lines":"..","opening":"(..)台词","appearance":"..","style":".."}`。与 UI「保存并开始聊天」同一数据路径:逐字段校验(必填/长度/重名,FAIL 回逐字段原因)→ 单事务落库(角色 + 首个 IM 会话 + 开场白消息 + 手机聊天会话);同名角色已存在时 FAIL `name conflict`(与 UI 双击保存幂等同源) |
+| `char_edit` | `ai_arg`=JSON 载荷(必含 `"id":N`) | 编辑既有角色:同上校验与落库;改写 `appearance`/`style` 保存后头像版本 +1、按新版本缓存键重生成(旧头像文件保留在图库可「设为当前」切回);会话与历史不动 |
+| `avatar_retry` | `ai_x`=角色 id | 显式重试头像生成(断网失败后的恢复路径);结果用 `chars` 轮询 avatar 字段 |
+| `open_tab` | `ai_arg`=create | 切到「创作AI+」tab(角色列表 + 新建入口;编辑页为全屏覆盖层,`char_create`/`char_edit` 直接走数据路径更稳) |
+
 ### 5.6 衍生内容(06/07/10 号文档域)
 
 | 命令 | 参数 | 分期 | 作用 |

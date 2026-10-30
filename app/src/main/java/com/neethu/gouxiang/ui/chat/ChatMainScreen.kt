@@ -323,7 +323,7 @@ private fun TopBar(onBack: () -> Unit, onOpenMemory: () -> Unit = {}) {
         Spacer(Modifier.width(18.dp))
         Icon(
             Icons.Filled.Favorite,
-            contentDescription = "会员",
+            contentDescription = "装饰",
             tint = Color(0xFFFFC94D),
             modifier = Modifier.size(24.dp),
         )

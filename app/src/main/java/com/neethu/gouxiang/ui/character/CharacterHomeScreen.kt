@@ -23,10 +23,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -79,6 +79,10 @@ fun CharacterHomeScreen(
     onOpenInnerVoice: () -> Unit,
     onOpenMoments: () -> Unit,
     onClose: () -> Unit,
+    /** C 工作包:进编辑表单页(主页可触达的编辑入口)。 */
+    onEditCharacter: () -> Unit = {},
+    /** C 工作包 C2:从主页直接进入该角色的 IM 会话续聊。 */
+    onOpenChat: () -> Unit = {},
     /** 「Ta 的心声」占位卡尾注计数(F8;>0 时展示「全部 N」)。 */
     innerVoiceCount: Int = 0,
     /** 「Ta 的朋友圈」占位卡尾注计数(F9;>0 时展示「全部 N」)。 */
@@ -236,22 +240,50 @@ fun CharacterHomeScreen(
                     fontWeight = FontWeight.Medium,
                 )
                 Spacer(Modifier.weight(1f))
-                // 关注按钮(dump:button_follow/tv_text;本地版静态)
+                // 关注按钮(dump:button_follow/tv_text)在本地版无关注生态,属
+                // 静态死按钮;C 工作包 C2 将该槽位替换为可用的「聊天」续聊入口
+                //(主页可打开续聊)+「编辑」入口,视觉形态沿用原胶囊样式。
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(999.dp))
                         .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(999.dp))
-                        .padding(horizontal = 18.dp, vertical = 8.dp),
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { onOpenChat() }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                 ) {
                     Icon(
-                        Icons.Filled.Add,
+                        Icons.Outlined.Chat,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(15.dp),
                     )
                     Spacer(Modifier.width(4.dp))
-                    Text("关注", color = Color.White, fontSize = 15.sp)
+                    Text("聊天", color = Color.White, fontSize = 15.sp)
+                }
+                Spacer(Modifier.width(8.dp))
+                // C 工作包:编辑资料入口(进编辑表单页,改字段/换形象)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(999.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.65f), RoundedCornerShape(999.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { onEditCharacter() }
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Edit,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("编辑", color = Color.White, fontSize = 15.sp)
                 }
             }
             Spacer(Modifier.height(18.dp))

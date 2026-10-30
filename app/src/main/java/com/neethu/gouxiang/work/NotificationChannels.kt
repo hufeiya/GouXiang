@@ -9,7 +9,7 @@ import android.content.Context
  * - "derivative"(IMPORTANCE_DEFAULT):衍生内容完成(心声/朋友圈/手帐/小说/合照);
  * - "proactive"(IMPORTANCE_HIGH):离线主动消息(用户该尽快看到的会话级事件)。
  * 幂等:通道已存在时重复调用静默无副作用(GouXiangApp.onCreate 每次启动都调)。
- * 红线:通道名/描述纳入文案扫描,不含计费/猫粮/会员字样([DerivativeCopy])。
+ * 红线:通道名/描述纳入文案扫描,不含敏感商业字样(红线清单见 DerivativeTaskTest,[DerivativeCopy])。
  */
 object NotificationChannels {
 

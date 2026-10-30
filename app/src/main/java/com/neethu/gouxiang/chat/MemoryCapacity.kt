@@ -7,7 +7,7 @@ import com.neethu.gouxiang.data.MemoryEntity
  *
  * - 容量只数 event(「经历过的事」);画像/称呼/身份/关系是身份性记忆,
  *   不占容量、永不 faded(与猫箱「容量文案只出现在事件区」语义一致)。
- * - capacity = base × multiplier(本地版无会员态,multiplier 为死配置)。
+ * - capacity = base × multiplier(本地版无增值档位,multiplier 为死配置)。
  * - 排序键 = at 倒序,前 capacity 条 normal,其后 faded(降权不删除——
  *   库内永远全量,分带在检索/渲染时现场算)。
  * - faded 条目仍在库、仍可被注入,但排序沉底 + 加「逐渐模糊」后缀(§3.2d:
@@ -18,7 +18,7 @@ object MemoryCapacity {
     /** 事件记忆容量上限(条)。猫箱数值服务端下发不可见,本地版默认 20。 */
     const val BASE = 20
 
-    /** 翻倍系数(死配置,预留会员位;本地版恒 1f)。 */
+    /** 翻倍系数(死配置,预留档位扩展;本地版恒 1f)。 */
     const val MULTIPLIER = 1f
 
     /** faded 条目的打分系数(仍在库,但排序沉底)。 */

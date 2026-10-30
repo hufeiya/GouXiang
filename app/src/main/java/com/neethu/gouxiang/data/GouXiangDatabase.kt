@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MomentEntity::class,
         MomentCommentEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -41,6 +41,16 @@ abstract class GouXiangDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        /**
+         * C 工作包迁移(v7→v8,单列纯增量):`characters` 加 `avatarVersion`
+         * 头像生成版本列(既有行回填 0 = 从未按版本重生成);其余表不动。
+         */
+        val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE characters ADD COLUMN avatarVersion INTEGER NOT NULL DEFAULT 0")
+            }
+        }
 
         /**
          * M0 收尾迁移(v6→v7,单列纯增量):`derivative_tasks` 加 `failureKind`

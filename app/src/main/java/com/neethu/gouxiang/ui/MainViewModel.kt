@@ -24,6 +24,16 @@ import com.neethu.gouxiang.data.ConversationRow
 import com.neethu.gouxiang.data.GouXiangRepo
 import com.neethu.gouxiang.data.HomeFeedCard
 import com.neethu.gouxiang.data.MessageEntity
+import com.neethu.gouxiang.ui.character.AvatarGenState
+import com.neethu.gouxiang.ui.character.CharacterDraft
+import com.neethu.gouxiang.ui.character.CharacterDraftPrefs
+import com.neethu.gouxiang.ui.character.CharacterEditorUi
+import com.neethu.gouxiang.ui.character.CharacterField
+import com.neethu.gouxiang.ui.character.CharacterFormCopy
+import com.neethu.gouxiang.ui.character.CharacterFormValidator
+import com.neethu.gouxiang.ui.character.CharacterSaveOutcome
+import com.neethu.gouxiang.ui.character.avatarCacheKey
+import com.neethu.gouxiang.ui.character.splitOpeningLine
 import com.neethu.gouxiang.ui.nav.BottomTab
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -112,6 +122,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** characterId → 头像缓存文件绝对路径(null=未生成,UI 画占位)。 */
     private val _avatarFiles = MutableStateFlow<Map<Long, String?>>(emptyMap())
     val avatarFiles: StateFlow<Map<Long, String?>> = _avatarFiles
+
+    // ── 角色头像生成状态(C 工作包 C3:生成中/失败/重试可见)──────────
+
+    /** characterId → 生成状态(Idle/Generating/Failed(reason)/Ready)。 */
+    private val _avatarStates = MutableStateFlow<Map<Long, AvatarGenState>>(emptyMap())
+    val avatarStates: StateFlow<Map<Long, AvatarGenState>> = _avatarStates.asStateFlow()
+
+    /** 本进程内已尝试过的版本化缓存键(失败后由 [retryAvatar] 清除以便重试)。 */
+    private val avatarAttemptedKeys = mutableSetOf<String>()
+
+    /** 头像缓存目录(与 [com.neethu.gouxiang.ai.image.AvatarImageProvider] 一致)。 */
+    private val AVATAR_DIR = "avatars"
+
+    /** 生成失败的统一原因文案(网络/密钥/服务端错误的可读收口)。 */
+    private val AVATAR_FAIL_REASON = "头像生成失败,请检查网络与生图配置后重试"
+
+    /** 头像生成 provider(进程内单例;filesDir/avatars 缓存)。 */
+    private var avatarProviderLazy: com.neethu.gouxiang.ai.image.AvatarImageProvider? = null
+
+    private fun avatarProvider(): com.neethu.gouxiang.ai.image.AvatarImageProvider =
+        avatarProviderLazy ?: synchronized(this) {
+            avatarProviderLazy ?: com.neethu.gouxiang.ai.image.AvatarImageProvider(
+                getApplication<Application>().filesDir,
+            ).also { avatarProviderLazy = it }
+        }
 
     // ── 对话风格(F5:角色主页 04 宫格弹层 09/10)──────────────────────
 
@@ -912,23 +947,330 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 角色头像一次生成落盘(范围说明);失败留在 map 外=UI 占位。
-     *  生图 prompt 在这里拼好再交给 provider(ImageGenAdapter 契约:
-     * prompt = appearance + 风格词缀,由调用方拼好),与心声/朋友圈配图
-     * 同一拼法 —— 修复前头像只喂 appearance、风格词缀缺失。 */
+    /** 角色头像生成(范围说明 + C 工作包 C3 状态机):
+     *  - 版本化缓存键 [avatarCacheKey]:改写形象保存后版本 +1 → 新键 → 新文件,
+     *    旧头像文件保留在图库可「设为当前」切回;
+     *  - 生成中/失败/就绪对用户可见([avatarStates]);失败不静默吞,同一版本键
+     *    本进程内只自动尝试一次,重试走 [retryAvatar] 显式发起;
+     *  - 已落库头像文件(avatarFile 列)存在时直接复用,重启不重复请求;
+     *  - 形象描述为空时置可解释失败态,不发请求;
+     *  - 生图 prompt 在这里拼好再交给 provider(ImageGenAdapter 契约:
+     *    prompt = appearance + 风格词缀,由调用方拼好),与心声/朋友圈配图
+     *    同一拼法 —— 修复前头像只喂 appearance、风格词缀缺失;
+     *  - 网络请求在数据库事务外(只读列 + 成功后单列回写)。
+     */
     fun ensureAvatars(characters: List<CharacterEntity>) {
         viewModelScope.launch {
-            val provider = com.neethu.gouxiang.ai.image.AvatarImageProvider(getApplication<Application>().filesDir)
+            val provider = avatarProvider()
+            val filesDir = getApplication<Application>().filesDir
             val updated = _avatarFiles.value.toMutableMap()
+            val states = _avatarStates.value.toMutableMap()
             for (character in characters) {
-                if (updated.containsKey(character.id)) continue
+                val key = avatarCacheKey(character.id, character.avatarVersion)
+                val state = states[character.id]
+                if (state is AvatarGenState.Ready && updated.containsKey(character.id)) continue
+                if (state is AvatarGenState.Generating) continue
+                // 1) 已落库头像文件(重启后/图库指定后直接复用,不发请求)
+                val persisted = character.avatarFile.takeIf { it.isNotBlank() }?.let {
+                    java.io.File(java.io.File(filesDir, AVATAR_DIR), it)
+                }
+                if (persisted != null && persisted.isFile && persisted.length() > 0) {
+                    updated[character.id] = persisted.absolutePath
+                    states[character.id] = AvatarGenState.Ready
+                    _avatarFiles.value = updated.toMap()
+                    _avatarStates.value = states.toMap()
+                    continue
+                }
+                // 2) 未填形象描述:置可解释状态,不发请求(手工卡照常可用)
+                if (character.appearance.isBlank()) {
+                    states[character.id] = AvatarGenState.Failed(CharacterFormCopy.AVATAR_NO_APPEARANCE)
+                    _avatarStates.value = states.toMap()
+                    continue
+                }
+                // 3) 同版本键已尝试过(含失败):不再自动发请求,等待显式重试
+                if (!avatarAttemptedKeys.add(key)) {
+                    if (states[character.id] !is AvatarGenState.Failed) {
+                        states[character.id] = AvatarGenState.Failed(AVATAR_FAIL_REASON)
+                        _avatarStates.value = states.toMap()
+                    }
+                    continue
+                }
+                states[character.id] = AvatarGenState.Generating
+                _avatarStates.value = states.toMap()
                 val file = provider.getOrGenerate(
-                    characterKey = "character-${character.id}",
+                    characterKey = key,
                     prompt = buildAvatarPrompt(character.appearance, character.appearanceStyle),
                 )
-                updated[character.id] = file?.absolutePath
+                if (file != null) {
+                    updated[character.id] = file.absolutePath
+                    states[character.id] = AvatarGenState.Ready
+                    repo.db.characterDao().setAvatarFile(character.id, file.name)
+                    // 编辑页开着且正是该角色:刷新图库(新落盘文件立即可见)
+                    if (_editorOpen.value && _editorUi.value.editingCharacterId == character.id) {
+                        refreshEditorGallery(character.id)
+                    }
+                } else {
+                    states[character.id] = AvatarGenState.Failed(AVATAR_FAIL_REASON)
+                }
                 _avatarFiles.value = updated.toMap()
+                _avatarStates.value = states.toMap()
             }
+        }
+    }
+
+    /** 头像显式重试(创作页/编辑页「重试」;清除尝试记录后重走生成链)。 */
+    fun retryAvatar(characterId: Long) {
+        viewModelScope.launch {
+            val character = repo.characterById(characterId) ?: return@launch
+            avatarAttemptedKeys.remove(avatarCacheKey(character.id, character.avatarVersion))
+            _avatarStates.value = _avatarStates.value - characterId
+            ensureAvatars(listOf(character))
+        }
+    }
+
+    // ── 角色创作与管理(C 工作包 C1~C3)──────────────────────────────
+
+    /** 创作页角色列表(全部角色;种子与自建同列,行内以 source 区分)。 */
+    val allCharacters: StateFlow<List<CharacterEntity>> =
+        repo.db.characterDao().observeAll()
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 新建角色草稿槽(仅新建路径;编辑直接改行不落草稿)。 */
+    private val draftPrefs by lazy { CharacterDraftPrefs(getApplication()) }
+
+    // ── 编辑页(表单)状态 ───────────────────────────────────────────
+
+    private val _editorOpen = MutableStateFlow(false)
+    val editorOpen: StateFlow<Boolean> = _editorOpen.asStateFlow()
+
+    private val _editorUi = MutableStateFlow(CharacterEditorUi())
+    val editorUi: StateFlow<CharacterEditorUi> = _editorUi.asStateFlow()
+
+    /** 编辑页一次性提示(设为当前/删除图等;Toast 消费后清空)。 */
+    private val _editorNotice = MutableStateFlow("")
+    val editorNotice: StateFlow<String> = _editorNotice.asStateFlow()
+
+    fun consumeEditorNotice() {
+        _editorNotice.value = ""
+    }
+
+    /** 编辑页本地图片列表(filesDir/avatars/ 下该角色的版本化文件,新→旧)。 */
+    private val _editorGallery = MutableStateFlow<List<java.io.File>>(emptyList())
+    val editorGallery: StateFlow<List<java.io.File>> = _editorGallery.asStateFlow()
+
+    /**
+     * 打开编辑页:[characterId] = null 新建(恢复草稿),>0 编辑既有角色。
+     * 关闭页面不丢草稿(自动保存),保存成功才清草稿槽。
+     */
+    fun openCharacterEditor(characterId: Long?) {
+        if (_editorOpen.value) return
+        _editorNotice.value = ""
+        _editorGallery.value = emptyList()
+        viewModelScope.launch {
+            val existing = characterId?.takeIf { it > 0 }?.let { repo.characterById(it) }
+            _editorUi.value = if (existing != null) {
+                CharacterEditorUi(
+                    editingCharacterId = existing.id,
+                    name = existing.name,
+                    profile = existing.profile,
+                    intro = existing.intro,
+                    exampleLines = existing.exampleLines,
+                    openingLine = existing.openingLine,
+                    appearance = existing.appearance,
+                    appearanceStyle = existing.appearanceStyle,
+                    originalAppearance = existing.appearance,
+                    originalAppearanceStyle = existing.appearanceStyle,
+                )
+            } else {
+                val draft = draftPrefs.load()
+                if (draft != null) {
+                    CharacterEditorUi(
+                        editingCharacterId = draft.id,
+                        name = draft.name,
+                        profile = draft.profile,
+                        intro = draft.intro,
+                        exampleLines = draft.exampleLines,
+                        openingLine = draft.openingLine,
+                        appearance = draft.appearance,
+                        appearanceStyle = draft.appearanceStyle,
+                        draftRestored = true,
+                    )
+                } else {
+                    CharacterEditorUi()
+                }
+            }
+            refreshEditorGallery(characterId)
+            // 编辑模式:确保当前头像立即可见(已落库文件直接复用;缺图且已填
+            // 形象描述时走同一生成链,失败可在形象区看到并可重试)
+            existing?.let { ensureAvatars(listOf(it)) }
+            _editorOpen.value = true
+        }
+    }
+
+    /** 角色主页「编辑」入口:按会话解析角色行后进入编辑页(先收起主页)。 */
+    fun editCharacterForConversation(conversationId: Long) {
+        viewModelScope.launch {
+            val conv = repo.db.conversationDao().byId(conversationId) ?: return@launch
+            closeCharacterHome()
+            openCharacterEditor(conv.characterId)
+        }
+    }
+
+    /** 角色主页「聊天」入口(C2):收起主页,直接进入该角色的 IM 会话续聊。 */
+    fun openChatFromCharacterHome(conversationId: Long) {
+        closeCharacterHome()
+        openChat(conversationId)
+    }
+
+    /** 关闭编辑页(新建草稿已自动保存,重进可恢复)。 */
+    fun closeCharacterEditor() {
+        _editorOpen.value = false
+        _editorUi.value = CharacterEditorUi()
+        _editorGallery.value = emptyList()
+        _editorNotice.value = ""
+    }
+
+    /** 表单字段更新(逐项;新建路径写通草稿槽,该字段既有错误即时清除)。 */
+    fun updateCharacterField(field: CharacterField, value: String) {
+        val ui = _editorUi.value
+        if (ui.saving) return
+        val next = when (field) {
+            CharacterField.NAME -> ui.copy(name = value, errors = ui.errors.copy(name = null))
+            CharacterField.PROFILE -> ui.copy(profile = value, errors = ui.errors.copy(profile = null))
+            CharacterField.INTRO -> ui.copy(intro = value, errors = ui.errors.copy(intro = null))
+            CharacterField.LINES -> ui.copy(exampleLines = value, errors = ui.errors.copy(exampleLines = null))
+            CharacterField.OPENING -> ui.copy(openingLine = value, errors = ui.errors.copy(openingLine = null))
+            CharacterField.APPEARANCE -> ui.copy(appearance = value, errors = ui.errors.copy(appearance = null))
+            CharacterField.STYLE -> ui.copy(appearanceStyle = value, errors = ui.errors.copy(appearanceStyle = null))
+        }
+        _editorUi.value = next
+        if (!next.isEditing) draftPrefs.save(next.toDraft())
+    }
+
+    /** 切预览/编辑视图。 */
+    fun toggleEditorPreview(show: Boolean) {
+        _editorUi.value = _editorUi.value.copy(showPreview = show)
+    }
+
+    /**
+     * 保存表单(编辑页按钮;ai_cmd 走 [saveCharacter] 同一数据路径):
+     * 校验 → 原子落库 → 成功清草稿/关页/直接进入该角色的 IM 续聊。
+     */
+    fun saveCharacterFromEditor(openChatAfterSave: Boolean = true) {
+        val ui = _editorUi.value
+        if (ui.saving || !_editorOpen.value) return
+        _editorUi.value = ui.copy(saving = true, errorMessage = null)
+        viewModelScope.launch {
+            val draft = ui.toDraft()
+            when (val outcome = saveCharacter(draft, openChatAfter = openChatAfterSave)) {
+                is CharacterSaveOutcome.Invalid -> _editorUi.value =
+                    _editorUi.value.copy(saving = false, errors = outcome.errors)
+                is CharacterSaveOutcome.Conflict -> _editorUi.value =
+                    _editorUi.value.copy(saving = false, errorMessage = CharacterFormCopy.SAVE_CONFLICT)
+                is CharacterSaveOutcome.Failure -> _editorUi.value =
+                    _editorUi.value.copy(saving = false, errorMessage = outcome.reason)
+                is CharacterSaveOutcome.Ok -> {
+                    if (outcome.created) draftPrefs.clear()
+                    _editorOpen.value = false
+                    _editorUi.value = CharacterEditorUi()
+                    _editorGallery.value = emptyList()
+                    if (openChatAfterSave) openChat(outcome.conversationId)
+                }
+            }
+        }
+    }
+
+    /**
+     * 保存数据路径(UI 按钮与 ai_cmd 共用):schema 校验(必填/长度/重名)→
+     * 单事务原子落库([com.neethu.gouxiang.data.SeedDao.saveCharacterAtomic])→
+     * 形象改写时失效旧头像并按新版本键排队重生成(网络在事务外)。
+     * 不做任何网络/LLM 调用即完成保存 —— 无模型/断网也能存下手工卡。
+     */
+    suspend fun saveCharacter(
+        draft: CharacterDraft,
+        openChatAfter: Boolean = false,
+    ): CharacterSaveOutcome {
+        val errors = CharacterFormValidator.validate(
+            draft,
+            nameOwnerId = repo.characterByName(draft.name)?.takeIf { it.id != draft.id }?.id,
+        )
+        if (errors.hasErrors) return CharacterSaveOutcome.Invalid(errors)
+        val existing = if (draft.id > 0) repo.characterById(draft.id) else null
+        if (draft.id > 0 && existing == null) {
+            return CharacterSaveOutcome.Failure("角色不存在或已被删除")
+        }
+        val appearanceChanged = existing != null &&
+            (existing.appearance != draft.appearance || existing.appearanceStyle != draft.appearanceStyle)
+        val (openingContent, openingActions) = splitOpeningLine(draft.openingLine)
+        return try {
+            val saved = repo.db.seedDao().saveCharacterAtomic(
+                character = draft.toEntity(existing?.createdAt ?: System.currentTimeMillis()),
+                openingContent = openingContent.ifBlank { draft.openingLine.trim() },
+                openingActions = openingActions,
+                openingAt = System.currentTimeMillis(),
+                appearanceChanged = appearanceChanged,
+            )
+            if (appearanceChanged) {
+                // 失效旧头像:清内存路径与尝试记录,按新版本键重走生成链
+                _avatarFiles.value = _avatarFiles.value - saved.characterId
+                _avatarStates.value = _avatarStates.value + (saved.characterId to AvatarGenState.Idle)
+            }
+            repo.characterById(saved.characterId)?.let { ensureAvatars(listOf(it)) }
+            CharacterSaveOutcome.Ok(saved.characterId, saved.conversationId, saved.created)
+        } catch (e: com.neethu.gouxiang.data.CharacterNameConflictException) {
+            CharacterSaveOutcome.Conflict
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e("CharacterStudio", "save character failed", e)
+            CharacterSaveOutcome.Failure(CharacterFormCopy.SAVE_FAILED)
+        }
+    }
+
+    /** 刷新编辑页本地图片列表(打开页/图库操作/头像落盘后调用)。 */
+    fun refreshEditorGallery(characterId: Long?) {
+        val id = characterId ?: _editorUi.value.editingCharacterId
+        if (id <= 0) {
+            _editorGallery.value = emptyList()
+            return
+        }
+        val dir = java.io.File(getApplication<Application>().filesDir, AVATAR_DIR)
+        _editorGallery.value = dir.listFiles { f ->
+            // 版本化文件(character-<id>-v<N>.jpg)与既有基础命名(character-<id>.jpg)
+            f.isFile && f.name.endsWith(".jpg") &&
+                (f.name == "character-$id.jpg" || f.name.startsWith("character-$id-"))
+        }?.sortedByDescending { it.lastModified() } ?: emptyList()
+    }
+
+    /** 图库「设为当前」:写 avatarFile 列 + 立即更新内存路径(上屏即生效)。 */
+    fun setCharacterAvatar(characterId: Long, fileName: String) {
+        viewModelScope.launch {
+            repo.db.characterDao().setAvatarFile(characterId, fileName)
+            val file = java.io.File(java.io.File(getApplication<Application>().filesDir, AVATAR_DIR), fileName)
+            if (file.isFile) {
+                _avatarFiles.value = _avatarFiles.value + (characterId to file.absolutePath)
+                _avatarStates.value = _avatarStates.value + (characterId to AvatarGenState.Ready)
+            }
+            _editorNotice.value = CharacterFormCopy.GALLERY_SET_DONE
+        }
+    }
+
+    /** 图库删除:落盘删除;删除的是当前形象则清引用回落占位。 */
+    fun deleteCharacterAvatar(characterId: Long, fileName: String) {
+        viewModelScope.launch {
+            val file = java.io.File(java.io.File(getApplication<Application>().filesDir, AVATAR_DIR), fileName)
+            val deleted = runCatching { file.delete() }.getOrDefault(false)
+            if (!deleted) {
+                _editorNotice.value = "图片删除失败,请重试"
+                return@launch
+            }
+            if (repo.characterById(characterId)?.avatarFile == fileName) {
+                repo.db.characterDao().setAvatarFile(characterId, "")
+                _avatarFiles.value = _avatarFiles.value - characterId
+                _avatarStates.value = _avatarStates.value + (characterId to AvatarGenState.Idle)
+            }
+            refreshEditorGallery(characterId)
+            _editorNotice.value = CharacterFormCopy.GALLERY_DELETE_DONE
         }
     }
 

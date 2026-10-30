@@ -56,7 +56,11 @@ class DatabaseMigrationTest {
     @Test fun v5DataAndUnattributedWindowSurviveMigration() {
         createV5()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_5_6, GouXiangDatabase.MIGRATION_6_7)
+            .addMigrations(
+                GouXiangDatabase.MIGRATION_5_6,
+                GouXiangDatabase.MIGRATION_6_7,
+                GouXiangDatabase.MIGRATION_7_8,
+            )
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -111,7 +115,7 @@ class DatabaseMigrationTest {
     @Test fun v6TaskHistoryGainsFailureKindColumnAndKeepsRows() {
         createV6FromV5WithTaskHistoryRow()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_6_7)
+            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -124,6 +128,35 @@ class DatabaseMigrationTest {
             // 新列可写(Worker 失败收口的落库面)
             sql.execSQL("UPDATE derivative_tasks SET failureKind = 'NETWORK' WHERE workId = 'w1'")
             assertEquals("NETWORK", scalar("SELECT failureKind FROM derivative_tasks"))
+        } finally { db.close() }
+    }
+
+    /** v7 库 = v6 全部语句 + failureKind 列(照 6→7 真实迁移顺序)。 */
+    private fun createV7FromV6() {
+        createV6FromV5WithTaskHistoryRow()
+        val db = context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null)
+        db.execSQL("ALTER TABLE derivative_tasks ADD COLUMN failureKind TEXT")
+        db.version = 7
+        db.close()
+    }
+
+    @Test fun v7CharactersGainAvatarVersionColumnAndKeepsRows() {
+        createV7FromV6()
+        val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
+            .addMigrations(GouXiangDatabase.MIGRATION_7_8)
+            .allowMainThreadQueries().build()
+        try {
+            val sql = db.openHelper.writableDatabase
+            fun scalar(query: String): String = sql.query(query).use { it.moveToFirst(); it.getString(0) }
+            fun longScalar(query: String): Long = sql.query(query).use { it.moveToFirst(); it.getLong(0) }
+            // 角色行及其会话/消息原样保留;新列回填 0(从未按版本重生成)
+            assertEquals("角色", scalar("SELECT name FROM characters WHERE id=1"))
+            assertEquals(0L, longScalar("SELECT avatarVersion FROM characters WHERE id=1"))
+            assertEquals("摘要", scalar("SELECT lastSummary FROM conversations WHERE id=2"))
+            assertEquals("聊天", scalar("SELECT content FROM messages WHERE id=3"))
+            // 新列可写(编辑改写形象 → 版本化缓存键的面)
+            sql.execSQL("UPDATE characters SET avatarVersion = 3 WHERE id = 1")
+            assertEquals(3L, longScalar("SELECT avatarVersion FROM characters WHERE id=1"))
         } finally { db.close() }
     }
 }

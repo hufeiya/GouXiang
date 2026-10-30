@@ -34,6 +34,13 @@ data class CharacterEntity(
     val appearanceStyle: String,
     /** 生成头像缓存文件名(filesDir/avatars/ 下,空=用占位)。 */
     val avatarFile: String = "",
+    /**
+     * 头像生成版本(C 工作包 C3):版本化缓存键的一环 —— 缓存键 =
+     * `character-<id>-v<avatarVersion>`,改写形象描述/风格并保存时 +1 且
+     * [avatarFile] 置空,强制用新描述生成新文件,不复用旧头像。旧文件保留
+     * 在图库(filesDir/avatars/)可经「设为当前」切回。
+     */
+    val avatarVersion: Long = 0,
     /** 来源标识(预留:脑洞 2.0 / 本地创作)。 */
     val source: String = "local",
     /** 创建时间(epoch millis)。 */

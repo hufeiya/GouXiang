@@ -8,7 +8,7 @@ package com.neethu.gouxiang.protocol
  * - 距上次对话超过 [offlineThresholdMs] → 按 12h 冷/热分档产出 1~[maxCatchUp] 条。
  *
  * 条数与 kind 是纯函数判定(单测锁死),生成走既有 ChatOrchestrator(同一
- * LLM/记忆底座);响应式回复不计数、不配额 —— 本地版无猫粮(04 §3.4)。
+ * LLM/记忆底座);响应式回复不计数、不配额 —— 本地版无配额(04 §3.4)。
  */
 object ProactiveMessages {
 

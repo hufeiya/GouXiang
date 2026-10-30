@@ -7,7 +7,7 @@ import com.neethu.gouxiang.protocol.MultiBubbleParser
  *
  * - [DialogMode] 对话模式五项(弹层 09):选择真实生效 = 给 system prompt 附加
  *   对应行为段([DialogMode.promptBlock]);长对话模式额外放大连发字数参数。
- *   本地版全部免费,无任何计费门禁。
+ *   本地版全部免费,无任何付费门禁。
  * - [ReplyLength] 回复长度三段(弹层 10):真实影响 F2 预留的连发参数
  *   ([BurstParams] min/max 条数 + 每条字数)。
  * - [ChatStyleParams] 一回合实际下发的组合(回合发起时从 [ChatPrefs] 现读)。
