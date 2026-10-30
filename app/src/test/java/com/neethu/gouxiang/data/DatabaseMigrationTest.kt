@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -63,6 +64,7 @@ class DatabaseMigrationTest {
                 GouXiangDatabase.MIGRATION_8_9,
                 GouXiangDatabase.MIGRATION_9_10,
                 GouXiangDatabase.MIGRATION_10_11,
+                GouXiangDatabase.MIGRATION_11_12,
             )
             .allowMainThreadQueries().build()
         try {
@@ -118,7 +120,7 @@ class DatabaseMigrationTest {
     @Test fun v6TaskHistoryGainsFailureKindColumnAndKeepsRows() {
         createV6FromV5WithTaskHistoryRow()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11)
+            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -146,7 +148,7 @@ class DatabaseMigrationTest {
     @Test fun v7CharactersGainAvatarVersionColumnAndKeepsRows() {
         createV7FromV6()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11)
+            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -176,7 +178,7 @@ class DatabaseMigrationTest {
     @Test fun v8ProactiveLedgerTablesCreatedAndOldDataKept() {
         createV8FromV7()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11)
+            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -261,7 +263,7 @@ class DatabaseMigrationTest {
     @Test fun v9CharacterStatusRecordsTableCreatedAndOldDataKept() {
         createV9FromV8()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11)
+            .addMigrations(GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -321,7 +323,7 @@ class DatabaseMigrationTest {
     @Test fun v10SidestoryRecordsTableCreatedAndOldDataKept() {
         createV10FromV9()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_10_11)
+            .addMigrations(GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -355,6 +357,90 @@ class DatabaseMigrationTest {
             assertEquals("failed", scalar("SELECT state FROM sidestory_records WHERE requestId='req-f1'"))
             assertEquals("生成失败", scalar("SELECT failureReason FROM sidestory_records WHERE requestId='req-f1'"))
             assertEquals(1L, longScalar("SELECT characterId FROM sidestory_records WHERE requestId='req-f1'"))
+        } finally { db.close() }
+    }
+
+    /** v11 库 = v10 全部语句 + 番外记录表(照 10→11 真实迁移顺序)。 */
+    private fun createV11FromV10() {
+        createV10FromV9()
+        val db = context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null)
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `sidestory_records` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`kind` TEXT NOT NULL, " +
+                "`templateKey` TEXT NOT NULL, " +
+                "`templateVersion` INTEGER NOT NULL, " +
+                "`title` TEXT NOT NULL, " +
+                "`characterId` INTEGER NOT NULL, " +
+                "`conversationId` INTEGER NOT NULL, " +
+                "`sourceStartMessageId` INTEGER, " +
+                "`sourceEndMessageId` INTEGER, " +
+                "`sourceVersion` INTEGER NOT NULL, " +
+                "`requestId` TEXT NOT NULL, " +
+                "`state` TEXT NOT NULL, " +
+                "`failureReason` TEXT NOT NULL, " +
+                "`bodyJson` TEXT NOT NULL, " +
+                "`imageFile` TEXT NOT NULL, " +
+                "`imageStatus` TEXT NOT NULL, " +
+                "`notified` INTEGER NOT NULL, " +
+                "`isStale` INTEGER NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_sidestory_records_characterId` ON `sidestory_records` (`characterId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_sidestory_records_conversationId` ON `sidestory_records` (`conversationId`)")
+        // 开发期已有的一条心声记录 + 一条番外记录:升级后必须原样保留(G4「迁移不丢失」)
+        // (v5 种子已带 id=5 的心声行,这里用显式 id=7 避免冲突;两行都要活下来)
+        db.execSQL("INSERT INTO inner_voices (id, characterId, title, echo, imageFile, at, isStale) VALUES (7, 1, '晚安心声', '今天也很想你', '', 9, 0)")
+        db.execSQL(
+            "INSERT INTO sidestory_records (kind, templateKey, templateVersion, title, characterId, conversationId, " +
+                "sourceStartMessageId, sourceEndMessageId, sourceVersion, requestId, state, failureReason, bodyJson, " +
+                "imageFile, imageStatus, notified, isStale, createdAt, updatedAt) " +
+                "VALUES ('sidestory', 'Drunk', 1, '', 1, 2, 3, 3, 0, 'req-f0', 'succeeded', '', " +
+                "'{\"title\":\"微醺\",\"pages\":[]}', '', 'skipped', 1, 0, 10, 10)",
+        )
+        db.version = 11
+        db.close()
+    }
+
+    /** G 工作包 v11→v12:新建 chat_derivative_records + characters.innerVoiceAuto;心声/番外/角色原样保留。 */
+    @Test fun v11ChatDerivativeRecordsCreatedAndInnerVoicesKept() {
+        createV11FromV10()
+        val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
+            .addMigrations(GouXiangDatabase.MIGRATION_11_12)
+            .allowMainThreadQueries().build()
+        try {
+            val sql = db.openHelper.writableDatabase
+            fun scalar(query: String): String = sql.query(query).use { it.moveToFirst(); it.getString(0) }
+            fun longScalar(query: String): Long = sql.query(query).use { it.moveToFirst(); it.getLong(0) }
+            // G4 迁移不丢失:存量心声(v5 种子 id=5 与开发期新增 id=7)与番外记录原样保留
+            assertEquals("心声", scalar("SELECT title FROM inner_voices WHERE id=5"))
+            assertEquals("晚安心声", scalar("SELECT title FROM inner_voices WHERE id=7"))
+            assertEquals("今天也很想你", scalar("SELECT echo FROM inner_voices WHERE id=7"))
+            assertTrue(scalar("SELECT bodyJson FROM sidestory_records WHERE requestId='req-f0'").contains("微醺"))
+            // 角色行保留,新开关列回填 1(允许自动;与全局自动默认关叠加后行为不变)
+            assertEquals("角色", scalar("SELECT name FROM characters WHERE id=1"))
+            assertEquals(1L, longScalar("SELECT innerVoiceAuto FROM characters WHERE id=1"))
+            // 新表可写可读(手帐/小说/合照记录落地面);kind 分区 + 状态机语义成立
+            sql.execSQL(
+                "INSERT INTO chat_derivative_records (kind, title, characterId, conversationId, optionJson, " +
+                    "sourceStartMessageId, sourceEndMessageId, sourceVersion, requestId, state, failureReason, " +
+                    "bodyJson, imageFile, imageStatus, notified, isStale, createdAt, updatedAt) " +
+                    "VALUES ('handbook', '', 1, 2, '{\"range\":\"turn10\"}', 3, 3, 0, 'req-g1', 'generating', '', " +
+                    "'', '', 'pending', 0, 0, 10, 10)",
+            )
+            assertEquals("handbook", scalar("SELECT kind FROM chat_derivative_records WHERE requestId='req-g1'"))
+            sql.execSQL(
+                "UPDATE chat_derivative_records SET state='succeeded', title='放学后的天台' " +
+                    "WHERE requestId='req-g1' AND state='generating'",
+            )
+            assertEquals("放学后的天台", scalar("SELECT title FROM chat_derivative_records WHERE requestId='req-g1'"))
+            // 回溯失效联动语义成立(来源区间命中即标)
+            sql.execSQL("UPDATE chat_derivative_records SET isStale = 1 WHERE conversationId = 2 AND sourceEndMessageId >= 3 AND isStale = 0")
+            assertEquals(1L, longScalar("SELECT isStale FROM chat_derivative_records WHERE requestId='req-g1'"))
+            // 角色开关可写(心声页 Switch 的落地面)
+            sql.execSQL("UPDATE characters SET innerVoiceAuto = 0 WHERE id = 1")
+            assertEquals(0L, longScalar("SELECT innerVoiceAuto FROM characters WHERE id=1"))
         } finally { db.close() }
     }
 }

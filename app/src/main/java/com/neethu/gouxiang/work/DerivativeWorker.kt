@@ -62,25 +62,26 @@ class DerivativeWorker(
         suspend fun record(state: String, reason: String? = null, terminal: Boolean = false, failureKind: DerivativeFailureKind? = null) {
             val time = DerivativeClock.nowMillis()
             dao.setStateWithKind(id.toString(), state, reason, failureKind?.name, time, if (terminal) time else null)
-            // 番外/心动(F 工作包):任务终态同步落记录行,失败状态在记录列表
-            // 可见可重试(与任务历史一致,不假成功);成功态由生成事务收口,
-            // 这里只在失败/取消/跳过时拨记录(条件更新只在 generating 生效)。
-            if (kind == DerivativeKind.SIDESTORY && task.recordId > 0L && state in TERMINAL_FAILURE_STATES) {
-                GouXiangRepo.get(app).db.sidestoryRecordDao()
-                    .markFailedIfGenerating(task.recordId, reason ?: "生成失败，请重试", time)
+            // 番外/心动(F)与手帐/小说/合照(G):任务终态同步落记录行,失败状态
+            // 在记录列表可见可重试(与任务历史一致,不假成功);成功态由生成事务
+            // 收口,这里只在失败/取消/跳过时拨记录(条件更新只在 generating 生效)。
+            if (kind in RECORD_BACKED_KINDS && task.recordId > 0L && state in TERMINAL_FAILURE_STATES) {
+                val db = GouXiangRepo.get(app).db
+                if (kind == DerivativeKind.SIDESTORY) {
+                    db.sidestoryRecordDao().markFailedIfGenerating(task.recordId, reason ?: "生成失败，请重试", time)
+                } else {
+                    db.chatDerivativeDao().markFailedIfGenerating(task.recordId, reason ?: "生成失败，请重试", time)
+                }
             }
         }
         if (source == DerivativeSource.AUTOMATIC && (
                 !automaticEnabled(app, kind) ||
+                    (kind == DerivativeKind.INNER_VOICE && task.characterId > 0L && !innerVoiceAutoAllowed(app, task.characterId)) ||
                     inputData.getLong(KEY_AUTOMATIC_EPOCH, -1L) != automaticEpoch(app, kind) ||
                     (kind in setOf(DerivativeKind.MOMENT, DerivativeKind.INNER_VOICE) && day != DerivativeTask.localDay())
             )) {
             record("skipped", "自动生成已关闭或请求已过期", terminal = true)
             return Result.success(androidx.work.workDataOf("disposition" to "skipped"))
-        }
-        if (kind in setOf(DerivativeKind.HANDBOOK, DerivativeKind.NOVEL, DerivativeKind.PHOTO)) {
-            record("failed", "功能开发中", terminal = true, failureKind = DerivativeFailureKind.UNKNOWN)
-            return Result.failure(androidx.work.workDataOf("reason" to "功能开发中"))
         }
         record("running")
         return try {
@@ -128,6 +129,27 @@ class DerivativeWorker(
 
         /** 番外/心动记录要同步拨失败的终态(succeeded 由生成事务收口,不在列)。 */
         internal val TERMINAL_FAILURE_STATES = setOf("failed", "cancelled", "skipped")
+
+        /**
+         * 记录背书型 kind(F 番外/心动 + G 手帐/小说/合照):任务终态同步落
+         * 记录行的集合([DerivativeTask.recordId] 定位)。
+         */
+        internal val RECORD_BACKED_KINDS = setOf(
+            DerivativeKind.SIDESTORY,
+            DerivativeKind.HANDBOOK,
+            DerivativeKind.NOVEL,
+            DerivativeKind.PHOTO,
+        )
+
+        /**
+         * 心声自动的角色级放行(G4):全局自动开关之外再查角色开关
+         * (`characters.innerVoiceAuto`,关开关的角色不入队/不执行)。
+         */
+        internal suspend fun innerVoiceAutoAllowed(context: Context, characterId: Long): Boolean {
+            if (!com.neethu.gouxiang.ai.GenerationPrefs.innerVoiceAuto(context)) return false
+            if (characterId <= 0L) return true
+            return GouXiangRepo.get(context).characterById(characterId)?.innerVoiceAuto ?: true
+        }
 
         /** 网络约束 + 指数退避 30s(§2.2 约定)。 */
         private val constraints = Constraints.Builder()

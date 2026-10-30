@@ -92,6 +92,8 @@ import com.neethu.gouxiang.ui.ChatUiState
 fun ChatMainScreen(
     state: ChatUiState,
     avatarFile: String?,
+    /** 合照设为聊天背景(G3/G4):非空时优先于角色立绘展示。 */
+    backgroundFile: String? = null,
     onBack: () -> Unit,
     onSend: (String) -> Unit,
     /** 回合进行中的流式草稿(逐字累积;空串=无草稿)。 */
@@ -133,9 +135,12 @@ fun ChatMainScreen(
     val context = LocalContext.current
     Box(modifier = modifier.fillMaxSize()) {
         // ── 全屏角色照片底(生成缓存命中显示真图,未生成显示渐变占位)──
-        if (avatarFile != null) {
+        // G3/G4:合照页「设为聊天背景」的会话优先展示合照(backgroundFile 非
+        // 空且文件仍存在;记录删除后文件失效,由 ChatBackgroundPrefs 校验回落)。
+        val effectiveBackground = backgroundFile?.takeIf { java.io.File(it).isFile } ?: avatarFile
+        if (effectiveBackground != null) {
             AsyncImage(
-                model = java.io.File(avatarFile),
+                model = java.io.File(effectiveBackground),
                 contentDescription = state.character?.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

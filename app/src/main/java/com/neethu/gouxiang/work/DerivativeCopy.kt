@@ -33,6 +33,13 @@ internal object DerivativeCopy {
     /** 番外/心动完成标题(F 工作包;心动事件同通道,不再细分以免文案发散)。 */
     fun sidestoryTitle(name: String): String = "${name}的番外内容已生成"
 
+    /** 手帐/小说/合照完成标题(G 工作包;按 kind 细分,文案简短统一)。 */
+    fun chatDerivativeTitle(name: String, kind: String): String = when (kind) {
+        com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_HANDBOOK -> "${name}的手帐已生成"
+        com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_NOVEL -> "${name}的小说已生成"
+        else -> "${name}的合照已生成"
+    }
+
     /** 通用兜底标题(M2 kind 接入前不触达;保证任意 kind 有合法文案)。 */
     fun genericTitle(name: String): String = "${name}有新内容"
 

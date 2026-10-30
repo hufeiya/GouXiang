@@ -71,6 +71,14 @@ class AvatarImageProvider(
     suspend fun getOrGenerateSidestoryImage(characterKey: String, prompt: String): File? =
         getOrGenerateImage(characterKey, prompt, subDir = "sidestory", size = "768x1024")
 
+    /**
+     * 聊天衍生配图/合照(G 工作包 G1/G3):同一生成链,缓存目录 filesDir/photos,
+     * 竖版 768×1024(手帐配图与合照均为竖版构图)。返回 null = 生图失败
+     * (手帐保留文字成品;合照整条记失败可重试)。
+     */
+    suspend fun getOrGeneratePhotoImage(characterKey: String, prompt: String): File? =
+        getOrGenerateImage(characterKey, prompt, subDir = "photos", size = "768x1024")
+
     internal suspend fun getOrGenerateImage(
         characterKey: String,
         prompt: String,

@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import com.neethu.gouxiang.chat.BurstParams
+import com.neethu.gouxiang.chat.ChatBackgroundPrefs
 import com.neethu.gouxiang.chat.ChatMemoryCoordinator
 import com.neethu.gouxiang.chat.ChatOrchestrator
 import com.neethu.gouxiang.chat.ChatPrefs
@@ -24,6 +25,9 @@ import com.neethu.gouxiang.data.ConversationRow
 import com.neethu.gouxiang.data.GouXiangRepo
 import com.neethu.gouxiang.data.HomeFeedCard
 import com.neethu.gouxiang.data.MessageEntity
+import com.neethu.gouxiang.derivatives.DerivativeOptions
+import com.neethu.gouxiang.derivatives.DerivativeRange
+import com.neethu.gouxiang.derivatives.NovelLength
 import com.neethu.gouxiang.ui.character.AvatarGenState
 import com.neethu.gouxiang.ui.character.CharacterDraft
 import com.neethu.gouxiang.ui.character.CharacterDraftPrefs
@@ -221,6 +225,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 innerVoiceCount = repo.countInnerVoices(character.id),
                 momentCount = repo.countMoments(character.id),
                 sidestoryCount = repo.countSidestoryRecords(character.id),
+                handbookCount = repo.countChatDerivatives(character.id, com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_HANDBOOK),
+                novelCount = repo.countChatDerivatives(character.id, com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_NOVEL),
+                photoCount = repo.countChatDerivatives(character.id, com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_PHOTO),
             )
             repo.observeMessages(conversationId).collect { messages ->
                 _characterHomeUi.value = _characterHomeUi.value.copy(
@@ -1432,6 +1439,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             _innerVoiceUi.value = _innerVoiceUi.value.copy(characterName = character.name)
+            launch {
+                // G4 角色开关回显(人物行改动即时反映到页内 Switch)。
+                repo.observeCharacter(character.id).collect { c ->
+                    _innerVoiceUi.value = _innerVoiceUi.value.copy(
+                        characterId = character.id,
+                        characterAutoEnabled = c?.innerVoiceAuto ?: true,
+                    )
+                }
+            }
             com.neethu.gouxiang.work.reconcileDerivativeTasks(getApplication())
             launch {
                 repo.db.derivativeResultDao().observeImageTasks(character.id, "INNER_VOICE").collect {
@@ -1917,6 +1933,431 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         openSidestory(conversationId)
     }
 
+    // ── 手帐/小说/合照(G 工作包 G1-G3;与番外页同构的记录-任务模型)──
+
+    /**
+     * 三个衍生页的页内状态(各自独立的打开态/UI 态/订阅任务;记录同表
+     * `chat_derivative_records`,按 kind 分区)。
+     */
+    private class DerivativePage(val kind: String) {
+        val opened = MutableStateFlow<Long?>(null)
+        val ui = MutableStateFlow(com.neethu.gouxiang.ui.derivatives.ChatDerivativeUiState())
+        var job: Job? = null
+    }
+
+    private val handbookPage = DerivativePage(com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_HANDBOOK)
+    private val novelPage = DerivativePage(com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_NOVEL)
+    private val photoPage = DerivativePage(com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_PHOTO)
+
+    val handbookConversationId: StateFlow<Long?> get() = handbookPage.opened.asStateFlow()
+    val handbookUi: StateFlow<com.neethu.gouxiang.ui.derivatives.ChatDerivativeUiState> get() = handbookPage.ui.asStateFlow()
+    val novelConversationId: StateFlow<Long?> get() = novelPage.opened.asStateFlow()
+    val novelUi: StateFlow<com.neethu.gouxiang.ui.derivatives.ChatDerivativeUiState> get() = novelPage.ui.asStateFlow()
+    val photoConversationId: StateFlow<Long?> get() = photoPage.opened.asStateFlow()
+    val photoUi: StateFlow<com.neethu.gouxiang.ui.derivatives.ChatDerivativeUiState> get() = photoPage.ui.asStateFlow()
+
+    /** 合照页的拍照描述(输入框状态;生成时随记录快照入库)。 */
+    private val _photoDescription = MutableStateFlow("")
+    val photoDescription: StateFlow<String> = _photoDescription.asStateFlow()
+
+    fun onPhotoDescriptionChange(value: String) {
+        _photoDescription.value = value.take(DerivativeOptions.PHOTO_DESCRIPTION_MAX_CHARS)
+    }
+
+    /** 聊天背景映射(合照页设置后聊天页即时生效;ChatBackgroundPrefs 进程内同步)。 */
+    val chatBackgrounds: StateFlow<Map<Long, String>> get() = ChatBackgroundPrefs.state
+
+    fun openHandbook(conversationId: Long) = openDerivativePage(handbookPage, conversationId)
+    fun closeHandbook() = closeDerivativePage(handbookPage)
+
+    fun openNovel(conversationId: Long) = openDerivativePage(novelPage, conversationId)
+    fun closeNovel() = closeDerivativePage(novelPage)
+
+    fun openPhoto(conversationId: Long) = openDerivativePage(photoPage, conversationId)
+    fun closePhoto() = closeDerivativePage(photoPage)
+
+    /** 打开一页衍生记录:取角色 + 订阅记录流(按 kind 过滤);进页先对账中断遗留。 */
+    private fun openDerivativePage(page: DerivativePage, conversationId: Long) {
+        if (page.opened.value == conversationId) return
+        page.opened.value = conversationId
+        page.ui.value = com.neethu.gouxiang.ui.derivatives.ChatDerivativeUiState(loading = true)
+        page.job?.cancel()
+        page.job = viewModelScope.launch {
+            val conv = repo.db.conversationDao().byId(conversationId)
+            val character = conv?.let { repo.characterById(it.characterId) }
+            if (conv == null || character == null) {
+                page.ui.value = page.ui.value.copy(loading = false, loadFailed = true)
+                return@launch
+            }
+            page.ui.value = page.ui.value.copy(characterName = character.name)
+            // 进页对账:记录行 generating 而任务已终态(进程中断)→ 拨失败可重试。
+            runCatching {
+                com.neethu.gouxiang.derivatives.ChatDerivativeGenerator.production(getApplication())
+                    .reconcileInterrupted()
+            }
+            repo.observeChatDerivatives(conversationId).collect { records ->
+                page.ui.value = page.ui.value.copy(
+                    rows = records.filter { it.kind == page.kind },
+                    loading = false,
+                )
+            }
+        }
+    }
+
+    private fun closeDerivativePage(page: DerivativePage) {
+        page.job?.cancel()
+        page.job = null
+        page.opened.value = null
+        page.ui.value = com.neethu.gouxiang.ui.derivatives.ChatDerivativeUiState()
+        if (page === photoPage) _photoDescription.value = ""
+    }
+
+    /**
+     * 生成一条手帐/小说/合照记录(入口按钮与 ai_cmd 共用数据路径):同 kind
+     * 已有生成中的记录即在事务内拒绝(原子去重,防快速双击重复生成);短事务
+     * 捕获来源范围与会话版本后落 generating 行,再入队 Worker(网络在事务外;
+     * 任务与记录以同 requestId 关联)。
+     *
+     * @return 新记录 id;null = 同 kind 已有生成中记录(幂等跳过)。
+     */
+    private suspend fun generateChatDerivative(page: DerivativePage, option: DerivativeOptions): Long? {
+        val conversationId = page.opened.value
+            ?: throw IllegalStateException("derivative screen is not open for a conversation")
+        val conv = repo.db.conversationDao().byId(conversationId)
+            ?: throw IllegalStateException("conversation $conversationId not found")
+        val requestId = java.util.UUID.randomUUID().toString()
+        val stamp = System.currentTimeMillis()
+        val recordId = repo.db.withTransaction {
+            // 原子去重:同 kind 已有生成中记录则拒绝(双击/命令重发幂等)。
+            if (repo.db.chatDerivativeDao().forConversation(conversationId)
+                    .any { it.kind == page.kind && it.isGenerating }
+            ) {
+                return@withTransaction -1L
+            }
+            when (page.kind) {
+                // G1 手帐:按预设回合算选中区间(与版本快照同一事务读,来源一致)。
+                com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_HANDBOOK -> {
+                    val range = DerivativeRange.resolve(repo.db.messageDao().allForConversation(conversationId), (option as DerivativeOptions.HandbookOption).preset)
+                        ?: return@withTransaction -2L
+                    repo.db.chatDerivativeDao().insert(
+                        com.neethu.gouxiang.data.ChatDerivativeEntity(
+                            kind = page.kind,
+                            characterId = conv.characterId,
+                            conversationId = conversationId,
+                            optionJson = option.toJson(),
+                            sourceStartMessageId = range.startMessageId,
+                            sourceEndMessageId = range.endMessageId,
+                            sourceVersion = repo.db.memoryWindowDao().version(conversationId) ?: 0L,
+                            requestId = requestId,
+                            imageStatus = com.neethu.gouxiang.data.ChatDerivativeEntity.IMAGE_PENDING,
+                            createdAt = stamp,
+                            updatedAt = stamp,
+                        ),
+                    )
+                }
+                // G2/G3:来源 = 最近对话窗口(与番外 captureDerivativeSource 同口径)。
+                else -> {
+                    val source = com.neethu.gouxiang.work.captureDerivativeSource(
+                        repo.db, conversationId, conv.characterId,
+                    )
+                    repo.db.chatDerivativeDao().insert(
+                        com.neethu.gouxiang.data.ChatDerivativeEntity(
+                            kind = page.kind,
+                            characterId = conv.characterId,
+                            conversationId = conversationId,
+                            optionJson = option.toJson(),
+                            sourceStartMessageId = source.firstMessageId,
+                            sourceEndMessageId = source.lastMessageId,
+                            sourceVersion = source.version,
+                            requestId = requestId,
+                            imageStatus = if (page.kind == com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_PHOTO) {
+                                com.neethu.gouxiang.data.ChatDerivativeEntity.IMAGE_PENDING
+                            } else {
+                                com.neethu.gouxiang.data.ChatDerivativeEntity.IMAGE_SKIPPED
+                            },
+                            createdAt = stamp,
+                            updatedAt = stamp,
+                        ),
+                    )
+                }
+            }
+        }
+        if (recordId == -1L) return null
+        if (recordId == -2L) throw IllegalStateException("还没有聊天记录,先和 TA 聊几句再生成手帐")
+        val derivativeKind = when (page.kind) {
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_HANDBOOK -> com.neethu.gouxiang.chat.DerivativeKind.HANDBOOK
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_NOVEL -> com.neethu.gouxiang.chat.DerivativeKind.NOVEL
+            else -> com.neethu.gouxiang.chat.DerivativeKind.PHOTO
+        }
+        com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+            getApplication(),
+            com.neethu.gouxiang.chat.DerivativeTask(
+                derivativeKind,
+                conversationId,
+                characterId = conv.characterId,
+                recordId = recordId,
+                requiresNetwork = false,
+            ),
+            requestIdOverride = requestId,
+        )
+        return recordId
+    }
+
+    /** 手帐生成入口(范围 chips;失败置一次性错误提示)。 */
+    fun generateHandbook(presetKey: String) {
+        launchDerivativeGeneration(handbookPage) {
+            generateChatDerivative(handbookPage, DerivativeOptions.HandbookOption(presetKey))
+        }
+    }
+
+    /** 小说生成入口(长度档 chips)。 */
+    fun generateNovel(lengthKey: String) {
+        launchDerivativeGeneration(novelPage) {
+            generateChatDerivative(novelPage, DerivativeOptions.NovelOption(lengthKey))
+        }
+    }
+
+    /** 合照生成入口(描述输入;空白描述直接提示,不发请求)。 */
+    fun generatePhoto() {
+        val description = _photoDescription.value.trim()
+        if (description.isBlank()) {
+            photoPage.ui.value = photoPage.ui.value.copy(error = "先写下想和 TA 合影的场景吧")
+            return
+        }
+        launchDerivativeGeneration(photoPage) {
+            generateChatDerivative(photoPage, DerivativeOptions.PhotoOption(description))
+        }
+    }
+
+    /** 生成入口包装:成功清错误,失败转一次性错误(入队失败等)。 */
+    private fun launchDerivativeGeneration(page: DerivativePage, block: suspend () -> Long?) {
+        if (page.opened.value == null) return
+        viewModelScope.launch {
+            try {
+                val recordId = block()
+                if (recordId == null) {
+                    page.ui.value = page.ui.value.copy(error = "同类内容正在生成中,请等它完成")
+                } else {
+                    page.ui.value = page.ui.value.copy(error = null)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                android.util.Log.e("ChatDerivative", "enqueue failed", e)
+                page.ui.value = page.ui.value.copy(error = e.message ?: "任务入队失败，请重试")
+            }
+        }
+    }
+
+    /** 失败重试(同一记录、同一 requestId;拨回 generating 后重新入队)。 */
+    fun retryChatDerivative(recordId: Long) {
+        viewModelScope.launch {
+            try {
+                val record = repo.chatDerivativeById(recordId) ?: return@launch
+                if (!record.isFailed) return@launch
+                val ok = repo.db.chatDerivativeDao().markGeneratingForRetry(recordId, System.currentTimeMillis()) > 0
+                if (!ok) return@launch
+                val kind = record.kind.toDerivativeKind()
+                com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+                    getApplication(),
+                    com.neethu.gouxiang.chat.DerivativeTask(
+                        kind,
+                        record.conversationId,
+                        characterId = record.characterId,
+                        recordId = recordId,
+                        requiresNetwork = false,
+                    ),
+                    requestIdOverride = record.requestId,
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                android.util.Log.e("ChatDerivative", "retry enqueue failed", e)
+                setDerivativePageError(recordId, "重试入队失败，请稍后再试")
+            }
+        }
+    }
+
+    /** 删除一条记录(列表与库一致;配图文件一并清理)。 */
+    fun deleteChatDerivative(recordId: Long) {
+        viewModelScope.launch {
+            try {
+                val record = repo.chatDerivativeById(recordId) ?: return@launch
+                repo.deleteChatDerivative(recordId)
+                if (record.imageFile.isNotBlank()) {
+                    runCatching { java.io.File(record.imageFile).delete() }
+                }
+                for (page in listOf(handbookPage, novelPage, photoPage)) {
+                    if (page.ui.value.detailId == recordId) page.ui.value = page.ui.value.copy(detailId = null)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                android.util.Log.e("ChatDerivative", "delete failed", e)
+                setDerivativePageError(recordId, "删除失败，请重试")
+            }
+        }
+    }
+
+    private fun openChatDerivativeDetail(page: DerivativePage, recordId: Long) {
+        page.ui.value = page.ui.value.copy(detailId = recordId)
+    }
+
+    private fun closeChatDerivativeDetail(page: DerivativePage) {
+        page.ui.value = page.ui.value.copy(detailId = null)
+    }
+
+    /** 详情开合(手帐/小说/合照三页;MainActivity 按页转发)。 */
+    fun openHandbookDetail(recordId: Long) = openChatDerivativeDetail(handbookPage, recordId)
+    fun closeHandbookDetail() = closeChatDerivativeDetail(handbookPage)
+    fun openNovelDetail(recordId: Long) = openChatDerivativeDetail(novelPage, recordId)
+    fun closeNovelDetail() = closeChatDerivativeDetail(novelPage)
+    fun openPhotoDetail(recordId: Long) = openChatDerivativeDetail(photoPage, recordId)
+    fun closePhotoDetail() = closeChatDerivativeDetail(photoPage)
+
+    /** 一次性错误落到记录所在页(重试/删除从详情层触发时定位用)。 */
+    private fun setDerivativePageError(recordId: Long, message: String) {
+        for (page in listOf(handbookPage, novelPage, photoPage)) {
+            if (page.ui.value.rows.any { it.id == recordId }) {
+                page.ui.value = page.ui.value.copy(error = message)
+                return
+            }
+        }
+    }
+
+    // ── 聊天背景设置(G3/G4「可用的背景设置」;合照页动作)────────────
+
+    /** 把一张合照设为该会话的聊天背景(07 §1.3「设为聊天背景」本地化)。 */
+    fun setChatBackground(record: com.neethu.gouxiang.data.ChatDerivativeEntity) {
+        if (record.imageFile.isBlank()) return
+        ChatBackgroundPrefs.setBackground(getApplication(), record.conversationId, record.imageFile)
+    }
+
+    /** 还原该会话的默认背景(合照页动作;幂等)。 */
+    fun clearChatBackground(conversationId: Long?) {
+        val id = conversationId ?: photoPage.opened.value ?: return
+        ChatBackgroundPrefs.clearBackground(getApplication(), id)
+    }
+
+    /** 冷启动懒加载:把该会话已设背景从盘读进进程内同步态(设置动作本就即时入态)。 */
+    fun ensureChatBackground(conversationId: Long?) {
+        val id = conversationId ?: return
+        ChatBackgroundPrefs.background(getApplication(), id)
+    }
+
+    // ── 手帐/小说/合照调试命令(ai_cmd:G 工作包验收口)───────────────
+
+    /** `derivative_list`:当前会话的手帐/小说/合照记录(最新在前)。 */
+    suspend fun debugChatDerivativeList(limit: Int): List<com.neethu.gouxiang.data.ChatDerivativeEntity> {
+        val (_, conversationId) = requireOpenChatCharacterAndConversation()
+        return repo.chatDerivatives(conversationId).take(limit)
+    }
+
+    /** `handbook_generate`/`novel_generate`/`photo_generate`:按当前会话生成一条(入队即返回)。 */
+    suspend fun debugGenerateChatDerivative(kind: String, arg: String?): String {
+        val chatId = _chatUi.value.conversationId
+        if (chatId == 0L) throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+        val page = when (kind) {
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_HANDBOOK -> handbookPage
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_NOVEL -> novelPage
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_PHOTO -> photoPage
+            else -> throw IllegalArgumentException("unknown derivative kind '$kind'")
+        }
+        if (page.opened.value != chatId) openDerivativePage(page, chatId)
+        val option = when (kind) {
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_HANDBOOK ->
+                DerivativeOptions.HandbookOption(DerivativeRange.Preset.fromKey(arg).key)
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_NOVEL ->
+                DerivativeOptions.NovelOption(NovelLength.fromKey(arg).key)
+            else -> {
+                val description = arg?.trim().orEmpty()
+                if (description.isBlank()) {
+                    throw IllegalArgumentException("missing ai_arg — photo description text, e.g. \"天台看晚霞\"")
+                }
+                DerivativeOptions.PhotoOption(description.take(DerivativeOptions.PHOTO_DESCRIPTION_MAX_CHARS))
+            }
+        }
+        val recordId = generateChatDerivative(page, option)
+            ?: throw IllegalStateException("$kind is already generating — poll derivative_list")
+        return "queued record $recordId ($kind) for conversation $chatId (poll derivative_list to confirm)"
+    }
+
+    /** `derivative_retry`:按记录 id 重试一次失败记录(与 UI「重试」同一数据路径)。 */
+    suspend fun debugChatDerivativeRetry(recordId: Long): String {
+        val record = repo.chatDerivativeById(recordId)
+            ?: throw IllegalArgumentException("No chat derivative record matches id $recordId — send ai_cmd=derivative_list")
+        if (!record.isFailed) throw IllegalStateException("record $recordId is ${record.state}; only failed records can be retried")
+        val reset = repo.db.chatDerivativeDao().markGeneratingForRetry(recordId, System.currentTimeMillis()) > 0
+        if (!reset) throw IllegalStateException("record $recordId state changed concurrently — poll derivative_list")
+        com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+            getApplication(),
+            com.neethu.gouxiang.chat.DerivativeTask(
+                record.kind.toDerivativeKind(),
+                record.conversationId,
+                characterId = record.characterId,
+                recordId = recordId,
+                requiresNetwork = false,
+            ),
+            requestIdOverride = record.requestId,
+        )
+        return "retry queued for record $recordId (poll derivative_list to confirm)"
+    }
+
+    /** `derivative_delete`:按记录 id 删除(与 UI「删除」同一数据路径)。 */
+    suspend fun debugChatDerivativeDelete(recordId: Long): String {
+        val record = repo.chatDerivativeById(recordId)
+            ?: throw IllegalArgumentException("No chat derivative record matches id $recordId — send ai_cmd=derivative_list")
+        repo.deleteChatDerivative(recordId)
+        if (record.imageFile.isNotBlank()) runCatching { java.io.File(record.imageFile).delete() }
+        for (page in listOf(handbookPage, novelPage, photoPage)) {
+            if (page.ui.value.detailId == recordId) page.ui.value = page.ui.value.copy(detailId = null)
+        }
+        return "deleted record $recordId (${record.kind}/${record.state})"
+    }
+
+    /** 记录 kind 字符串 → DerivativeKind(未知直接抛错由调用方处理)。 */
+    private fun String.toDerivativeKind(): com.neethu.gouxiang.chat.DerivativeKind =
+        when (this) {
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_HANDBOOK -> com.neethu.gouxiang.chat.DerivativeKind.HANDBOOK
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_NOVEL -> com.neethu.gouxiang.chat.DerivativeKind.NOVEL
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_PHOTO -> com.neethu.gouxiang.chat.DerivativeKind.PHOTO
+            else -> throw IllegalArgumentException("unknown chat derivative kind '$this'")
+        }
+
+    // ── 心声 G4:角色开关 / 内容管理 ─────────────────────────────────
+
+    /** `innervoice_switch` 的目标角色(心声页当前角色;未开页报错)。 */
+    fun debugInnerVoiceCharacterId(): Long? =
+        _innerVoiceUi.value.characterId.takeIf { it > 0 }
+
+    /** 切换该角色「允许自动生成心声」(心声页开关行;只门控自动路径,点击不受限)。 */
+    fun toggleInnerVoiceAuto(characterId: Long, enabled: Boolean) {
+        viewModelScope.launch {
+            val character = repo.characterById(characterId) ?: return@launch
+            repo.updateCharacter(character.copy(innerVoiceAuto = enabled))
+        }
+    }
+
+    /** 删除一张心声卡(G4 内容管理;配图文件一并清理)。 */
+    fun deleteInnerVoice(id: Long) {
+        viewModelScope.launch {
+            try {
+                val convId = _innerVoiceConversationId.value ?: return@launch
+                val conv = repo.db.conversationDao().byId(convId) ?: return@launch
+                val target = repo.innerVoices(conv.characterId).firstOrNull { it.id == id } ?: return@launch
+                repo.db.innerVoiceDao().deleteById(id)
+                if (target.imageFile.isNotBlank()) {
+                    runCatching { java.io.File(target.imageFile).delete() }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                android.util.Log.e("InnerVoice", "delete failed", e)
+                _innerVoiceUi.value = _innerVoiceUi.value.copy(error = "删除失败，请重试")
+            }
+        }
+    }
+
     // ── 记忆页 05(F3)───────────────────────────────────────────────
 
     /** 记忆页打开的会话 id(null=未进入;入口:聊天页顶栏「记忆」图标)。 */
@@ -2052,6 +2493,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (e.success) refreshCharacterHomeCounts()
     }
 
+    /** 手帐/小说/合照任务收口(MainActivity 消费事件后回调):成功同步主页尾注计数。 */
+    fun onChatDerivativeTaskSettled(e: com.neethu.gouxiang.work.DerivativeEvents.Event) {
+        if (e.success) refreshCharacterHomeCounts()
+    }
+
     /** WorkManager persists this state, including across process death. */
     private suspend fun observeManualDerivative(
         kind: com.neethu.gouxiang.chat.DerivativeKind,
@@ -2078,7 +2524,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
     }
 
-    /** 角色主页占位卡尾注同步(若主页仍打开;F8/F9/番外共用)。 */
+    /** 角色主页占位卡尾注同步(若主页仍打开;F8/F9/番外/G 衍生共用)。 */
     private fun refreshCharacterHomeCounts() {
         val homeConvId = _characterHomeConversationId.value ?: return
         viewModelScope.launch {
@@ -2087,6 +2533,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 innerVoiceCount = repo.countInnerVoices(conv.characterId),
                 momentCount = repo.countMoments(conv.characterId),
                 sidestoryCount = repo.countSidestoryRecords(conv.characterId),
+                handbookCount = repo.countChatDerivatives(conv.characterId, com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_HANDBOOK),
+                novelCount = repo.countChatDerivatives(conv.characterId, com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_NOVEL),
+                photoCount = repo.countChatDerivatives(conv.characterId, com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_PHOTO),
             )
         }
     }
@@ -2140,6 +2589,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 innerVoiceImages = com.neethu.gouxiang.ai.GenerationPrefs.innerVoiceImages(app),
                 momentsImages = com.neethu.gouxiang.ai.GenerationPrefs.momentsImages(app),
                 sidestoryImages = com.neethu.gouxiang.ai.GenerationPrefs.sidestoryImages(app),
+                handbookImages = com.neethu.gouxiang.ai.GenerationPrefs.handbookImages(app),
             )
     }
 
@@ -2179,6 +2629,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.neethu.gouxiang.ai.GenerationPrefs.setMomentsImages(app, enabled)
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_SIDESTORY_IMAGES ->
                 com.neethu.gouxiang.ai.GenerationPrefs.setSidestoryImages(app, enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_HANDBOOK_IMAGES ->
+                com.neethu.gouxiang.ai.GenerationPrefs.setHandbookImages(app, enabled)
         }
         _generationSettings.value = when (key) {
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_AUTO ->
@@ -2197,6 +2649,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _generationSettings.value.copy(momentsImages = enabled)
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_SIDESTORY_IMAGES ->
                 _generationSettings.value.copy(sidestoryImages = enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_HANDBOOK_IMAGES ->
+                _generationSettings.value.copy(handbookImages = enabled)
             else -> _generationSettings.value.copy(notifyEnabled = enabled)
         }
     }
@@ -2282,6 +2736,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 通知直跳入口:朋友圈页。 */
     fun openMomentsFromNotification(conversationId: Long) {
         openMoments(conversationId)
+    }
+
+    /** 通知直跳入口:手帐页(G 工作包)。 */
+    fun openHandbookFromNotification(conversationId: Long) {
+        openHandbook(conversationId)
+    }
+
+    /** 通知直跳入口:小说页(G 工作包)。 */
+    fun openNovelFromNotification(conversationId: Long) {
+        openNovel(conversationId)
+    }
+
+    /** 通知直跳入口:合照页(G 工作包)。 */
+    fun openPhotoFromNotification(conversationId: Long) {
+        openPhoto(conversationId)
     }
 
     /** 通知直跳入口:聊天页(手机形态,与消息列表角标入口同参)。 */
@@ -2511,6 +2980,10 @@ data class CharacterHomeUiState(
     val momentCount: Int = 0,
     /** 「番外剧场」占位卡尾注(F 工作包:全部 N;N=0 时不带尾注)。 */
     val sidestoryCount: Int = 0,
+    /** 「手帐」「小说」「合照」入口卡尾注(G 工作包:全部 N;N=0 时不带尾注)。 */
+    val handbookCount: Int = 0,
+    val novelCount: Int = 0,
+    val photoCount: Int = 0,
 )
 
 /**

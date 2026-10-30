@@ -41,14 +41,20 @@ internal class DerivativeExecutor(private val app: Context) {
             // 番外/心动(F 工作包 F3/F4):按记录粒度生成,幂等/版本拦截/失败
             // 收口都在 SidestoryGenerator 内部(记录行删除=幂等完成,不判失败)。
             DerivativeKind.SIDESTORY -> sidestoryGenerator().generate(task.recordId, requestId)
-            // M2 接入前不触达(枚举先行,Scheduler/点击均不派发这些 kind;
-            // 触达即视为无操作的完成,不烧请求不重试)。
-            DerivativeKind.HANDBOOK, DerivativeKind.NOVEL, DerivativeKind.PHOTO -> false
+            // 手帐/小说/合照(G 工作包 G1-G3):按记录粒度生成,幂等/版本拦截/
+            // 失败收口都在 ChatDerivativeGenerator 内部(记录行删除=幂等完成)。
+            DerivativeKind.HANDBOOK -> chatDerivativeGenerator().generate(task.recordId, requestId)
+            DerivativeKind.NOVEL -> chatDerivativeGenerator().generate(task.recordId, requestId)
+            DerivativeKind.PHOTO -> chatDerivativeGenerator().generate(task.recordId, requestId)
         }
 
     /** 番外/心动生成器(生产装配;每次执行现取 repo 单例)。 */
     private fun sidestoryGenerator() =
         com.neethu.gouxiang.sidestory.SidestoryGenerator.production(app)
+
+    /** 手帐/小说/合照生成器(G 工作包;生产装配)。 */
+    private fun chatDerivativeGenerator() =
+        com.neethu.gouxiang.derivatives.ChatDerivativeGenerator.production(app)
 
     // ── 心声(F8 主体搬运;判空/失败语义与 UI 版一致)────────────────
 

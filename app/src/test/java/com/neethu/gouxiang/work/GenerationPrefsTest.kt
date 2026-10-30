@@ -53,6 +53,17 @@ class GenerationPrefsTest {
     }
 
     @Test
+    fun `handbook images default off and roundtrip`() {
+        // G1 手帐配图:默认关(与番外配图同口径),写后读往返
+        val c = context()
+        assertFalse(GenerationPrefs.handbookImages(c))
+        GenerationPrefs.setHandbookImages(c, true)
+        assertTrue(GenerationPrefs.handbookImages(c))
+        GenerationPrefs.setHandbookImages(c, false)
+        assertFalse(GenerationPrefs.handbookImages(c))
+    }
+
+    @Test
     fun `moments last day roundtrip and default`() {
         val c = context()
         assertEquals(-1L, GenerationPrefs.momentsLastDay(c))

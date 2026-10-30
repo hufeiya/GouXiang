@@ -118,6 +118,12 @@ fun GenerationSettingsScreen(
             onCheckedChange = { onToggle(com.neethu.gouxiang.ai.GenerationPrefs.KEY_SIDESTORY_IMAGES, it) },
         )
         SwitchRow(
+            title = "手帐配图",
+            subtitle = "关闭后新手帐仅生成文字；失败保留文字，可在记录里查看",
+            checked = snapshot.handbookImages,
+            onCheckedChange = { onToggle(com.neethu.gouxiang.ai.GenerationPrefs.KEY_HANDBOOK_IMAGES, it) },
+        )
+        SwitchRow(
             title = "隔夜记忆总结",
             subtitle = "开启后闲置 8 小时以上自动提炼记忆窗口;关闭后记忆窗口等下次聊天时提炼",
             checked = snapshot.memoryOvernight,
@@ -131,7 +137,7 @@ fun GenerationSettingsScreen(
         )
         SwitchRow(
             title = "手帐/小说/合照自动",
-            subtitle = "功能开发中，暂不可开启",
+            subtitle = "自动生成暂未开放；三类内容可在各自页面手动生成",
             checked = false,
             enabled = false,
             onCheckedChange = { },

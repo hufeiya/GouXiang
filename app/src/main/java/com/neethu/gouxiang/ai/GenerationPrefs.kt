@@ -32,6 +32,12 @@ object GenerationPrefs {
      */
     const val KEY_SIDESTORY_IMAGES = "gen_sidestory_images"
 
+    /**
+     * 手帐配图(G1;文本先出、图片可选,失败保留文字成品)。默认关:与番外
+     * 配图同口径——手帐以文字为主,配图逐张烧 token,按保守默认。
+     */
+    const val KEY_HANDBOOK_IMAGES = "gen_handbook_images"
+
     /** 隔夜记忆总结兜底(A16:闲置 8h+ 补提炼)。 */
     const val KEY_MEMORY_OVERNIGHT = "gen_memory_overnight"
 
@@ -101,6 +107,12 @@ object GenerationPrefs {
 
     fun setSidestoryImages(context: Context, enabled: Boolean) =
         write(context, KEY_SIDESTORY_IMAGES, enabled)
+
+    /** 手帐配图(G1;默认关,文本先出图片可选)。 */
+    fun handbookImages(context: Context): Boolean = read(context, KEY_HANDBOOK_IMAGES, false)
+
+    fun setHandbookImages(context: Context, enabled: Boolean) =
+        write(context, KEY_HANDBOOK_IMAGES, enabled)
 
     /** 隔夜记忆总结兜底(默认关:记忆页已有手动「立即总结」兜底)。 */
     fun memoryOvernight(context: Context): Boolean =

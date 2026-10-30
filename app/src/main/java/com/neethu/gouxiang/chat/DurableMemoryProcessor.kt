@@ -114,6 +114,9 @@ class DurableMemoryProcessor(private val db: GouXiangDatabase, private val extra
         // F 工作包回溯联动:番外/心动记录同语义标失效(来源区间命中即标,
         // 不删除不重写;生成中的在途候选由版本拦截拒绝落库)。
         db.sidestoryRecordDao().markStaleFrom(conversationId, messageId)
+        // G 工作包回溯联动:手帐/小说/合照记录同语义标失效(G2「历史变化时
+        // 标记内容可能过期」;生成中的在途候选由版本拦截拒绝落库)。
+        db.chatDerivativeDao().markStaleFrom(conversationId, messageId)
         db.messageDao().deleteFromMessage(conversationId, messageId)
     }
 }

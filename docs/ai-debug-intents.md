@@ -251,6 +251,22 @@ adb shell am start -n $PKG/.MainActivity --es ai_cmd msgs
 
 F 工作包验收 SOP:`open_chat <角色>` → `sidestory_keys` → `sidestory_generate his_collection` 与 `sidestory_generate checkphone` 各一条 → 轮询 `sidestory_list`(状态转 succeeded)→ `sidestory_delete <id>` 对拍;断网失败恢复 = 断网后 `sidestory_generate` → `sidestory_list` 见 failed → 联网后 `sidestory_retry`。
 
+### 5.6b 手帐/小说/合照与心声交互(G 工作包,2026-10-31 增补)
+
+| 命令 | 参数 | 作用 |
+|---|---|---|
+| `handbook_generate` | `ai_arg`=turn5 \| turn10 \| all(缺省 turn10) | 按预设回合范围生成一条手帐(与 UI「聊天范围」chips 同一数据路径:事务内原子去重→按 turn 分组快照来源区间与会话版本→落 generating 行→入队 Worker);**入队即 OK,结果用 `derivative_list` 轮询**;会真实请求 LLM,断网时任务与记录一致转 failed |
+| `novel_generate` | `ai_arg`=short \| medium \| long(缺省 medium) | 按长度档(短篇 2~3 章/中篇 4~5 章/长篇 6~8 章)生成一部多章小说;LLM 输出章数越出所选档边界判解析失败(不静默裁剪) |
+| `photo_generate` | `ai_arg`=合照描述文本(必填,≤60字) | 二维文生图合照(角色形象+描述;无参考图/身份保持能力,UI 明示不承诺一致性);失败整条记 failed 可重试 |
+| `derivative_list` | `ai_x`=条数(默认20) | 当前会话的手帐/小说/合照记录:`id kind 状态 配图 [stale] 请求ID前8位 「标题」`;`stale`=来源历史已回溯 |
+| `derivative_retry` | `ai_x`=记录 id | 重试一条 failed 记录(同一 requestId 幂等重跑) |
+| `derivative_delete` | `ai_x`=记录 id | 删除一条记录(列表与库一致;配图文件一并清理) |
+| `open_handbook` / `close_handbook`、`open_novel` / `close_novel`、`open_photo` / `close_photo` | — | 打开/关闭对应页(当前会话;uiautomator dump 验证「参数区/记录」两区与合照描述输入) |
+| `innervoice_switch` | `ai_arg`=on \| off | 当前角色的「自动生成心声」开关(G4 角色级,写 `characters.innerVoiceAuto`;需先 `open innervoice`)。关→自动批量扫描跳过该角色且执行期二次拦截;点击「生成心声」不受限 |
+| `innervoice_delete` | `ai_x`=心声 id | 删除一张心声卡(G4 内容管理;配图文件一并清理) |
+
+G 工作包验收 SOP:`open_chat <角色>` → `handbook_generate turn10`、`novel_generate medium`、`photo_generate 天台看晚霞` 各一条 → 轮询 `derivative_list`(状态转 succeeded)→ `derivative_delete <id>` 对拍;断网失败恢复 = 断网后 `photo_generate` → `derivative_list` 见 failed → 联网后 `derivative_retry`。心声开关验收 = `open innervoice` → `innervoice_switch off` → dump 心声页开关为关,且心声自动批量(若全局开关开)跳过该角色。
+
 ### 5.7 AI 底座(ai_config_prefs / 语音)
 
 | 命令 | 参数 | 分期 | 作用 |

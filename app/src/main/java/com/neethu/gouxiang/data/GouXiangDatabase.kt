@@ -26,8 +26,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ProactiveConversationStateEntity::class,
         CharacterStatusEntity::class,
         SidestoryRecordEntity::class,
+        ChatDerivativeEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -44,10 +45,50 @@ abstract class GouXiangDatabase : RoomDatabase() {
     abstract fun proactiveDao(): ProactiveDao
     abstract fun characterStatusDao(): CharacterStatusDao
     abstract fun sidestoryRecordDao(): SidestoryRecordDao
+    abstract fun chatDerivativeDao(): ChatDerivativeDao
     abstract fun seedDao(): SeedDao
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        /**
+         * G 工作包迁移(v11→v12,单表纯增量 + 角色开关列):
+         * - 新建聊天衍生内容记录表 `chat_derivative_records`(手帐/小说/合照
+         *   三类共用,kind 分区;与番外 `sidestory_records` 同构不并表);
+         * - `characters` 加 `innerVoiceAuto` 角色心声开关列(G4,既有行回填 1
+         *   = 允许自动;心声自动全局开关默认关,叠加后行为不变)。
+         * 既有角色/会话/消息/记忆/心声/朋友圈/状态/番外不动——尤其 inner_voices
+         * 的存量心声记录在升级中原样保留(G4「迁移不丢失」)。
+         */
+        val MIGRATION_11_12: Migration = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `chat_derivative_records` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`characterId` INTEGER NOT NULL, " +
+                        "`conversationId` INTEGER NOT NULL, " +
+                        "`optionJson` TEXT NOT NULL, " +
+                        "`sourceStartMessageId` INTEGER, " +
+                        "`sourceEndMessageId` INTEGER, " +
+                        "`sourceVersion` INTEGER NOT NULL, " +
+                        "`requestId` TEXT NOT NULL, " +
+                        "`state` TEXT NOT NULL, " +
+                        "`failureReason` TEXT NOT NULL, " +
+                        "`bodyJson` TEXT NOT NULL, " +
+                        "`imageFile` TEXT NOT NULL, " +
+                        "`imageStatus` TEXT NOT NULL, " +
+                        "`notified` INTEGER NOT NULL, " +
+                        "`isStale` INTEGER NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_derivative_records_characterId` ON `chat_derivative_records` (`characterId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_chat_derivative_records_conversationId` ON `chat_derivative_records` (`conversationId`)")
+                db.execSQL("ALTER TABLE characters ADD COLUMN innerVoiceAuto INTEGER NOT NULL DEFAULT 1")
+            }
+        }
 
         /**
          * F 工作包迁移(v10→v11,单表纯增量):新建统一内容记录表

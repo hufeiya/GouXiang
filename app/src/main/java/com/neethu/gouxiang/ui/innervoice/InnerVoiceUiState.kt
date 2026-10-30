@@ -19,6 +19,10 @@ data class InnerVoiceUiState(
     val imageResults: Map<Long, com.neethu.gouxiang.ui.ImageGenerationState> = emptyMap(),
     val error: String? = null,
     val automaticError: String? = null,
+    /** 该角色是否允许自动生成心声(G4 角色开关;只门控自动路径,点击不受限)。 */
+    val characterAutoEnabled: Boolean = true,
+    /** 当前角色 id(开关回写目标)。 */
+    val characterId: Long = 0,
     /** 加载失败(会话/角色不存在)。 */
     val loadFailed: Boolean = false,
 )

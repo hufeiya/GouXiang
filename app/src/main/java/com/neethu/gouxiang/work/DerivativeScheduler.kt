@@ -135,6 +135,9 @@ class InnerVoiceAutoWorker(context: Context, params: WorkerParameters) :
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(applicationContext)
         return runCatching {
             for (conv in repo.db.conversationDao().latestImPerCharacter()) {
+                // G4 角色开关:该角色关了「允许自动生成心声」则不入队(点击路径不受限)。
+                val character = repo.characterById(conv.characterId)
+                if (character != null && !character.innerVoiceAuto) continue
                 DerivativeWorker.enqueue(
                     applicationContext,
                     DerivativeTask(DerivativeKind.INNER_VOICE, conv.id, DerivativeSource.AUTOMATIC, conv.characterId, automaticEpoch = epoch),

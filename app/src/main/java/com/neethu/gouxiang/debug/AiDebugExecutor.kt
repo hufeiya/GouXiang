@@ -90,6 +90,29 @@ internal suspend fun executeAiCommand(
                 vm.closeSidestory()
                 "sidestory screen closed"
             }
+            "handbook_generate" -> vm.debugGenerateChatDerivative("handbook", command.arg)
+            "novel_generate" -> vm.debugGenerateChatDerivative("novel", command.arg)
+            "photo_generate" -> vm.debugGenerateChatDerivative("photo", command.arg)
+            "derivative_list" -> cmdDerivativeList(vm, command)
+            "derivative_retry" -> cmdDerivativeRetry(vm, command)
+            "derivative_delete" -> cmdDerivativeDelete(vm, command)
+            "open_handbook" -> cmdOpenDerivative(vm, "handbook")
+            "close_handbook" -> {
+                vm.closeHandbook()
+                "handbook screen closed"
+            }
+            "open_novel" -> cmdOpenDerivative(vm, "novel")
+            "close_novel" -> {
+                vm.closeNovel()
+                "novel screen closed"
+            }
+            "open_photo" -> cmdOpenDerivative(vm, "photo")
+            "close_photo" -> {
+                vm.closePhoto()
+                "photo screen closed"
+            }
+            "innervoice_switch" -> cmdInnerVoiceSwitch(vm, command)
+            "innervoice_delete" -> cmdInnerVoiceDelete(vm, command)
             else -> throw IllegalArgumentException(
                 "unknown command, send ai_cmd=help (see docs/ai-debug-intents.md)",
             )
@@ -699,6 +722,67 @@ private suspend fun cmdOpenSidestory(vm: MainViewModel): String {
         ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
     vm.openSidestory(chatId)
     return "sidestory screen opened for conversation $chatId (verify via uiautomator dump)"
+}
+
+// ── 5.6b 手帐/小说/合照与心声 G 交互(G 工作包)────────────────────
+
+/** `derivative_list`:当前会话的手帐/小说/合照记录(id kind 状态 配图 标题)。 */
+private suspend fun cmdDerivativeList(vm: MainViewModel, command: AiDebugCommand): String {
+    val limit = (command.x?.toInt() ?: 20).coerceIn(1, 100)
+    val records = vm.debugChatDerivativeList(limit)
+    if (records.isEmpty()) return "(no handbook/novel/photo records; handbook_generate | novel_generate | photo_generate one)"
+    return records.joinToString("\n") { r ->
+        val title = r.title.ifBlank { "-" }
+        "${r.id} ${r.kind} ${r.state} img=${r.imageStatus}${if (r.isStale) " stale" else ""} req=${r.requestId.take(8)} 「$title」"
+    }
+}
+
+/** `handbook_generate`/`novel_generate`/`photo_generate` 后的共同重试入口。 */
+private suspend fun cmdDerivativeRetry(vm: MainViewModel, command: AiDebugCommand): String {
+    val id = command.x?.toLong() ?: command.arg?.toLongOrNull()
+        ?: throw IllegalArgumentException("missing record id — pass ai_x=<recordId> (see derivative_list)")
+    return vm.debugChatDerivativeRetry(id)
+}
+
+/** `derivative_delete`:按记录 id 删除一条(与 UI 同一数据路径)。 */
+private suspend fun cmdDerivativeDelete(vm: MainViewModel, command: AiDebugCommand): String {
+    val id = command.x?.toLong() ?: command.arg?.toLongOrNull()
+        ?: throw IllegalArgumentException("missing record id — pass ai_x=<recordId> (see derivative_list)")
+    return vm.debugChatDerivativeDelete(id)
+}
+
+/** `open_handbook`/`open_novel`/`open_photo`:打开对应衍生页(dump 验证页面结构)。 */
+private suspend fun cmdOpenDerivative(vm: MainViewModel, kind: String): String {
+    val chatId = vm.debugConversationId
+        ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+    when (kind) {
+        "handbook" -> vm.openHandbook(chatId)
+        "novel" -> vm.openNovel(chatId)
+        else -> vm.openPhoto(chatId)
+    }
+    return "$kind screen opened for conversation $chatId (verify via uiautomator dump)"
+}
+
+/** `innervoice_switch`:当前角色的「自动生成心声」开关(arg = on | off)。 */
+private fun cmdInnerVoiceSwitch(vm: MainViewModel, command: AiDebugCommand): String {
+    val arg = requireArg(command).lowercase()
+    val enabled = when (arg) {
+        "on", "true", "1" -> true
+        "off", "false", "0" -> false
+        else -> throw IllegalArgumentException("arg must be on|off (got '$arg')")
+    }
+    val characterId = vm.debugInnerVoiceCharacterId()
+        ?: throw IllegalStateException("no open inner-voice screen — send ai_cmd=open innervoice first")
+    vm.toggleInnerVoiceAuto(characterId, enabled)
+    return "inner-voice auto switch for character $characterId -> $enabled (poll state or dump the sheet)"
+}
+
+/** `innervoice_delete`:按心声 id 删除一张卡(与 UI 同一数据路径)。 */
+private fun cmdInnerVoiceDelete(vm: MainViewModel, command: AiDebugCommand): String {
+    val id = command.x?.toLong() ?: command.arg?.toLongOrNull()
+        ?: throw IllegalArgumentException("missing voice id — pass ai_x=<innerVoiceId>")
+    vm.deleteInnerVoice(id)
+    return "inner voice $id delete requested (poll innervoice screen or dump)"
 }
 
 /** char 载荷容错 JSON 解析(与 MultiBubbleParser 同款 lenient 配置)。 */

@@ -41,6 +41,14 @@ data class CharacterEntity(
      * 在图库(filesDir/avatars/)可经「设为当前」切回。
      */
     val avatarVersion: Long = 0,
+    /**
+     * 该角色是否允许自动生成心声(G4 角色开关,07-chat-derivatives.md §1.4
+     * 「角色可生成 Ta 的心声」的本地化):只门控「自动」路径——心声自动批量
+     * ([com.neethu.gouxiang.work.InnerVoiceAutoWorker] 入队与 [com.neethu.gouxiang.work.DerivativeWorker]
+     * 执行时双重检查);点击「生成心声」不受限。默认开(与心声自动全局开关
+     * 默认关叠加:关全局=谁都不自动,开全局=未关角色的可自动)。
+     */
+    @androidx.room.ColumnInfo(defaultValue = "1") val innerVoiceAuto: Boolean = true,
     /** 来源标识(预留:脑洞 2.0 / 本地创作)。 */
     val source: String = "local",
     /** 创建时间(epoch millis)。 */

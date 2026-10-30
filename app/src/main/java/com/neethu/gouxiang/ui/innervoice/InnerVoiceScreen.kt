@@ -62,6 +62,10 @@ fun InnerVoiceScreen(
     onGenerate: () -> Unit,
     onDismiss: () -> Unit,
     onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit = {},
+    /** G4 角色开关切换(只门控自动路径,点击生成不受限)。 */
+    onToggleAuto: (Boolean) -> Unit = {},
+    /** G4 内容管理:删除一张心声卡(配图文件一并清理)。 */
+    onDelete: (Long) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler { onDismiss() }
@@ -166,9 +170,36 @@ fun InnerVoiceScreen(
                 state.automaticError?.let { error ->
                     item(key = "automatic-error") { Text(error, color = Color(0xFFFFB4CD), fontSize = 12.sp) }
                 }
+                // ── G4 角色开关:允许该角色自动生成心声(点击生成不受开关限制)──
+                if (state.characterId > 0) {
+                    item(key = "auto-switch") {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("自动生成心声", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Text(
+                                    "开启后会在后台定期为 TA 自动写心声(仍受「内容生成」设置的总开关约束);手动生成不受影响",
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    fontSize = 11.sp,
+                                    lineHeight = 15.sp,
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            androidx.compose.material3.Switch(
+                                checked = state.characterAutoEnabled,
+                                onCheckedChange = onToggleAuto,
+                            )
+                        }
+                    }
+                }
                 // ── 心声卡列表(dump rv_events,倒序最新在上)──────────────
                 items(state.items, key = { it.id }) { voice ->
-                    VoiceCard(voice, state.imageResults[voice.id], onRetryImage)
+                    VoiceCard(voice, state.imageResults[voice.id], onRetryImage, onDelete)
                 }
                 if (state.items.isEmpty() && !state.generating && !state.loading) {
                     item(key = "empty") {
@@ -202,9 +233,14 @@ fun InnerVoiceScreen(
     }
 }
 
-/** 单张心声卡(dump 每卡:img_cover + tv_title + tv_desc + tv_expire)。 */
+/** 单张心声卡(dump 每卡:img_cover + tv_title + tv_desc + tv_expire;G4 增加删除操作)。 */
 @Composable
-private fun VoiceCard(voice: InnerVoiceEntity, image: com.neethu.gouxiang.ui.ImageGenerationState?, onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit) {
+private fun VoiceCard(
+    voice: InnerVoiceEntity,
+    image: com.neethu.gouxiang.ui.ImageGenerationState?,
+    onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit,
+    onDelete: (Long) -> Unit,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -261,6 +297,17 @@ private fun VoiceCard(voice: InnerVoiceEntity, image: com.neethu.gouxiang.ui.Ima
                 formatVoiceDate(voice.at),
                 color = Color.White.copy(alpha = 0.55f),
                 fontSize = 13.sp,
+            )
+            Spacer(Modifier.height(6.dp))
+            // G4 内容管理:删除卡片(本地记录 + 配图文件;不可恢复,直接执行)
+            Text(
+                "删除这条心声",
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 12.sp,
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onDelete(voice.id) },
             )
         }
     }

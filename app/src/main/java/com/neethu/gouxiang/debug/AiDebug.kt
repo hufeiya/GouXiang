@@ -161,6 +161,18 @@ fun aiDebugHelp(): String = """
 |  sidestory_retry <ai_x=id> 重试一条失败记录(断网失败后的恢复路径)
 |  sidestory_delete <ai_x=id> 删除一条记录(列表与库一致)
 |  open_sidestory / close_sidestory 打开/关闭番外页(dump 验证页面)
+|Derivatives (手帐/小说/合照与心声交互,G 工作包;需先 open_chat):
+|  handbook_generate <arg>  arg=turn5|turn10|all(缺省 turn10);入队即 OK,
+|                           结果用 derivative_list 轮询;会真实请求 LLM
+|  novel_generate <arg>     arg=short|medium|long(缺省 medium)
+|  photo_generate <arg>     arg=合照描述文本(必填,≤60字);纯生图,无 LLM 文本
+|  derivative_list [ai_x=N] 当前会话记录: id kind 状态 配图 请求 标题(stale=已回溯)
+|  derivative_retry <ai_x=id> 重试一条失败记录(断网失败后的恢复路径)
+|  derivative_delete <ai_x=id> 删除一条记录(配图文件一并清理)
+|  open_handbook / close_handbook、open_novel / close_novel、
+|  open_photo / close_photo   打开/关闭对应页(dump 验证)
+|  innervoice_switch <arg>  当前角色「自动生成心声」开关(arg=on|off;需先 open innervoice)
+|  innervoice_delete <ai_x=id> 删除一张心声卡(内容管理)
 |
     |Hot start: 应用已启动时再次 am start 走 onNewIntent(命令经进程级总线入队);
     |排查入队用 adb logcat -d -s AIDebug.Queue,执行结果用 -s AIDebug。

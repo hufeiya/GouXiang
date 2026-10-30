@@ -157,6 +157,16 @@ class MainActivity : ComponentActivity() {
         // 番外剧场与心动事件(F 工作包 F3/F4)
         val sidestoryId by vm.sidestoryConversationId.collectAsState()
         val sidestoryUi by vm.sidestoryUi.collectAsState()
+
+        // 手帐/小说/合照(G 工作包):三页打开态/记录流 + 合照描述与聊天背景
+        val handbookId by vm.handbookConversationId.collectAsState()
+        val handbookUi by vm.handbookUi.collectAsState()
+        val novelId by vm.novelConversationId.collectAsState()
+        val novelUi by vm.novelUi.collectAsState()
+        val photoId by vm.photoConversationId.collectAsState()
+        val photoUi by vm.photoUi.collectAsState()
+        val photoDescription by vm.photoDescription.collectAsState()
+        val chatBackgrounds by vm.chatBackgrounds.collectAsState()
         // 对话风格(F5:弹层 09/10 的当前选择)
         val chatStyle by vm.chatStyle.collectAsState()
         // 语音通话 12(F6)
@@ -237,6 +247,15 @@ class MainActivity : ComponentActivity() {
                     com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_SIDESTORY,
                 )?.let { vm.openSidestoryFromNotification(it) }
                 extras.navLong(
+                    com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_HANDBOOK,
+                )?.let { vm.openHandbookFromNotification(it) }
+                extras.navLong(
+                    com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_NOVEL,
+                )?.let { vm.openNovelFromNotification(it) }
+                extras.navLong(
+                    com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_PHOTO,
+                )?.let { vm.openPhotoFromNotification(it) }
+                extras.navLong(
                     com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_CHAT,
                 )?.let { vm.openChatFromNotification(it) }
                 if (extras.containsKey(
@@ -258,7 +277,7 @@ class MainActivity : ComponentActivity() {
                 com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE -> vm.onInnerVoiceTaskSettled(e)
                 com.neethu.gouxiang.chat.DerivativeKind.MOMENT -> vm.onMomentTaskSettled(e)
                 com.neethu.gouxiang.chat.DerivativeKind.SIDESTORY -> vm.onSidestoryTaskSettled(e)
-                else -> Unit
+                else -> vm.onChatDerivativeTaskSettled(e)
             }
         }
 
@@ -364,6 +383,8 @@ class MainActivity : ComponentActivity() {
 
         // 聊天主页 03:全屏覆盖层(自管边缘到边缘,盖住底栏;返回回消息列表)
         if (chatId != null && !isPhoneChat) {
+            // 合照背景冷启动懒加载(G3/G4):进聊天页把已设背景读进同步态
+            LaunchedEffect(chatId) { vm.ensureChatBackground(chatId) }
             Box(
                 Modifier
                     .fillMaxSize()
@@ -372,6 +393,8 @@ class MainActivity : ComponentActivity() {
                 ChatMainScreen(
                     state = chatUi,
                     avatarFile = chatUi.character?.let { avatarFiles[it.id] },
+                    // 合照设为聊天背景(G3/G4):设置了合照背景的会话优先展示合照
+                    backgroundFile = chatBackgrounds[chatId],
                     onBack = { vm.closeChat() },
                     onSend = { vm.sendChatMessage(it) },
                     streamDraft = streamDraft,
@@ -492,6 +515,18 @@ class MainActivity : ComponentActivity() {
                     onOpenSidestory = {
                         characterHomeId?.let { vm.openSidestory(it) }
                     },
+                    handbookCount = characterHomeUi.handbookCount,
+                    novelCount = characterHomeUi.novelCount,
+                    photoCount = characterHomeUi.photoCount,
+                    onOpenHandbook = {
+                        characterHomeId?.let { vm.openHandbook(it) }
+                    },
+                    onOpenNovel = {
+                        characterHomeId?.let { vm.openNovel(it) }
+                    },
+                    onOpenPhoto = {
+                        characterHomeId?.let { vm.openPhoto(it) }
+                    },
                 )
             }
         }
@@ -506,6 +541,11 @@ class MainActivity : ComponentActivity() {
                     onGenerate = { vm.generateInnerVoices() },
                     onDismiss = { vm.closeInnerVoices() },
                     onRetryImage = { vm.retryDerivativeImage(com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE, it) },
+                    // G4:角色开关(只门控自动路径)+ 内容管理(删卡)。
+                    onToggleAuto = { enabled ->
+                        innerVoiceUi.characterId.takeIf { it > 0 }?.let { vm.toggleInnerVoiceAuto(it, enabled) }
+                    },
+                    onDelete = { vm.deleteInnerVoice(it) },
                 )
             }
         }
@@ -540,6 +580,56 @@ class MainActivity : ComponentActivity() {
                     onRetry = { vm.retrySidestory(it) },
                     onDelete = { vm.deleteSidestoryRecord(it) },
                     onCloseDetail = { vm.closeSidestoryDetail() },
+                )
+            }
+        }
+
+        // 手帐页(G 工作包 G1):角色主页「手帐」卡 / 完成通知进入的全屏覆盖层
+        // (渲染序在番外页之后,同层后声明者在上)。返回 = closeHandbook()。
+        if (handbookId != null) {
+            Box(Modifier.fillMaxSize()) {
+                com.neethu.gouxiang.ui.derivatives.HandbookScreen(
+                    state = handbookUi,
+                    onBack = { vm.closeHandbook() },
+                    onGenerate = { vm.generateHandbook(it) },
+                    onOpenDetail = { vm.openHandbookDetail(it) },
+                    onRetry = { vm.retryChatDerivative(it) },
+                    onDelete = { vm.deleteChatDerivative(it) },
+                    onCloseDetail = { vm.closeHandbookDetail() },
+                )
+            }
+        }
+
+        // 小说页(G 工作包 G2):同层后声明者在上,盖回角色主页。
+        if (novelId != null) {
+            Box(Modifier.fillMaxSize()) {
+                com.neethu.gouxiang.ui.derivatives.NovelScreen(
+                    state = novelUi,
+                    onBack = { vm.closeNovel() },
+                    onGenerate = { vm.generateNovel(it) },
+                    onOpenDetail = { vm.openNovelDetail(it) },
+                    onRetry = { vm.retryChatDerivative(it) },
+                    onDelete = { vm.deleteChatDerivative(it) },
+                    onCloseDetail = { vm.closeNovelDetail() },
+                )
+            }
+        }
+
+        // 合照页(G 工作包 G3):描述输入 + 二维生图 + 设为聊天背景。
+        if (photoId != null) {
+            Box(Modifier.fillMaxSize()) {
+                com.neethu.gouxiang.ui.derivatives.PhotoScreen(
+                    state = photoUi,
+                    description = photoDescription,
+                    onDescriptionChange = { vm.onPhotoDescriptionChange(it) },
+                    onBack = { vm.closePhoto() },
+                    onGenerate = { vm.generatePhoto() },
+                    onOpenDetail = { vm.openPhotoDetail(it) },
+                    onRetry = { vm.retryChatDerivative(it) },
+                    onDelete = { vm.deleteChatDerivative(it) },
+                    onSetBackground = { vm.setChatBackground(it) },
+                    onClearBackground = { vm.clearChatBackground(photoId) },
+                    onCloseDetail = { vm.closePhotoDetail() },
                 )
             }
         }

@@ -34,6 +34,15 @@ internal object NotificationPoster {
     /** 直跳番外/心动页 extra(F 工作包)。 */
     const val EXTRA_OPEN_SIDESTORY = "open_sidestory_conversation_id"
 
+    /** 直跳手帐页 extra(G 工作包)。 */
+    const val EXTRA_OPEN_HANDBOOK = "open_handbook_conversation_id"
+
+    /** 直跳小说页 extra(G 工作包)。 */
+    const val EXTRA_OPEN_NOVEL = "open_novel_conversation_id"
+
+    /** 直跳合照页 extra(G 工作包)。 */
+    const val EXTRA_OPEN_PHOTO = "open_photo_conversation_id"
+
     /** 直跳消息列表(不落具体会话)。 */
     const val EXTRA_OPEN_MESSAGES = "open_messages"
 
@@ -127,6 +136,26 @@ internal object NotificationPoster {
         )
     }
 
+    /**
+     * 手帐/小说/合照完成通知(G 工作包;通道一,直跳各自页面)。ID 走
+     * [stableChatDerivativeId]:同角色/同会话/同类型的后续完成替换同一条。
+     */
+    fun chatDerivative(context: Context, characterName: String, conversationId: Long, kind: String) {
+        val direct = when (kind) {
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_HANDBOOK -> EXTRA_OPEN_HANDBOOK
+            com.neethu.gouxiang.data.ChatDerivativeEntity.KIND_NOVEL -> EXTRA_OPEN_NOVEL
+            else -> EXTRA_OPEN_PHOTO
+        }
+        notify(
+            context,
+            DerivativeCopy.CHANNEL_DERIVATIVE,
+            id = stableChatDerivativeId(characterName, conversationId, kind),
+            title = DerivativeCopy.chatDerivativeTitle(characterName, kind),
+            body = DerivativeCopy.BODY_TAP_TO_VIEW,
+            contentIntent = contentIntent(context, conversationId, direct),
+        )
+    }
+
     /** 主动消息通知(通道二 HIGH;直跳聊天页)。ID 走 [stableProactiveId]:每会话一条,累计条数原地更新。 */
     fun proactive(context: Context, characterName: String, conversationId: Long, count: Int) {
         notify(
@@ -153,4 +182,8 @@ internal object NotificationPoster {
     /** 番外/心动通知稳定 ID(纯函数,单测锁死:同参同值,异参异值)。 */
     internal fun stableSidestoryId(characterName: String, conversationId: Long): Int =
         ("deriv-sidestory$characterName$conversationId").hashCode()
+
+    /** 手帐/小说/合照通知稳定 ID(纯函数:同参同值,异参异值)。 */
+    internal fun stableChatDerivativeId(characterName: String, conversationId: Long, kind: String): Int =
+        ("deriv-g$characterName$conversationId$kind").hashCode()
 }

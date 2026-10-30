@@ -91,6 +91,14 @@ fun CharacterHomeScreen(
     sidestoryCount: Int = 0,
     /** 番外剧场页入口(F3/F4;番外模板 + 心动事件 + 记录管理)。 */
     onOpenSidestory: () -> Unit = {},
+    /** 手帐/小说/合照入口卡尾注计数(G 工作包;>0 时展示「全部 N」)。 */
+    handbookCount: Int = 0,
+    novelCount: Int = 0,
+    photoCount: Int = 0,
+    /** 手帐/小说/合照页入口(G 工作包 G1-G3)。 */
+    onOpenHandbook: () -> Unit = {},
+    onOpenNovel: () -> Unit = {},
+    onOpenPhoto: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var modeSheet by remember { mutableStateOf(false) }
@@ -374,6 +382,27 @@ fun CharacterHomeScreen(
                 "番外剧场",
                 tail = if (sidestoryCount > 0) "全部 $sidestoryCount" else null,
                 onClick = onOpenSidestory,
+            )
+            Spacer(Modifier.height(12.dp))
+            // 手帐(G 工作包 G1):选聊天范围生成图文手帐 + 历史管理
+            PlaceholderCard(
+                "手帐",
+                tail = if (handbookCount > 0) "全部 $handbookCount" else null,
+                onClick = onOpenHandbook,
+            )
+            Spacer(Modifier.height(12.dp))
+            // 小说(G 工作包 G2):聊天转小说,篇章结构 + 长度档
+            PlaceholderCard(
+                "小说",
+                tail = if (novelCount > 0) "全部 $novelCount" else null,
+                onClick = onOpenNovel,
+            )
+            Spacer(Modifier.height(12.dp))
+            // 合照(G 工作包 G3):二维文生图合照 + 设为聊天背景
+            PlaceholderCard(
+                "合照",
+                tail = if (photoCount > 0) "全部 $photoCount" else null,
+                onClick = onOpenPhoto,
             )
             Spacer(Modifier.height(18.dp))
             Spacer(Modifier.navigationBarsPadding())

@@ -54,4 +54,6 @@ data class GenerationSettingsSnapshot(
     val momentsImages: Boolean = true,
     /** 番外配图(F 工作包接入;默认关,文本先出图片可选)。 */
     val sidestoryImages: Boolean = false,
+    /** 手帐配图(G 工作包;默认关,文本先出图片可选)。 */
+    val handbookImages: Boolean = false,
 )

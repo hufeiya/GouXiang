@@ -165,6 +165,17 @@ interface MessageDao {
     )
     suspend fun lastAssistantOfTurn(conversationId: Long, turnId: String): MessageEntity?
 
+    /**
+     * 手帐来源区间(G1):按消息 id 闭区间取区间内全部消息(时间正序)。
+     * 区间由 [com.neethu.gouxiang.derivatives.DerivativeRange] 按 turn 分组
+     * 预设算出,创建记录时快照,生成时按同区间重读素材。
+     */
+    @Query(
+        "SELECT * FROM messages WHERE conversationId = :conversationId " +
+            "AND id >= :startId AND id <= :endId ORDER BY at ASC, id ASC",
+    )
+    suspend fun rangeForConversation(conversationId: Long, startId: Long, endId: Long): List<MessageEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(messages: List<MessageEntity>): List<Long>
 

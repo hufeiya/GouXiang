@@ -48,7 +48,10 @@ data class DerivativeTask(
     val localDay: String = localDay(),
     val automaticEpoch: Long? = null,
     val imageRetryRequestId: String? = null,
-    /** 番外/心动记录 id(F 工作包;仅 SIDESTORY 消费,任务由此定位目标记录)。 */
+    /**
+     * 番外/心动(F)与手帐/小说/合照(G)的记录 id(任务由此定位目标记录行;
+     * 这些 kind 在唯一名上也按记录粒度去重)。
+     */
     val recordId: Long = -1L,
     /**
      * 是否要求网络约束(默认 true)。番外/心动手动任务置 false:断网时立即
@@ -82,17 +85,23 @@ data class DerivativeTask(
 
         /**
          * 入队唯一名(§2.2 幂等约定):同会话同类任务 KEEP 去重,不同会话互不
-         * 冲突;-1 批扫任务(如 PROACTIVE_OUTBOX)全局单例名;番外/心动按
-         * 记录粒度去重(同会话可同时挂多个模板任务,互不 KEEP 掉)。
+         * 冲突;-1 批扫任务(如 PROACTIVE_OUTBOX)全局单例名;番外/心动(F)与
+         * 手帐/小说/合照(G)按记录粒度去重(同会话可同时挂多个记录任务,互不
+         * KEEP 掉)。
          */
         fun uniqueName(task: DerivativeTask): String =
             if (task.kind == DerivativeKind.SIDESTORY && task.recordId > 0L) {
                 "deriv:sidestory:${task.recordId}"
+            } else if (task.kind in RECORD_TASK_KINDS && task.recordId > 0L) {
+                "deriv:record:${task.kind.name}:${task.recordId}"
             } else if (task.imageRetryRequestId != null) "deriv:image:${task.imageRetryRequestId}"
             else if (task.source == DerivativeSource.AUTOMATIC) {
                 if (task.characterId > 0L && task.kind in setOf(DerivativeKind.INNER_VOICE, DerivativeKind.MOMENT))
                     "deriv:auto:${automaticKey(task)}"
                 else "deriv:auto:${task.kind.name}:${task.conversationId}"
             } else "deriv:${task.kind.name}:${task.conversationId}"
+
+        /** 记录背书型 kind(G 手帐/小说/合照;F 番外另有专属前缀,见上)。 */
+        private val RECORD_TASK_KINDS = setOf(DerivativeKind.HANDBOOK, DerivativeKind.NOVEL, DerivativeKind.PHOTO)
     }
 }

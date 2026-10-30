@@ -38,6 +38,7 @@ class GouXiangRepo private constructor(context: Context) {
         GouXiangDatabase.MIGRATION_8_9,
         GouXiangDatabase.MIGRATION_9_10,
         GouXiangDatabase.MIGRATION_10_11,
+        GouXiangDatabase.MIGRATION_11_12,
     ).build()
 
     init {
@@ -218,6 +219,30 @@ class GouXiangRepo private constructor(context: Context) {
     /** 回溯联动标记(与心声/朋友圈 isStale 同语义;不删除不重写)。 */
     suspend fun markSidestoryStaleFrom(conversationId: Long, messageId: Long): Int =
         db.sidestoryRecordDao().markStaleFrom(conversationId, messageId)
+
+    // ── 聊天衍生内容(G 工作包 G1-G3;手帐/小说/合照统一记录)───────
+
+    /** 会话内手帐/小说/合照记录流(各自页面按 kind 过滤,落库即上屏)。 */
+    fun observeChatDerivatives(conversationId: Long): Flow<List<ChatDerivativeEntity>> =
+        db.chatDerivativeDao().observeForConversation(conversationId)
+
+    suspend fun chatDerivatives(conversationId: Long): List<ChatDerivativeEntity> =
+        db.chatDerivativeDao().forConversation(conversationId)
+
+    /** 角色主页入口卡尾注(按类型「全部 N」)。 */
+    suspend fun countChatDerivatives(characterId: Long, kind: String): Int =
+        db.chatDerivativeDao().countForKind(characterId, kind)
+
+    suspend fun chatDerivativeById(id: Long): ChatDerivativeEntity? =
+        db.chatDerivativeDao().byId(id)
+
+    /** 删除一条记录(列表/详情管理;图片文件由调用方按需清理)。 */
+    suspend fun deleteChatDerivative(id: Long): Int = db.chatDerivativeDao().deleteById(id)
+
+    // ── 心声角色开关(G4)/角色行更新 ─────────────────────────────────
+
+    /** 更新角色行(心声页角色开关等字段级编辑;整行 REPLACE 语义)。 */
+    suspend fun updateCharacter(character: CharacterEntity) = db.characterDao().update(character)
 
     // ── 主动消息账本(D 工作包 D1-D4)────────────────────────────────
 
