@@ -45,6 +45,13 @@ interface ConversationDao {
     @Query("SELECT * FROM conversations ORDER BY lastAt DESC LIMIT :limit")
     suspend fun latest(limit: Int): List<ConversationEntity>
 
+    /** Each character's most recently active IM conversation, without a scan limit. */
+    @Query("SELECT * FROM conversations AS c WHERE c.mode = 'im' AND NOT EXISTS (" +
+        "SELECT 1 FROM conversations AS newer WHERE newer.characterId = c.characterId AND newer.mode = 'im' " +
+        "AND (newer.lastAt > c.lastAt OR (newer.lastAt = c.lastAt AND newer.id > c.id))) " +
+        "ORDER BY c.lastAt DESC, c.id DESC")
+    suspend fun latestImPerCharacter(): List<ConversationEntity>
+
     @Query("SELECT * FROM conversations WHERE characterId = :characterId AND mode = :mode LIMIT 1")
     suspend fun byCharacter(characterId: Long, mode: String): ConversationEntity?
 
@@ -117,6 +124,9 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE id = :id")
     suspend fun byId(id: Long): MessageEntity?
 
+    @Query("SELECT MIN(id) FROM messages WHERE conversationId = :conversationId AND turnId = :turnId")
+    suspend fun firstIdOfTurn(conversationId: Long, turnId: String): Long?
+
     /** 重生成(F4 长按操作):回合最后一条消息(id 倒序取一)。 */
     @Query(
         "SELECT * FROM messages WHERE conversationId = :conversationId AND turnId = :turnId " +
@@ -156,6 +166,9 @@ interface MemoryDao {
     @Query("DELETE FROM memories WHERE id = :id")
     suspend fun deleteById(id: Long)
 
+    @Query("DELETE FROM memories WHERE category = 'event' AND sourceConversationId = :conversationId AND sourceEndMessageId >= :messageId")
+    suspend fun deleteFromSource(conversationId: Long, messageId: Long): Int
+
     @Query("DELETE FROM memories WHERE characterId = :characterId")
     suspend fun deleteForCharacter(characterId: Long)
 
@@ -174,6 +187,46 @@ interface MemoryWindowDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun save(entity: PendingMemoryWindowEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTurn(turn: PendingMemoryTurnEntity): Long
+
+    @Query("SELECT DISTINCT conversationId FROM memory_turns WHERE completed = 1 AND (profileDone = 0 OR eventDone = 0)")
+    suspend fun pendingConversationIds(): List<Long>
+
+    @Query("SELECT * FROM memory_turns WHERE conversationId = :conversationId AND (profileDone = 0 OR eventDone = 0) ORDER BY id")
+    suspend fun turns(conversationId: Long): List<PendingMemoryTurnEntity>
+
+    /** Retain consumed source snapshots so a rewind inside a turn can reconstruct its prefix. */
+    @Query("SELECT * FROM memory_turns WHERE conversationId = :conversationId ORDER BY id")
+    suspend fun allTurns(conversationId: Long): List<PendingMemoryTurnEntity>
+
+    @Query("SELECT * FROM memory_turns WHERE conversationId = :conversationId AND turnId = :turnId LIMIT 1")
+    suspend fun turn(conversationId: Long, turnId: String): PendingMemoryTurnEntity?
+
+    @Query("UPDATE memory_turns SET completed = 1 WHERE completed = 0")
+    suspend fun recoverInterruptedTurns()
+
+    @Query("UPDATE memory_turns SET completed = 1 WHERE conversationId = :conversationId AND turnId = :turnId AND completed = 0")
+    suspend fun completeTurn(conversationId: Long, turnId: String)
+
+    @Update
+    suspend fun updateTurns(turns: List<PendingMemoryTurnEntity>)
+
+    @Query("DELETE FROM memory_turns WHERE conversationId = :conversationId AND startMessageId >= :messageId OR conversationId = :conversationId AND endMessageId >= :messageId")
+    suspend fun deleteFrom(conversationId: Long, messageId: Long)
+
+    @Query("UPDATE memory_turns SET profileLease = '', eventLease = '', profileLeaseAt = 0, eventLeaseAt = 0 WHERE conversationId = :conversationId")
+    suspend fun clearLeases(conversationId: Long)
+
+    @Query("SELECT version FROM memory_conversation_versions WHERE conversationId = :conversationId")
+    suspend fun version(conversationId: Long): Long?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun setVersion(version: MemoryConversationVersion)
+
+    @Query("DELETE FROM pending_memory_window WHERE id = 0")
+    suspend fun discardLegacy()
 }
 
 @Dao

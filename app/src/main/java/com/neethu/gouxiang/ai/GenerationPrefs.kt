@@ -22,6 +22,9 @@ object GenerationPrefs {
     /** 朋友圈每日自动发帖(M1 每日一条图文)。 */
     const val KEY_MOMENTS_DAILY = "gen_moments_daily"
 
+    const val KEY_INNER_VOICE_IMAGES = "gen_inner_voice_images"
+    const val KEY_MOMENTS_IMAGES = "gen_moments_images"
+
     /** 隔夜记忆总结兜底(A16:闲置 8h+ 补提炼)。 */
     const val KEY_MEMORY_OVERNIGHT = "gen_memory_overnight"
 
@@ -65,6 +68,11 @@ object GenerationPrefs {
 
     fun setMomentsDaily(context: Context, enabled: Boolean) =
         write(context, KEY_MOMENTS_DAILY, enabled)
+
+    fun innerVoiceImages(context: Context): Boolean = read(context, KEY_INNER_VOICE_IMAGES, true)
+    fun setInnerVoiceImages(context: Context, enabled: Boolean) = write(context, KEY_INNER_VOICE_IMAGES, enabled)
+    fun momentsImages(context: Context): Boolean = read(context, KEY_MOMENTS_IMAGES, true)
+    fun setMomentsImages(context: Context, enabled: Boolean) = write(context, KEY_MOMENTS_IMAGES, enabled)
 
     /** 隔夜记忆总结兜底(默认关:记忆页已有手动「立即总结」兜底)。 */
     fun memoryOvernight(context: Context): Boolean =

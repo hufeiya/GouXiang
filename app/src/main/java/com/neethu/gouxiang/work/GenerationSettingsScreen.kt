@@ -100,6 +100,18 @@ fun GenerationSettingsScreen(
             onCheckedChange = { onToggle(KEY_MOMENTS_DAILY, it) },
         )
         SwitchRow(
+            title = "心声配图",
+            subtitle = "关闭后新心声仅生成文字；手动补图仍可使用",
+            checked = snapshot.innerVoiceImages,
+            onCheckedChange = { onToggle(com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_IMAGES, it) },
+        )
+        SwitchRow(
+            title = "朋友圈配图",
+            subtitle = "关闭后新动态仅生成文字；手动补图仍可使用",
+            checked = snapshot.momentsImages,
+            onCheckedChange = { onToggle(com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_IMAGES, it) },
+        )
+        SwitchRow(
             title = "隔夜记忆总结",
             subtitle = "开启后闲置 8 小时以上自动提炼记忆窗口;关闭后记忆窗口等下次聊天时提炼",
             checked = snapshot.memoryOvernight,
@@ -113,9 +125,10 @@ fun GenerationSettingsScreen(
         )
         SwitchRow(
             title = "手帐/小说/合照自动",
-            subtitle = "开启后达标自动生成衍生内容;关闭后仅手动生成(功能开发中)",
-            checked = snapshot.derivativeAuto,
-            onCheckedChange = { onToggle(KEY_DERIVATIVE_AUTO, it) },
+            subtitle = "功能开发中，暂不可开启",
+            checked = false,
+            enabled = false,
+            onCheckedChange = { },
         )
         SwitchRow(
             title = "完成通知",
@@ -135,6 +148,7 @@ private fun SwitchRow(
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    enabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier
@@ -157,7 +171,7 @@ private fun SwitchRow(
             )
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(checked = checked, onCheckedChange = onCheckedChange, enabled = enabled)
     }
     HorizontalDivider(
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),

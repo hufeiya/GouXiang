@@ -12,6 +12,7 @@ import androidx.work.WorkerParameters
 import com.neethu.gouxiang.ai.GenerationPrefs
 import com.neethu.gouxiang.chat.DerivativeKind
 import com.neethu.gouxiang.chat.DerivativeTask
+import com.neethu.gouxiang.chat.DerivativeSource
 import java.util.concurrent.TimeUnit
 
 /**
@@ -81,6 +82,14 @@ object DerivativeScheduler {
                 .build()
             manager.enqueueUniquePeriodicWork(uniqueName, ExistingPeriodicWorkPolicy.UPDATE, request)
         } else {
+            val kind = when (uniqueName) {
+                UNIQUE_INNER_VOICE_AUTO -> DerivativeKind.INNER_VOICE
+                UNIQUE_MOMENTS_DAILY -> DerivativeKind.MOMENT
+                UNIQUE_MEMORY_OVERNIGHT -> DerivativeKind.MEMORY_SUMMARY
+                UNIQUE_PROACTIVE_OUTBOX -> DerivativeKind.PROACTIVE_OUTBOX
+                else -> null
+            }
+            if (kind != null) invalidateAutomatic(context, kind)
             manager.cancelUniqueWork(uniqueName)
         }
     }
@@ -103,14 +112,16 @@ object DerivativeScheduler {
 
     /** 该任务对应的 GenerationPrefs 开关读法。 */
     protected abstract fun gate(context: Context): Boolean
+    protected abstract val taskKind: DerivativeKind
 
     final override suspend fun doWork(): androidx.work.ListenableWorker.Result {
+        val epoch = automaticEpoch(applicationContext, taskKind)
         if (!gate(applicationContext)) return androidx.work.ListenableWorker.Result.success()
-        return runAuto()
+        return runAuto(epoch)
     }
 
-    /** 开关通过后的任务体。 */
-    protected abstract suspend fun runAuto(): androidx.work.ListenableWorker.Result
+    /** 开关通过后的任务体；携带扫描开始时的版本，避免关闭后重新开启导致旧任务运行。 */
+    protected abstract suspend fun runAuto(epoch: Long): androidx.work.ListenableWorker.Result
 }
 
 /** 心声闲时自动批量:对每个 im 会话入队一条 INNER_VOICE(入队 KEEP 幂等)。 */
@@ -118,15 +129,15 @@ class InnerVoiceAutoWorker(context: Context, params: WorkerParameters) :
     AutoGuardWorker(context, params) {
 
     override fun gate(context: Context): Boolean = GenerationPrefs.innerVoiceAuto(context)
+    override val taskKind = DerivativeKind.INNER_VOICE
 
-    override suspend fun runAuto(): androidx.work.ListenableWorker.Result {
+    override suspend fun runAuto(epoch: Long): androidx.work.ListenableWorker.Result {
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(applicationContext)
         return runCatching {
-            for (conv in repo.db.conversationDao().latest(50)) {
-                if (conv.mode != "im") continue
+            for (conv in repo.db.conversationDao().latestImPerCharacter()) {
                 DerivativeWorker.enqueue(
                     applicationContext,
-                    DerivativeTask(DerivativeKind.INNER_VOICE, conv.id),
+                    DerivativeTask(DerivativeKind.INNER_VOICE, conv.id, DerivativeSource.AUTOMATIC, conv.characterId, automaticEpoch = epoch),
                 )
             }
             androidx.work.ListenableWorker.Result.success()
@@ -139,20 +150,16 @@ class MomentsDailyWorker(context: Context, params: WorkerParameters) :
     AutoGuardWorker(context, params) {
 
     override fun gate(context: Context): Boolean = GenerationPrefs.momentsDaily(context)
+    override val taskKind = DerivativeKind.MOMENT
 
-    override suspend fun runAuto(): androidx.work.ListenableWorker.Result {
+    override suspend fun runAuto(epoch: Long): androidx.work.ListenableWorker.Result {
         val app = applicationContext
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(app)
         return runCatching {
-            // 日戳防重复补发(§4 M1.4):同 epoch day 内周期重跑不再入队。
-            val today = DerivativeExecutor.todayStartMs() / (24L * 60 * 60 * 1000)
-            if (GenerationPrefs.momentsLastDay(app) == today) return@runCatching androidx.work.ListenableWorker.Result.success()
-            GenerationPrefs.setMomentsLastDay(app, today)
-            for (conv in repo.db.conversationDao().latest(50)) {
-                if (conv.mode != "im") continue
+            for (conv in repo.db.conversationDao().latestImPerCharacter()) {
                 DerivativeWorker.enqueue(
                     app,
-                    DerivativeTask(DerivativeKind.MOMENT, conv.id),
+                    DerivativeTask(DerivativeKind.MOMENT, conv.id, DerivativeSource.AUTOMATIC, conv.characterId, automaticEpoch = epoch),
                 )
             }
             androidx.work.ListenableWorker.Result.success()
@@ -165,21 +172,16 @@ class MemoryOvernightWorker(context: Context, params: WorkerParameters) :
     AutoGuardWorker(context, params) {
 
     override fun gate(context: Context): Boolean = GenerationPrefs.memoryOvernight(context)
+    override val taskKind = DerivativeKind.MEMORY_SUMMARY
 
-    override suspend fun runAuto(): androidx.work.ListenableWorker.Result {
+    override suspend fun runAuto(epoch: Long): androidx.work.ListenableWorker.Result {
         val app = applicationContext
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(app)
         return runCatching {
-            val payload = repo.db.memoryWindowDao().loadPayload()
-            val turns = payload?.let { com.neethu.gouxiang.data.deserializeWindow(it) }.orEmpty()
-            if (turns.isEmpty()) return@runCatching androidx.work.ListenableWorker.Result.success()
-            // 窗口无会话归属(单行表);取最近会话作为素材回放目标。
-            val conv = repo.db.conversationDao().latest(1).firstOrNull()
-                ?: return@runCatching androidx.work.ListenableWorker.Result.success()
-            DerivativeWorker.enqueue(
-                app,
-                DerivativeTask(DerivativeKind.MEMORY_SUMMARY, conv.id),
-            )
+            repo.db.memoryWindowDao().pendingConversationIds().forEach { conversationId ->
+                val conv = repo.db.conversationDao().byId(conversationId) ?: return@forEach
+                DerivativeWorker.enqueue(app, DerivativeTask(DerivativeKind.MEMORY_SUMMARY, conversationId, DerivativeSource.AUTOMATIC, conv.characterId, automaticEpoch = epoch))
+            }
             androidx.work.ListenableWorker.Result.success()
         }.getOrDefault(androidx.work.ListenableWorker.Result.retry())
     }
@@ -190,8 +192,9 @@ class ProactiveOutboxWorker(context: Context, params: WorkerParameters) :
     AutoGuardWorker(context, params) {
 
     override fun gate(context: Context): Boolean = GenerationPrefs.proactiveOutbox(context)
+    override val taskKind = DerivativeKind.PROACTIVE_OUTBOX
 
-    override suspend fun runAuto(): androidx.work.ListenableWorker.Result =
+    override suspend fun runAuto(epoch: Long): androidx.work.ListenableWorker.Result =
         runCatching {
             val ok = DerivativeExecutor(applicationContext)
                 .execute(DerivativeKind.PROACTIVE_OUTBOX, -1L)

@@ -187,15 +187,15 @@ class MomentsChannel(
     private val replyTemp = 0.8f
 
     /** @return 模型原始输出;请求失败/流错误/空输出返回 null(调用方提示失败)。 */
-    suspend fun requestPost(system: String, user: String): String? =
-        request(system, user, postTemp)
+    suspend fun requestPost(system: String, user: String, strict: Boolean = false): String? =
+        request(system, user, postTemp, strict)
 
     suspend fun requestReply(system: String, user: String): String? =
         request(system, user, replyTemp)
 
-    private suspend fun request(system: String, user: String, temp: Float): String? {
+    private suspend fun request(system: String, user: String, temp: Float, strict: Boolean = false): String? {
         val sb = StringBuilder()
-        var failed = false
+        var failure: Throwable? = null
         try {
             llm.streamChat(
                 listOf(
@@ -206,16 +206,20 @@ class MomentsChannel(
             ).collect { event ->
                 when (event) {
                     is LlmStreamEvent.TextDelta -> sb.append(event.text)
-                    is LlmStreamEvent.Error -> failed = true
+                    is LlmStreamEvent.Error -> failure = event.throwable
                     else -> Unit
                 }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (t: Throwable) {
+            if (strict) throw DerivativeFailure.from(t)
             return null
         }
-        if (failed) return null
-        return sb.toString().takeIf { it.isNotBlank() }
+        if (failure != null) {
+            if (strict) throw DerivativeFailure.from(failure!!)
+            return null
+        }
+        return sb.toString().takeIf { it.isNotBlank() } ?: if (strict) throw DerivativeFailure.empty() else null
     }
 }

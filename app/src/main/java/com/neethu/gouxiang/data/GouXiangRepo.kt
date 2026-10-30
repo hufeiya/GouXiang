@@ -22,11 +22,17 @@ class GouXiangRepo private constructor(context: Context) {
         context.applicationContext,
         GouXiangDatabase::class.java,
         GouXiangDatabase.NAME,
-    ).addMigrations(
+    ).addCallback(object : androidx.room.RoomDatabase.Callback() {
+        override fun onOpen(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+            // This runs before any DAO operation in a newly opened process.
+            db.execSQL("UPDATE memory_turns SET completed = 1 WHERE completed = 0")
+        }
+    }).addMigrations(
         GouXiangDatabase.MIGRATION_1_2,
         GouXiangDatabase.MIGRATION_2_3,
         GouXiangDatabase.MIGRATION_3_4,
         GouXiangDatabase.MIGRATION_4_5,
+        GouXiangDatabase.MIGRATION_5_6,
     ).build()
 
     init {

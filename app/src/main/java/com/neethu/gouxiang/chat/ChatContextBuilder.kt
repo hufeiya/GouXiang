@@ -29,23 +29,6 @@ object ChatContextBuilder {
     /** 事件记忆的容量上限(超出丢弃最旧的)。 */
     const val MAX_EVENT_MEMORIES = 6
 
-    /**
-     * 手机聊天形态开关(线程内可变,由 ChatContextBuilder 的各入口显式传参;
-     * 默认关 = 陪伴聊天 F2 行为不变)。单测用 withPhoneStyle 临时打开。
-     */
-    @Volatile var phoneStyle: Boolean = false
-
-    /** 临时打开手机聊天形态跑 [block](测试/单次组上下文用,包内可见)。 */
-    internal inline fun <T> withPhoneStyle(enabled: Boolean = true, block: () -> T): T {
-        val prev = phoneStyle
-        phoneStyle = enabled
-        return try {
-            block()
-        } finally {
-            phoneStyle = prev
-        }
-    }
-
     fun systemPrompt(
         character: CharacterEntity,
         memories: List<com.neethu.gouxiang.data.MemoryEntity>,
@@ -54,6 +37,7 @@ object ChatContextBuilder {
         minBubbles: Int = 0,
         userText: String = "",
         mode: DialogMode = DialogMode.DEFAULT,
+        phoneStyle: Boolean = false,
     ): String {
         val s = StringBuilder()
         s.appendLine("你是「${character.name}」,与用户在手机聊天。")
@@ -72,13 +56,12 @@ object ChatContextBuilder {
         // F5 对话风格弹层经 [minBubbles]/[maxBubbles]/[mode] 真实改写这三处:
         // [minBubbles] 未显式传(=0)时走 F2/F4 既定口径(IM 固定 [maxBubbles] 条、
         // 手机固定 2~4 条)——既有 prompt 逐字节兼容,实机验收不回归。
-        val phone = phoneStyle
         val (lo, hi) = when {
             minBubbles > 0 -> minBubbles.coerceAtMost(maxBubbles) to maxBubbles
-            phone -> 2 to 4
+            phoneStyle -> 2 to 4
             else -> maxBubbles to maxBubbles
         }
-        val burstRule = if (phone) {
+        val burstRule = if (phoneStyle) {
             "1. 每次回复必须输出 $lo~$hi 条独立的短消息(至少 $lo 条,更碎、更像真人手速)," +
                 "每条消息各占一行,行与行之间不写任何连接词;" +
                 "每条只说一件事,一件事说完立刻换行开启下一条。"

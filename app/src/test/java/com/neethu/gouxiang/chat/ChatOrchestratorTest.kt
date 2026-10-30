@@ -8,6 +8,8 @@ import com.neethu.gouxiang.data.CharacterEntity
 import com.neethu.gouxiang.data.MemoryEntity
 import com.neethu.gouxiang.data.MessageEntity
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
@@ -74,6 +76,41 @@ class ChatOrchestratorTest {
         assertEquals("快了快了", h[1].content)
         assertEquals(ChatRole.USER, h[1].role)
         assertEquals("[sticker:哼]", h[2].content)
+    }
+
+    @Test
+    fun `overlapping im and proactive phone requests keep their own prompt styles`() = runTest {
+        val bothWaiting = CompletableDeferred<Unit>()
+        var requestsWaiting = 0
+        val captured = mutableMapOf<String, String>()
+        val store = object : ChatOrchestrator.DaoAccess {
+            override suspend fun character(characterId: Long) = char
+            override suspend fun memories(characterId: Long): List<MemoryEntity> {
+                requestsWaiting++
+                if (requestsWaiting == 2) bothWaiting.complete(Unit)
+                bothWaiting.await()
+                return emptyList()
+            }
+            override suspend fun history(conversationId: Long, limit: Int) = emptyList<MessageEntity>()
+            override suspend fun insertMessage(message: MessageEntity) = Unit
+            override suspend fun touchConversation(conversationId: Long, summary: String, at: Long) = Unit
+        }
+        val llm = ChatOrchestrator.Llm { messages, _ ->
+            captured[messages.last().content] = messages.first().content
+            flow {
+                emit(LlmStreamEvent.TextDelta("你好"))
+                emit(LlmStreamEvent.Finish("stop"))
+            }
+        }
+        val im = ChatOrchestrator(store, llm, bubbleGapMs = 0)
+        val phone = ChatOrchestrator(store, llm, bubbleGapMs = 0)
+        val imJob = async { im.respondTo(1, 1, "IM", {}, phoneStyle = false) }
+        val phoneJob = async { phone.respondProactively(2, 1, "PHONE", {}, phoneStyle = true) }
+        imJob.await()
+        phoneJob.await()
+        assertTrue(captured.getValue("IM").contains("必须输出 3 条独立的短消息"))
+        assertFalse(captured.getValue("IM").contains("更碎、更像真人手速"))
+        assertTrue(captured.getValue("PHONE").contains("更碎、更像真人手速"))
     }
 
     // ── 编排器回合(假 LLM)────────────────────────────────────────

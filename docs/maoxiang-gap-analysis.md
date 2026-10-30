@@ -1,5 +1,7 @@
 # 猫箱文档 vs GouXiang 实现 · 偏差比对报告
 
+> 历史报告提示：本文基于 2026-10-29 的代码，统计和现状已过时。当前实施顺序与源码基线请看 [2026-10-30 非 3D 功能实施路线图](maoxiang-implementation-roadmap-20261030.md)。
+
 > 比对日期: 2026-10-29
 > 基准文档: `/home/neethu/projects/AIAvatar-SDK/docs/maoxiang-feature-analysis.md` + `/home/neethu/projects/AIAvatar-SDK/docs/maoxiang/01~12` 专项文档 + `docs/maoxiang/ui/README.md`
 > 被核对工程: 本仓库 `/home/neethu/projects/GouXiang`（包名 `com.neethu.gouxiang`，源码基址 `app/src/main/java/com/neethu/gouxiang/`，下文相对路径均相对此基址）

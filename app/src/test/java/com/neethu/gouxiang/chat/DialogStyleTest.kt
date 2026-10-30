@@ -123,9 +123,7 @@ class DialogStyleTest {
         assertTrue(ranged.contains("连发 2~3 条"))
         assertTrue(ranged.contains("连发 2~3 条".replace("连发 ", ""))) // 形态行同步
         // 手机形态:区间口径保持(min~max)
-        val phone = ChatContextBuilder.withPhoneStyle {
-            ChatContextBuilder.systemPrompt(char, memories, maxBubbles = 3, maxBubbleChars = 16, minBubbles = 2)
-        }
+        val phone = ChatContextBuilder.systemPrompt(char, memories, maxBubbles = 3, maxBubbleChars = 16, minBubbles = 2, phoneStyle = true)
         assertTrue(phone.contains("连发 2~3 条"))
         assertTrue(phone.contains("不超过 16个字"))
     }
@@ -136,9 +134,7 @@ class DialogStyleTest {
         val im = ChatContextBuilder.systemPrompt(char, memories, maxBubbles = 3, maxBubbleChars = 30)
         assertTrue(im.contains("连发 3 条"))
         assertFalse(im.contains("连发 0~"))
-        val phone = ChatContextBuilder.withPhoneStyle {
-            ChatContextBuilder.systemPrompt(char, memories, maxBubbles = 4, maxBubbleChars = 30)
-        }
+        val phone = ChatContextBuilder.systemPrompt(char, memories, maxBubbles = 4, maxBubbleChars = 30, phoneStyle = true)
         assertTrue(phone.contains("连发 2~4 条"))
     }
 

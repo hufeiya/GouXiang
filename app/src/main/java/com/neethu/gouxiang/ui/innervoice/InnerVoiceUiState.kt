@@ -16,7 +16,9 @@ data class InnerVoiceUiState(
     val generating: Boolean = false,
     val characterName: String = "",
     val items: List<InnerVoiceEntity> = emptyList(),
+    val imageResults: Map<Long, com.neethu.gouxiang.ui.ImageGenerationState> = emptyMap(),
     val error: String? = null,
+    val automaticError: String? = null,
     /** 加载失败(会话/角色不存在)。 */
     val loadFailed: Boolean = false,
 )

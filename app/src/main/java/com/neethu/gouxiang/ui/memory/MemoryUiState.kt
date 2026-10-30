@@ -14,6 +14,7 @@ data class MemoryUiState(
     val loading: Boolean = false,
     val generating: Boolean = false,
     val characterName: String = "",
+    val legacyWindow: String? = null,
     /** 画像两件套(Ta 心中的我;null/空 = 暂无)。 */
     val profileName: String? = null,
     val profileIdentity: String? = null,

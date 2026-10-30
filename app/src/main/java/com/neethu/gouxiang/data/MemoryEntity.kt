@@ -33,6 +33,8 @@ data class MemoryEntity(
     val importance: Int = 5,
     /** 时间(epoch millis;事件区按此倒序)。 */
     val at: Long = 0,
+    val sourceConversationId: Long? = null,
+    val sourceEndMessageId: Long? = null,
 )
 
 /**
@@ -50,3 +52,26 @@ data class PendingMemoryWindowEntity(
  * 记忆窗口的单回合(用户原文 + 助手合并文本),与持久化行互转。
  */
 data class MemoryTurn(val user: String, val assistant: String)
+
+/** One durable turn; each extraction channel acknowledges it independently. */
+@Entity(tableName = "memory_turns", indices = [Index("conversationId"), Index(value = ["conversationId", "turnId"], unique = true)])
+data class PendingMemoryTurnEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val conversationId: Long,
+    val characterId: Long,
+    val turnId: String,
+    val startMessageId: Long,
+    val endMessageId: Long,
+    val user: String,
+    val assistant: String,
+    val completed: Boolean = false,
+    val profileDone: Boolean = false,
+    val eventDone: Boolean = false,
+    val profileLease: String = "",
+    val eventLease: String = "",
+    val profileLeaseAt: Long = 0,
+    val eventLeaseAt: Long = 0,
+)
+
+@Entity(tableName = "memory_conversation_versions")
+data class MemoryConversationVersion(@PrimaryKey val conversationId: Long, val version: Long)

@@ -2,6 +2,8 @@ package com.neethu.gouxiang.ui.memory
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -67,6 +69,7 @@ fun MemoryScreen(
     state: MemoryUiState,
     onBack: () -> Unit,
     onSummarizeNow: () -> Unit,
+    onDiscardLegacy: () -> Unit = {},
     onEditProfile: (subtype: String, value: String) -> Unit,
     onForget: (id: Long) -> Unit,
     modifier: Modifier = Modifier,
@@ -74,6 +77,8 @@ fun MemoryScreen(
     var editing by remember { mutableStateOf<String?>(null) } // null | "name" | "identity"
     var managing by remember { mutableStateOf(false) }
     var forgetTarget by remember { mutableStateOf<Long?>(null) }
+    var showLegacy by remember { mutableStateOf(false) }
+    var discardLegacy by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -145,6 +150,13 @@ fun MemoryScreen(
                         fontWeight = FontWeight.Bold,
                     )
                 }
+                if (state.legacyWindow != null) {
+                    item {
+                        TextButton(onClick = { showLegacy = true }) {
+                            Text("有来源不明的旧待处理记忆，点击查看", color = Color.White)
+                        }
+                    }
+                }
                 // ── Ta 心中的我(dump:profile_title_bar)─────────────────
                 item {
                     ProfileCard(
@@ -192,6 +204,26 @@ fun MemoryScreen(
             }
         }
 
+        if (showLegacy) {
+            AlertDialog(
+                onDismissRequest = { showLegacy = false },
+                title = { Text("来源不明的旧待处理记忆") },
+                text = { Text("这些内容无法确定所属角色，不会自动处理。\n\n" +
+                    state.legacyWindow.orEmpty().replace("\u0001", " | ").replace("\u0002", "\n"),
+                    modifier = Modifier.verticalScroll(rememberScrollState())) },
+                confirmButton = { TextButton(onClick = { showLegacy = false; discardLegacy = true }) { Text("丢弃") } },
+                dismissButton = { TextButton(onClick = { showLegacy = false }) { Text("关闭") } },
+            )
+        }
+        if (discardLegacy) {
+            AlertDialog(
+                onDismissRequest = { discardLegacy = false },
+                title = { Text("丢弃旧待处理记忆？") },
+                text = { Text("丢弃后无法恢复这些旧素材。已保存的聊天和记忆不受影响。") },
+                confirmButton = { TextButton(onClick = { onDiscardLegacy(); discardLegacy = false }) { Text("确认丢弃") } },
+                dismissButton = { TextButton(onClick = { discardLegacy = false }) { Text("取消") } },
+            )
+        }
         // ── 编辑画像弹层(称呼/身份)────────────────────────────────
         editing?.let { subtype ->
             ProfileEditDialog(

@@ -35,9 +35,16 @@ enum class DerivativeKind {
  * 一条衍生任务(经 Worker inputData 序列化;conversationId 供生成素材回放,
  * -1 = 不挂具体会话的批扫任务,由 Executor 自行展开)。
  */
+enum class DerivativeSource { MANUAL, AUTOMATIC }
+
 data class DerivativeTask(
     val kind: DerivativeKind,
     val conversationId: Long,
+    val source: DerivativeSource = DerivativeSource.MANUAL,
+    val characterId: Long = -1L,
+    val localDay: String = localDay(),
+    val automaticEpoch: Long? = null,
+    val imageRetryRequestId: String? = null,
 ) {
     companion object {
 
@@ -47,11 +54,28 @@ data class DerivativeTask(
         /** Worker inputData 键(conversationId)。 */
         const val KEY_CONVERSATION_ID = "derivative_conversation_id"
 
+        const val KEY_SOURCE = "derivative_source"
+        const val KEY_CHARACTER_ID = "derivative_character_id"
+        const val KEY_LOCAL_DAY = "derivative_local_day"
+        const val KEY_REQUEST_ID = "derivative_request_id"
+        const val KEY_IMAGE_RETRY_REQUEST_ID = "derivative_image_retry_request_id"
+
+        fun localDay(): String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT)
+            .format(java.util.Date())
+
+        fun automaticKey(task: DerivativeTask): String =
+            "${task.kind.name}:${task.characterId}:${task.localDay}"
+
         /**
          * 入队唯一名(§2.2 幂等约定):同会话同类任务 KEEP 去重,不同会话互不
          * 冲突;-1 批扫任务(如 PROACTIVE_OUTBOX)全局单例名。
          */
         fun uniqueName(task: DerivativeTask): String =
-            "deriv:${task.kind.name}:${task.conversationId}"
+            if (task.imageRetryRequestId != null) "deriv:image:${task.imageRetryRequestId}"
+            else if (task.source == DerivativeSource.AUTOMATIC) {
+                if (task.characterId > 0L && task.kind in setOf(DerivativeKind.INNER_VOICE, DerivativeKind.MOMENT))
+                    "deriv:auto:${automaticKey(task)}"
+                else "deriv:auto:${task.kind.name}:${task.conversationId}"
+            } else "deriv:${task.kind.name}:${task.conversationId}"
     }
 }

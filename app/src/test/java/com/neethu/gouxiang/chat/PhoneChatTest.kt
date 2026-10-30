@@ -35,8 +35,8 @@ class PhoneChatTest {
 
     @Test
     fun `phone style prompt demands 2 to 4 burst and shorter lines`() {
-        ChatContextBuilder.withPhoneStyle {
-            val p = ChatContextBuilder.systemPrompt(char, memories, maxBubbles = 3, maxBubbleChars = 24)
+        run {
+            val p = ChatContextBuilder.systemPrompt(char, memories, maxBubbles = 3, maxBubbleChars = 24, phoneStyle = true)
             assertTrue("应声明 2~4 连发,实际:\n$p", p.contains("连发 2~4 条"))
             assertTrue(p.contains("必须输出 2~4 条独立的短消息"))
             assertTrue("手机聊天每条应更短(≤24 字)", p.contains("不超过 24个字"))
@@ -45,7 +45,7 @@ class PhoneChatTest {
 
     @Test
     fun `default im style keeps 1-to-max burst semantics`() {
-        ChatContextBuilder.withPhoneStyle(false) {
+        run {
             val p = ChatContextBuilder.systemPrompt(char, memories, maxBubbles = 3, maxBubbleChars = 30)
             assertTrue(p.contains("连发 3 条"))
             assertFalse("IM 形态不应出现 2~4 区间", p.contains("2~4 条"))
@@ -55,8 +55,8 @@ class PhoneChatTest {
     @Test
     fun `protocol never mentions billing`() {
         // 范围 2 红线:本地版无计费,协议与说明文案不得出现猫粮/扣费
-        ChatContextBuilder.withPhoneStyle {
-            val p = ChatContextBuilder.systemPrompt(char, memories)
+        run {
+            val p = ChatContextBuilder.systemPrompt(char, memories, phoneStyle = true)
             assertFalse(p.contains("猫粮"))
             assertFalse(p.contains("扣费"))
         }

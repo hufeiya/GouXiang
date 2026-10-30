@@ -1,5 +1,6 @@
 package com.neethu.gouxiang.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -33,6 +34,7 @@ data class MomentEntity(
     val likedByMe: Boolean = false,
     /** 发布时间(epoch millis;列表按此倒序,「刚刚/N小时前」展示用)。 */
     val at: Long = 0,
+    @ColumnInfo(defaultValue = "0") val isStale: Boolean = false,
 )
 
 /**

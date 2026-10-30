@@ -3,6 +3,7 @@ package com.neethu.gouxiang
 import android.app.Application
 import com.neethu.gouxiang.work.DerivativeScheduler
 import com.neethu.gouxiang.work.NotificationChannels
+import kotlinx.coroutines.launch
 
 /**
  * Application 类(docs/background-generation-plan-20261030.md §2.1):
@@ -16,5 +17,9 @@ class GouXiangApp : Application() {
         super.onCreate()
         NotificationChannels.ensureAll(this)
         DerivativeScheduler.bootstrap(this)
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
+            com.neethu.gouxiang.work.reconcileDerivativeTasks(this@GouXiangApp)
+            com.neethu.gouxiang.data.GouXiangRepo.get(this@GouXiangApp).db.derivativeResultDao().recoverInterruptedImages()
+        }
     }
 }

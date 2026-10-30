@@ -2,6 +2,7 @@ package com.neethu.gouxiang.work
 
 import com.neethu.gouxiang.chat.DerivativeKind
 import com.neethu.gouxiang.chat.DerivativeTask
+import com.neethu.gouxiang.chat.DerivativeSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -33,6 +34,18 @@ class DerivativeTaskTest {
         assertTrue(DerivativeTask.uniqueName(voice) != DerivativeTask.uniqueName(moment))
         // 批扫任务全局单例名
         assertEquals("deriv:PROACTIVE_OUTBOX:-1", DerivativeTask.uniqueName(scan))
+    }
+
+    @Test
+    fun `automatic daily work is per character and day and separate from manual`() {
+        val a = DerivativeTask(DerivativeKind.MOMENT, 7, DerivativeSource.AUTOMATIC, 3, "2026-10-30")
+        val otherConversation = a.copy(conversationId = 8)
+        assertEquals(DerivativeTask.uniqueName(a), DerivativeTask.uniqueName(otherConversation))
+        assertTrue(DerivativeTask.uniqueName(a) != DerivativeTask.uniqueName(a.copy(characterId = 4)))
+        assertTrue(DerivativeTask.uniqueName(a) != DerivativeTask.uniqueName(a.copy(localDay = "2026-10-31")))
+        assertTrue(DerivativeTask.uniqueName(a) != DerivativeTask.uniqueName(a.copy(source = DerivativeSource.MANUAL)))
+        val memory = a.copy(kind = DerivativeKind.MEMORY_SUMMARY)
+        assertTrue(DerivativeTask.uniqueName(memory) != DerivativeTask.uniqueName(memory.copy(conversationId = 8)))
     }
 
     @Test

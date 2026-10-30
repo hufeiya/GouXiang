@@ -11,6 +11,13 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.neethu.gouxiang.chat.DerivativeKind
 import com.neethu.gouxiang.chat.DerivativeTask
+import com.neethu.gouxiang.chat.DerivativeSource
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import com.neethu.gouxiang.data.DerivativeTaskRecord
+import com.neethu.gouxiang.data.GouXiangRepo
 import java.util.concurrent.TimeUnit
 
 /**
@@ -31,24 +38,70 @@ class DerivativeWorker(
         val kind = runCatching { DerivativeKind.valueOf(kindName) }.getOrNull()
             ?: return Result.failure()
         val conversationId = inputData.getLong(DerivativeTask.KEY_CONVERSATION_ID, -1L)
-        return runCatching {
-            DerivativeExecutor(app).execute(kind, conversationId)
-        }.fold(
-            onSuccess = { ok ->
-                if (ok) {
-                    DerivativeEvents.post(kind, conversationId, success = true)
-                    Result.success()
-                } else {
-                    DerivativeEvents.post(kind, conversationId, success = false)
-                    Result.retry()
-                }
-            },
-            onFailure = {
-                DerivativeEvents.post(kind, conversationId, success = false)
-                Result.retry()
-            },
-        )
+        val source = inputData.getString(DerivativeTask.KEY_SOURCE)
+            ?.let { runCatching { DerivativeSource.valueOf(it) }.getOrNull() }
+            ?: return Result.failure(androidx.work.workDataOf("reason" to "旧任务来源不明，请重新生成"))
+        val characterId = inputData.getLong(DerivativeTask.KEY_CHARACTER_ID, -1L)
+        val day = inputData.getString(DerivativeTask.KEY_LOCAL_DAY) ?: DerivativeTask.localDay()
+        val requestId = inputData.getString(DerivativeTask.KEY_REQUEST_ID) ?: id.toString()
+        val imageRetryRequestId = inputData.getString(DerivativeTask.KEY_IMAGE_RETRY_REQUEST_ID)
+        val task = DerivativeTask(kind, conversationId, source, characterId, day, imageRetryRequestId = imageRetryRequestId)
+        val dao = GouXiangRepo.get(app).db.derivativeTaskDao()
+        val now = System.currentTimeMillis()
+        dao.insertIfMissing(DerivativeTaskRecord(id.toString(), requestId, kind.name, source.name,
+            conversationId, characterId, "queued", null, now, now, null))
+        suspend fun record(state: String, reason: String? = null, terminal: Boolean = false) {
+            val time = System.currentTimeMillis()
+            dao.setState(id.toString(), state, reason, time, if (terminal) time else null)
+        }
+        if (source == DerivativeSource.AUTOMATIC && (
+                !automaticEnabled(app, kind) ||
+                    inputData.getLong(KEY_AUTOMATIC_EPOCH, -1L) != automaticEpoch(app, kind) ||
+                    (kind in setOf(DerivativeKind.MOMENT, DerivativeKind.INNER_VOICE) && day != DerivativeTask.localDay())
+            )) {
+            record("skipped", "自动生成已关闭或请求已过期", terminal = true)
+            return Result.success(androidx.work.workDataOf("disposition" to "skipped"))
+        }
+        if (kind in setOf(DerivativeKind.HANDBOOK, DerivativeKind.NOVEL, DerivativeKind.PHOTO)) {
+            record("failed", "功能开发中", terminal = true)
+            return Result.failure(androidx.work.workDataOf("reason" to "功能开发中"))
+        }
+        record("running")
+        return try {
+            val ok = DerivativeExecutor(app).execute(kind, conversationId, task, requestId)
+            DerivativeEvents.post(kind, conversationId, success = ok)
+            if (ok) {
+                val imageStatus = com.neethu.gouxiang.data.GouXiangRepo.get(app).db
+                    .derivativeResultDao().byRequestId(requestId)?.imageStatus
+                record("succeeded", if (imageStatus == "failed") "文字已保存，配图生成失败" else null, terminal = true)
+                Result.success(androidx.work.workDataOf("warning" to
+                    if (imageStatus == "failed") "文字已保存，配图生成失败" else ""))
+            } else {
+                val retry = source == DerivativeSource.AUTOMATIC && runAttemptCount < 2
+                record(if (retry) "queued" else "failed", "生成失败，请检查网络与模型配置后重试", !retry)
+                failureOrRetry(source)
+            }
+        } catch (cancelled: CancellationException) {
+            withContext(NonCancellable) { record("cancelled", "任务已停止", terminal = true) }
+            throw cancelled
+        } catch (stale: StaleDerivativeSourceException) {
+            record("failed", "聊天历史已更改，请重新生成", terminal = true)
+            Result.failure(androidx.work.workDataOf("reason" to "聊天历史已更改，请重新生成"))
+        } catch (failure: com.neethu.gouxiang.chat.DerivativeFailure) {
+            val retry = failure.retryable && source == DerivativeSource.AUTOMATIC && runAttemptCount < 2
+            record(if (retry) "queued" else "failed", failure.reason, !retry)
+            if (retry) Result.retry() else Result.failure(androidx.work.workDataOf("reason" to failure.reason))
+        } catch (failure: Exception) {
+            DerivativeEvents.post(kind, conversationId, success = false)
+            val retry = source == DerivativeSource.AUTOMATIC && runAttemptCount < 2
+            record(if (retry) "queued" else "failed", "生成失败，请检查网络与模型配置后重试", !retry)
+            failureOrRetry(source)
+        }
     }
+
+    private fun failureOrRetry(source: DerivativeSource): Result =
+        if (source == DerivativeSource.AUTOMATIC && runAttemptCount < 2) Result.retry()
+        else Result.failure(androidx.work.workDataOf("reason" to "生成失败，请检查网络与模型配置后重试"))
 
     companion object {
 
@@ -64,24 +117,65 @@ class DerivativeWorker(
          * 点击路径与自动路径共用本入口;自动路径的开关闸门在调用方
          * (Scheduler)与 Worker 执行时双闸。
          */
-        fun enqueue(context: Context, task: DerivativeTask) {
+        suspend fun enqueue(context: Context, task: DerivativeTask) = withContext(Dispatchers.IO) {
+            val db = GouXiangRepo.get(context).db
+            val characterId = if (task.characterId > 0) task.characterId
+                else db.conversationDao().byId(task.conversationId)?.characterId ?: -1L
+            val resolved = task.copy(characterId = characterId)
+            val requestId = task.imageRetryRequestId ?: if (task.source == DerivativeSource.AUTOMATIC && characterId > 0L)
+                DerivativeTask.automaticKey(resolved) else java.util.UUID.randomUUID().toString()
             val request = OneTimeWorkRequestBuilder<DerivativeWorker>()
                 .setConstraints(constraints)
                 .setBackoffCriteria(backoff.first, backoff.second, TimeUnit.SECONDS)
-                .setInputData(task.toInputDataCompat())
+                .setInputData(resolved.toInputDataCompat(requestId, task.automaticEpoch ?: automaticEpoch(context, task.kind)))
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                DerivativeTask.uniqueName(task),
-                ExistingWorkPolicy.KEEP,
-                request,
-            )
+            val manager = WorkManager.getInstance(context)
+            val dao = db.derivativeTaskDao()
+            val now = System.currentTimeMillis()
+            val workId = request.id.toString()
+            dao.insertIfMissing(DerivativeTaskRecord(workId, requestId, task.kind.name, task.source.name,
+                task.conversationId, characterId, "queued", null, now, now, null))
+            try {
+                manager.enqueueUniqueWork(DerivativeTask.uniqueName(resolved), ExistingWorkPolicy.KEEP, request).result.get()
+                // KEEP rejected this request; there is no corresponding WorkManager item.
+                if (manager.getWorkInfoById(request.id).get() == null) dao.deleteById(workId)
+            } catch (failure: Exception) {
+                val at = System.currentTimeMillis()
+                dao.setState(workId, "failed", "任务入队失败，请重试", at, at)
+                throw failure
+            }
         }
     }
 }
 
 /** inputData 组装(用 WorkManager 原生 Data,兼容 §2.2 的 PersistableBundle 键序)。 */
-private fun DerivativeTask.toInputDataCompat(): androidx.work.Data =
+internal fun automaticEnabled(context: Context, kind: DerivativeKind): Boolean = when (kind) {
+    DerivativeKind.INNER_VOICE -> com.neethu.gouxiang.ai.GenerationPrefs.innerVoiceAuto(context)
+    DerivativeKind.MOMENT -> com.neethu.gouxiang.ai.GenerationPrefs.momentsDaily(context)
+    DerivativeKind.MEMORY_SUMMARY -> com.neethu.gouxiang.ai.GenerationPrefs.memoryOvernight(context)
+    DerivativeKind.PROACTIVE_OUTBOX -> com.neethu.gouxiang.ai.GenerationPrefs.proactiveOutbox(context)
+    else -> false
+}
+
+private const val KEY_AUTOMATIC_EPOCH = "derivative_automatic_epoch"
+private const val EPOCH_PREFS = "derivative_automatic_epochs"
+
+internal fun automaticEpoch(context: Context, kind: DerivativeKind): Long =
+    context.getSharedPreferences(EPOCH_PREFS, Context.MODE_PRIVATE).getLong(kind.name, 0L)
+
+internal fun invalidateAutomatic(context: Context, kind: DerivativeKind) {
+    val preferences = context.getSharedPreferences(EPOCH_PREFS, Context.MODE_PRIVATE)
+    preferences.edit().putLong(kind.name, automaticEpoch(context, kind) + 1).commit()
+}
+
+private fun DerivativeTask.toInputDataCompat(requestId: String, epoch: Long): androidx.work.Data =
     androidx.work.Data.Builder()
         .putString(DerivativeTask.KEY_KIND, kind.name)
         .putLong(DerivativeTask.KEY_CONVERSATION_ID, conversationId)
+        .putString(DerivativeTask.KEY_SOURCE, source.name)
+        .putLong(DerivativeTask.KEY_CHARACTER_ID, characterId)
+        .putString(DerivativeTask.KEY_LOCAL_DAY, localDay)
+        .putString(DerivativeTask.KEY_REQUEST_ID, requestId)
+        .putString(DerivativeTask.KEY_IMAGE_RETRY_REQUEST_ID, imageRetryRequestId)
+        .putLong(KEY_AUTOMATIC_EPOCH, epoch)
         .build()

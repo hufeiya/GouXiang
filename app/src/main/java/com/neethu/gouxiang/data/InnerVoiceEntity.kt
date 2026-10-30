@@ -1,5 +1,6 @@
 package com.neethu.gouxiang.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
@@ -30,4 +31,5 @@ data class InnerVoiceEntity(
     val imageFile: String = "",
     /** 生成时间(epoch millis;列表按此倒序,日期行展示用)。 */
     val at: Long = 0,
+    @ColumnInfo(defaultValue = "0") val isStale: Boolean = false,
 )

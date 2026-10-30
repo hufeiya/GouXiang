@@ -59,4 +59,18 @@ class GenerationPrefsTest {
         GenerationPrefs.setMomentsLastDay(c, 20372L)
         assertEquals(20372L, GenerationPrefs.momentsLastDay(c))
     }
+
+    @Test
+    fun `image settings are independent and persist separately`() {
+        val c = context()
+        assertTrue(GenerationPrefs.innerVoiceImages(c))
+        assertTrue(GenerationPrefs.momentsImages(c))
+        GenerationPrefs.setInnerVoiceImages(c, false)
+        assertFalse(GenerationPrefs.innerVoiceImages(c))
+        assertTrue(GenerationPrefs.momentsImages(c))
+        GenerationPrefs.setMomentsImages(c, false)
+        GenerationPrefs.setInnerVoiceImages(c, true)
+        assertTrue(GenerationPrefs.innerVoiceImages(c))
+        assertFalse(GenerationPrefs.momentsImages(c))
+    }
 }

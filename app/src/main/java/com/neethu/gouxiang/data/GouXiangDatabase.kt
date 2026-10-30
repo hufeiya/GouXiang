@@ -15,11 +15,15 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MessageEntity::class,
         MemoryEntity::class,
         PendingMemoryWindowEntity::class,
+        PendingMemoryTurnEntity::class,
+        MemoryConversationVersion::class,
+        DerivativeResultEntity::class,
+        DerivativeTaskRecord::class,
         InnerVoiceEntity::class,
         MomentEntity::class,
         MomentCommentEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -28,6 +32,8 @@ abstract class GouXiangDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun memoryDao(): MemoryDao
     abstract fun memoryWindowDao(): MemoryWindowDao
+    abstract fun derivativeResultDao(): DerivativeResultDao
+    abstract fun derivativeTaskDao(): DerivativeTaskDao
     abstract fun innerVoiceDao(): InnerVoiceDao
     abstract fun momentDao(): MomentDao
     abstract fun momentCommentDao(): MomentCommentDao
@@ -35,6 +41,23 @@ abstract class GouXiangDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // The old unowned payload remains untouched for explicit user review.
+                db.execSQL("CREATE TABLE IF NOT EXISTS `derivative_tasks` (`workId` TEXT NOT NULL, `requestId` TEXT NOT NULL, `kind` TEXT NOT NULL, `source` TEXT NOT NULL, `conversationId` INTEGER NOT NULL, `characterId` INTEGER NOT NULL, `state` TEXT NOT NULL, `failureReason` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `finishedAt` INTEGER, PRIMARY KEY(`workId`))")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `derivative_results` (`requestId` TEXT NOT NULL, `kind` TEXT NOT NULL, `characterId` INTEGER NOT NULL, `resultIds` TEXT NOT NULL, `imageStatus` TEXT NOT NULL, `sourceConversationId` INTEGER NOT NULL, `sourceStartMessageId` INTEGER, `sourceEndMessageId` INTEGER, `sourceVersion` INTEGER NOT NULL, `notificationDone` INTEGER NOT NULL, PRIMARY KEY(`requestId`))")
+                db.execSQL("ALTER TABLE moments ADD COLUMN isStale INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE inner_voices ADD COLUMN isStale INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE memories ADD COLUMN sourceConversationId INTEGER")
+                db.execSQL("ALTER TABLE memories ADD COLUMN sourceEndMessageId INTEGER")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `memory_turns` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `conversationId` INTEGER NOT NULL, `characterId` INTEGER NOT NULL, `turnId` TEXT NOT NULL, `startMessageId` INTEGER NOT NULL, `endMessageId` INTEGER NOT NULL, `user` TEXT NOT NULL, `assistant` TEXT NOT NULL, `completed` INTEGER NOT NULL, `profileDone` INTEGER NOT NULL, `eventDone` INTEGER NOT NULL, `profileLease` TEXT NOT NULL, `eventLease` TEXT NOT NULL, `profileLeaseAt` INTEGER NOT NULL, `eventLeaseAt` INTEGER NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_memory_turns_conversationId` ON `memory_turns` (`conversationId`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_memory_turns_conversationId_turnId` ON `memory_turns` (`conversationId`, `turnId`)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `memory_conversation_versions` (`conversationId` INTEGER NOT NULL, `version` INTEGER NOT NULL, PRIMARY KEY(`conversationId`))")
+            }
+        }
+
 
         /**
          * F3 记忆系统迁移(v1→v2,单列+单表纯增量):
@@ -132,7 +155,7 @@ internal fun deserializeWindow(payload: String): List<MemoryTurn> {
     return payload.split('\u0002').mapNotNull { block ->
         if (block.length < 2 || !block.startsWith("\u0001")) return@mapNotNull null
         val mid = block.indexOf('\u0001', 1)
-        if (mid <= 1) return@mapNotNull null
+        if (mid < 1) return@mapNotNull null
         MemoryTurn(user = block.substring(1, mid), assistant = block.substring(mid + 1))
     }
 }

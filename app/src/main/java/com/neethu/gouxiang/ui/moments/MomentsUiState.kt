@@ -21,9 +21,11 @@ data class MomentsUiState(
     val characterId: Long = 0,
     val characterName: String = "",
     val items: List<MomentEntity> = emptyList(),
+    val imageResults: Map<Long, com.neethu.gouxiang.ui.ImageGenerationState> = emptyMap(),
     val comments: Map<Long, List<MomentCommentEntity>> = emptyMap(),
     val replyingToId: Long? = null,
     val error: String? = null,
+    val automaticError: String? = null,
     /** 加载失败(会话/角色不存在)。 */
     val loadFailed: Boolean = false,
 )

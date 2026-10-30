@@ -63,12 +63,30 @@ class ChatOrchestrator(
     private val random: Random = Random.Default,
 ) {
 
+    /** The final bubble and its memory input must be committed together. */
+    data class CompletedMemoryTurn(
+        val characterId: Long,
+        val user: String,
+        val assistant: String,
+        val userMessageId: Long?,
+        val assistantPrefix: String = "",
+    )
+
     /** 数据侧抽象(Repo 实现;测试用 fake)。 */
     interface DaoAccess {
         suspend fun history(conversationId: Long, limit: Int): List<MessageEntity>
         suspend fun memories(characterId: Long): List<com.neethu.gouxiang.data.MemoryEntity>
         suspend fun character(characterId: Long): CharacterEntity?
         suspend fun insertMessage(message: MessageEntity)
+        suspend fun conversationVersion(conversationId: Long): Long = 0L
+        suspend fun insertMessageIfVersion(message: MessageEntity, version: Long): Boolean {
+            insertMessage(message)
+            touchConversation(message.conversationId, conversationSummary(message.kind, message.content, message.actionsJson), message.at)
+            return true
+        }
+        suspend fun insertMessageWithTurn(message: MessageEntity, version: Long, turn: CompletedMemoryTurn, completed: Boolean): Boolean =
+            insertMessageIfVersion(message, version)
+        suspend fun completePartialTurn(conversationId: Long, turnId: String, version: Long) = Unit
         suspend fun touchConversation(conversationId: Long, summary: String, at: Long)
     }
 
@@ -87,6 +105,7 @@ class ChatOrchestrator(
 
     /** 记忆收尾钩子(装配方注入;默认空)。 */
     @Volatile var memoryHook: TurnMemoryHook? = null
+    var detailedMemoryHook: (suspend (CharacterEntity, Long, String, String, String, Long?) -> Unit)? = null
 
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
@@ -116,11 +135,13 @@ class ChatOrchestrator(
         onAssistantSaved: suspend (MessageEntity) -> Unit,
         burst: BurstParams = BurstParams.resolve(ReplyLength.DEFAULT, phone = false, DialogMode.DEFAULT),
         mode: DialogMode = DialogMode.DEFAULT,
+        phoneStyle: Boolean = false,
+        userMessageId: Long? = null,
     ): TurnResult {
         _running.value = true
         _streamDraft.value = ""
         try {
-            return respondToInternal(conversationId, characterId, userText, onAssistantSaved, burst = burst, mode = mode)
+            return respondToInternal(conversationId, characterId, userText, onAssistantSaved, burst = burst, mode = mode, phoneStyle = phoneStyle, userMessageId = userMessageId)
         } finally {
             _running.value = false
             _streamDraft.value = ""
@@ -140,11 +161,12 @@ class ChatOrchestrator(
         onAssistantSaved: suspend (MessageEntity) -> Unit,
         burst: BurstParams = BurstParams.resolve(ReplyLength.DEFAULT, phone = true, DialogMode.DEFAULT),
         mode: DialogMode = DialogMode.DEFAULT,
+        phoneStyle: Boolean = true,
     ) {
         _running.value = true
         _streamDraft.value = ""
         try {
-            respondToInternal(conversationId, characterId, sceneLine, onAssistantSaved, proactive = true, burst = burst, mode = mode)
+            respondToInternal(conversationId, characterId, sceneLine, onAssistantSaved, proactive = true, burst = burst, mode = mode, phoneStyle = phoneStyle, userMessageId = null)
         } finally {
             _running.value = false
             _streamDraft.value = ""
@@ -159,7 +181,10 @@ class ChatOrchestrator(
         proactive: Boolean = false,
         burst: BurstParams,
         mode: DialogMode,
+        phoneStyle: Boolean,
+        userMessageId: Long?,
     ): TurnResult {
+        val conversationVersion = daoAccess.conversationVersion(conversationId)
         val turnId = if (proactive) "proactive-${UUID.randomUUID()}" else "turn-${UUID.randomUUID()}"
         val character = daoAccess.character(characterId) ?: return TurnResult.Completed(emptyList())
         val system = ChatContextBuilder.systemPrompt(
@@ -170,6 +195,7 @@ class ChatOrchestrator(
             minBubbles = burst.minBubbles,
             userText = userText,
             mode = mode,
+            phoneStyle = phoneStyle,
         )
         val history = daoAccess.history(conversationId, HISTORY_LIMIT)
         val messages = buildList {
@@ -186,8 +212,11 @@ class ChatOrchestrator(
             // 主动语感的 PROACTIVE_FALLBACK_TEXT,不再借用用户回合兜底)。
             if (proactive) {
                 val fallback = listOf(Bubble(Bubble.Kind.TEXT, PROACTIVE_FALLBACK_TEXT))
-                persistBubbles(conversationId, turnId, fallback, onAssistantSaved)
+                val assistantText = "(TA 主动发来)$PROACTIVE_FALLBACK_TEXT"
+                persistBubbles(conversationId, turnId, fallback, onAssistantSaved, conversationVersion,
+                    CompletedMemoryTurn(characterId, "", assistantText, null, "(TA 主动发来)"))
                 memoryHook?.onTurnCompleted(character, "", "(TA 主动发来)$PROACTIVE_FALLBACK_TEXT")
+                detailedMemoryHook?.invoke(character, conversationId, turnId, "", "(TA 主动发来)$PROACTIVE_FALLBACK_TEXT", null)
                 return TurnResult.Completed(fallback)
             }
             return TurnResult.Failed(userText)
@@ -211,7 +240,10 @@ class ChatOrchestrator(
         // 分享泡按协议 0~1 条不占额。proactivity 为 null 时 listOfNotNull
         // 原样返回主泡序列,行为与旧通路逐字节一致。
         val withShare = bubbles + listOfNotNull(reply.proactivity)
-        persistBubbles(conversationId, turnId, withShare, onAssistantSaved)
+        val memoryUser = if (proactive) "" else userText
+        val memoryAssistant = (if (proactive) "(TA 主动发来)" else "") + withShare.joinToString("\n") { it.text }
+        persistBubbles(conversationId, turnId, withShare, onAssistantSaved, conversationVersion,
+            CompletedMemoryTurn(characterId, memoryUser, memoryAssistant, userMessageId, if (proactive) "(TA 主动发来)" else ""))
         // 记忆收尾(F3):全部泡落库后触发总结通道(fire-and-forget 语义在
         // 协调器内部;失败/取消不影响本回合)。无文本泡时 assistant 侧以
         // 动作/贴纸描述参与,同样进窗口(用户可感知事件)。主动消息回合
@@ -222,6 +254,8 @@ class ChatOrchestrator(
             if (proactive) "" else userText,
             (if (proactive) "(TA 主动发来)" else "") + withShare.joinToString("\n") { it.text },
         )
+        detailedMemoryHook?.invoke(character, conversationId, turnId, if (proactive) "" else userText,
+            (if (proactive) "(TA 主动发来)" else "") + withShare.joinToString("\n") { it.text }, userMessageId)
         return TurnResult.Completed(withShare)
     }
 
@@ -235,37 +269,55 @@ class ChatOrchestrator(
         turnId: String,
         bubbles: List<Bubble>,
         onAssistantSaved: suspend (MessageEntity) -> Unit,
+        version: Long? = null,
+        memoryTurn: CompletedMemoryTurn? = null,
     ) {
-        bubbles.forEachIndexed { index, bubble ->
-            // 泡间节奏:开关开启([bubbleGapMs] > 0)时从 600~1200ms 随机取间隔
-            // (04 号文档);0 继续完全跳过,不进 delay 分支(测试零等待)。
-            if (index > 0 && bubbleGapMs > 0) delay(nextBubbleGapMs())
-            val entity = MessageEntity(
-                conversationId = conversationId,
-                turnId = turnId,
-                role = "assistant",
-                kind = bubble.storageKey,
-                content = bubble.text,
-                actionsJson = when (bubble.kind) {
-                    // 卡片泡(端到端打通):content 保留整行原样,载荷由行内标记
-                    // 解出存 actionsJson;解析失败降级为动作 JSON(渲染层
-                    // CardPayload.decode 为 null → 文本兜底),不崩。
-                    Bubble.Kind.CARD ->
-                        parseCardLine(bubble.text)?.encode()
-                            ?: com.neethu.gouxiang.protocol.ActionsJson.encode(bubble.actions)
-                    else -> com.neethu.gouxiang.protocol.ActionsJson.encode(bubble.actions)
-                },
-                at = System.currentTimeMillis(),
-            )
-            daoAccess.insertMessage(entity)
-            // 会话行摘要按泡型降级(附录 C-I3):语音/表情/图片/卡片泡不再把
-            // 裸文本(转写全文/占位描述/行内标记)刷进消息列表;TEXT 泡摘要仍=文本。
-            daoAccess.touchConversation(
-                conversationId,
-                conversationSummary(entity.kind, bubble.text, entity.actionsJson),
-                entity.at,
-            )
-            onAssistantSaved(entity)
+        try {
+            bubbles.forEachIndexed { index, bubble ->
+                // 泡间节奏:开关开启([bubbleGapMs] > 0)时从 600~1200ms 随机取间隔
+                // (04 号文档);0 继续完全跳过,不进 delay 分支(测试零等待)。
+                if (index > 0 && bubbleGapMs > 0) delay(nextBubbleGapMs())
+                val entity = MessageEntity(
+                    conversationId = conversationId,
+                    turnId = turnId,
+                    role = "assistant",
+                    kind = bubble.storageKey,
+                    content = bubble.text,
+                    actionsJson = when (bubble.kind) {
+                        // 卡片泡(端到端打通):content 保留整行原样,载荷由行内标记
+                        // 解出存 actionsJson;解析失败降级为动作 JSON(渲染层
+                        // CardPayload.decode 为 null → 文本兜底),不崩。
+                        Bubble.Kind.CARD ->
+                            parseCardLine(bubble.text)?.encode()
+                                ?: com.neethu.gouxiang.protocol.ActionsJson.encode(bubble.actions)
+                        else -> com.neethu.gouxiang.protocol.ActionsJson.encode(bubble.actions)
+                    },
+                    at = System.currentTimeMillis(),
+                )
+                val saved = when {
+                    version == null -> { daoAccess.insertMessage(entity); true }
+                    memoryTurn != null -> daoAccess.insertMessageWithTurn(entity, version,
+                        memoryTurn.copy(assistant = memoryTurn.assistantPrefix + bubbles.take(index + 1).joinToString("\n") { it.text }),
+                        completed = index == bubbles.lastIndex)
+                    else -> daoAccess.insertMessageIfVersion(entity, version)
+                }
+                if (!saved) throw IllegalStateException("会话历史已变更，请重新发送")
+                // 会话行摘要按泡型降级(附录 C-I3):语音/表情/图片/卡片泡不再把
+                // 裸文本(转写全文/占位描述/行内标记)刷进消息列表;TEXT 泡摘要仍=文本。
+                if (version == null) daoAccess.touchConversation(
+                    conversationId,
+                    conversationSummary(entity.kind, bubble.text, entity.actionsJson),
+                    entity.at,
+                )
+                onAssistantSaved(entity)
+            }
+        } catch (t: Throwable) {
+            if (version != null && memoryTurn != null) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    daoAccess.completePartialTurn(conversationId, turnId, version)
+                }
+            }
+            throw t
         }
     }
 

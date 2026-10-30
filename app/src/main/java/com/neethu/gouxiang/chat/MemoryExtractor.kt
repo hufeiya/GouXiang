@@ -43,11 +43,12 @@ object MemoryOpsParser {
             return null
         }
         val ops = root["ops"] as? JsonArray ?: return null
-        return ops.asSequence()
+        val parsed = ops.asSequence()
             .mapNotNull { it as? JsonObject }
             .mapNotNull(::parseOp)
             .take(MAX_OPS)
             .toList()
+        return if (ops.isNotEmpty() && parsed.isEmpty()) null else parsed
     }
 
     private fun parseOp(obj: JsonObject): Op? {
@@ -257,7 +258,8 @@ class MemoryBook(private val source: MemorySource) {
             mem.category == MemoryCategories.PROFILE && mem.subtype.isNotEmpty() ->
                 rows.firstOrNull { it.category == MemoryCategories.PROFILE && it.subtype == mem.subtype }
             else -> rows.firstOrNull {
-                it.category == mem.category && it.content == mem.content
+                it.category == mem.category && it.content == mem.content &&
+                    it.sourceConversationId == mem.sourceConversationId
             }
         }
         return if (dup != null) {
@@ -305,38 +307,48 @@ class MemoryExtractor(
      * 事件总结(「经历过的事」):最近对话窗口 → 1~3 条 category=event。
      * 解析失败/请求失败返回 false(窗口保留下次重试)。
      */
-    suspend fun summarize(turns: List<MemoryTurn>, character: CharacterEntity): Boolean {
-        if (turns.isEmpty()) return true
+    data class ProfileCandidate(val name: String?, val identity: String?, val previous: MemoryBook.Profile)
+
+    suspend fun eventCandidate(turns: List<MemoryTurn>, character: CharacterEntity): List<MemoryOpsParser.Op>? {
+        if (turns.isEmpty()) return emptyList()
         val dialog = turns.joinToString("\n\n") { "用户: ${it.user}\n${character.name}: ${it.assistant}" }
-        val manifest = existingEvents(character.id)
-        val raw = request(system = EventPrompts.system(character.name), user = EventPrompts.user(manifest, dialog))
-            ?: return false
-        val ops = MemoryOpsParser.parse(raw) ?: return false
-        apply(character.id, ops)
+        val raw = request(EventPrompts.system(character.name), EventPrompts.user(existingEvents(character.id), dialog)) ?: return null
+        return MemoryOpsParser.parse(raw)
+    }
+
+    suspend fun profileCandidate(turns: List<MemoryTurn>, character: CharacterEntity): ProfileCandidate? {
+        val current = book.profile(character.id)
+        if (turns.isEmpty()) return ProfileCandidate(null, null, current)
+        val dialog = turns.joinToString("\n\n") { "用户: ${it.user}\n${character.name}: ${it.assistant}" }
+        val raw = request(ProfilePrompts.system(current), ProfilePrompts.user(dialog)) ?: return null
+        val root = MemoryOpsParser.firstJsonObject(raw)?.let { fragment ->
+            try { Json.parseToJsonElement(fragment).jsonObject } catch (_: Exception) { null }
+        } ?: return null
+        if (!root.containsKey("name") || !root.containsKey("identity") ||
+            root["name"] !is JsonPrimitive || root["identity"] !is JsonPrimitive) return null
+        return ProfileCandidate(root.strMember("name")?.take(MemoryOpsParser.CONTENT_MAX_CHARS), root.strMember("identity")?.take(MemoryOpsParser.CONTENT_MAX_CHARS), current)
+    }
+
+    suspend fun profileUnchanged(characterId: Long, candidate: ProfileCandidate): Boolean = book.profile(characterId) == candidate.previous
+
+    suspend fun applyProfile(characterId: Long, candidate: ProfileCandidate) {
+        candidate.name?.let { book.writeProfile(characterId, MemoryCategories.SUBTYPE_NAME, it) }
+        candidate.identity?.let { book.writeProfile(characterId, MemoryCategories.SUBTYPE_IDENTITY, it) }
+    }
+
+    suspend fun applyEvents(characterId: Long, ops: List<MemoryOpsParser.Op>, conversationId: Long? = null, endMessageId: Long? = null) {
+        apply(characterId, ops, conversationId, endMessageId)
+    }
+
+    suspend fun summarize(turns: List<MemoryTurn>, character: CharacterEntity): Boolean {
+        val candidate = eventCandidate(turns, character) ?: return false
+        applyEvents(character.id, candidate)
         return true
     }
 
-    /**
-     * 画像判定(我的称呼/我的身份):绝不安造(03 §5.5),null 表示维持现状
-     * (即成功但无事可写)。解析失败返回 false。
-     */
     suspend fun extractProfile(turns: List<MemoryTurn>, character: CharacterEntity): Boolean {
-        if (turns.isEmpty()) return true
-        val current = book.profile(character.id)
-        val dialog = turns.joinToString("\n\n") { "用户: ${it.user}\n${character.name}: ${it.assistant}" }
-        val raw = request(system = ProfilePrompts.system(current), user = ProfilePrompts.user(dialog)) ?: return false
-        val root = MemoryOpsParser.firstJsonObject(raw)?.let { fragment ->
-            try {
-                Json.parseToJsonElement(fragment).jsonObject
-            } catch (_: Exception) {
-                null
-            }
-        } ?: return false
-        val name = root.strMember("name")
-        val identity = root.strMember("identity")
-        if (name == null && identity == null) return true
-        name?.let { book.writeProfile(character.id, MemoryCategories.SUBTYPE_NAME, it) }
-        identity?.let { book.writeProfile(character.id, MemoryCategories.SUBTYPE_IDENTITY, it) }
+        val candidate = profileCandidate(turns, character) ?: return false
+        applyProfile(character.id, candidate)
         return true
     }
 
@@ -374,11 +386,8 @@ class MemoryExtractor(
     }
 
     /** add 一律客户端盖章 category=event / importance=5(模型值不信任)。 */
-    private suspend fun apply(characterId: Long, ops: List<MemoryOpsParser.Op>) {
+    private suspend fun apply(characterId: Long, ops: List<MemoryOpsParser.Op>, conversationId: Long?, endMessageId: Long?) {
         val now = System.currentTimeMillis()
-        ops.filter { it.action == "delete" }.forEach { op ->
-            op.id?.toLongOrNull()?.let { book.forget(it) }
-        }
         ops.filter { it.action == "add" }.forEach { op ->
             book.upsertDeduped(
                 MemoryEntity(
@@ -387,6 +396,8 @@ class MemoryExtractor(
                     content = op.content,
                     importance = 5,
                     at = now,
+                    sourceConversationId = conversationId,
+                    sourceEndMessageId = endMessageId,
                 ),
             )
         }

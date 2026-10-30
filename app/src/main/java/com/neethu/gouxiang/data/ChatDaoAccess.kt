@@ -1,5 +1,6 @@
 package com.neethu.gouxiang.data
 
+import androidx.room.withTransaction
 import com.neethu.gouxiang.chat.ChatOrchestrator
 import com.neethu.gouxiang.chat.MemorySource
 import com.neethu.gouxiang.chat.MemoryWindowStore
@@ -8,23 +9,75 @@ import com.neethu.gouxiang.chat.MemoryWindowStore
  * [ChatOrchestrator.DaoAccess] 的 Room 实现:编排器只面向该抽象,
  * 测试可注入 fake(单测里已验证),UI 层经 Repo 单例接线。
  */
-class ChatDaoAccess(private val repo: GouXiangRepo) : ChatOrchestrator.DaoAccess {
+class ChatDaoAccess(private val db: GouXiangDatabase) : ChatOrchestrator.DaoAccess {
+    constructor(repo: GouXiangRepo) : this(repo.db)
 
     override suspend fun history(conversationId: Long, limit: Int): List<MessageEntity> =
-        repo.recentMessages(conversationId, limit)
+        db.messageDao().recentForConversation(conversationId, limit)
 
     override suspend fun memories(characterId: Long): List<MemoryEntity> =
-        repo.memoriesFor(characterId)
+        db.memoryDao().forCharacter(characterId)
 
-    override suspend fun character(characterId: Long): CharacterEntity? =
-        repo.characterById(characterId)
+    override suspend fun character(characterId: Long): CharacterEntity? = db.characterDao().byId(characterId)
 
-    override suspend fun insertMessage(message: MessageEntity) {
-        repo.insertMessage(message)
+    override suspend fun insertMessage(message: MessageEntity) { db.messageDao().insert(message) }
+
+    override suspend fun conversationVersion(conversationId: Long): Long = db.memoryWindowDao().version(conversationId) ?: 0L
+
+    override suspend fun insertMessageIfVersion(message: MessageEntity, version: Long): Boolean = db.withTransaction {
+        if ((db.memoryWindowDao().version(message.conversationId) ?: 0L) != version) false
+        else {
+            db.messageDao().insert(message)
+            db.conversationDao().touch(message.conversationId,
+                com.neethu.gouxiang.protocol.conversationSummary(message.kind, message.content, message.actionsJson), message.at)
+            true
+        }
+    }
+
+    override suspend fun insertMessageWithTurn(
+        message: MessageEntity,
+        version: Long,
+        turn: ChatOrchestrator.CompletedMemoryTurn,
+        completed: Boolean,
+    ): Boolean = db.withTransaction {
+        if ((db.memoryWindowDao().version(message.conversationId) ?: 0L) != version) return@withTransaction false
+        val userMessage = turn.userMessageId?.let { db.messageDao().byId(it) }
+        if (turn.userMessageId != null && (userMessage == null || userMessage.conversationId != message.conversationId || userMessage.role != "user")) {
+            return@withTransaction false
+        }
+        val messageId = db.messageDao().insert(message)
+        db.conversationDao().touch(message.conversationId,
+            com.neethu.gouxiang.protocol.conversationSummary(message.kind, message.content, message.actionsJson), message.at)
+        val firstAssistantId = db.messageDao().firstIdOfTurn(message.conversationId, message.turnId) ?: messageId
+        val current = db.memoryWindowDao().turn(message.conversationId, message.turnId)
+        check(current == null || !current.completed) { "Duplicate completed turn" }
+        val pending = PendingMemoryTurnEntity(
+            id = current?.id ?: 0,
+            conversationId = message.conversationId,
+            characterId = turn.characterId,
+            turnId = message.turnId,
+            startMessageId = turn.userMessageId ?: firstAssistantId,
+            endMessageId = messageId,
+            user = turn.user,
+            assistant = turn.assistant,
+            completed = completed,
+        )
+        if (current == null) {
+            check(db.memoryWindowDao().insertTurn(pending) != -1L) { "Duplicate turn" }
+        } else db.memoryWindowDao().updateTurns(listOf(pending))
+        true
+    }
+
+    override suspend fun completePartialTurn(conversationId: Long, turnId: String, version: Long) {
+        db.withTransaction {
+            if ((db.memoryWindowDao().version(conversationId) ?: 0L) == version) {
+                db.memoryWindowDao().completeTurn(conversationId, turnId)
+            }
+        }
     }
 
     override suspend fun touchConversation(conversationId: Long, summary: String, at: Long) {
-        repo.touchConversation(conversationId, summary, at)
+        db.conversationDao().touch(conversationId, summary, at)
     }
 }
 

@@ -61,6 +61,7 @@ fun InnerVoiceScreen(
     state: InnerVoiceUiState,
     onGenerate: () -> Unit,
     onDismiss: () -> Unit,
+    onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler { onDismiss() }
@@ -162,9 +163,12 @@ fun InnerVoiceScreen(
                         )
                     }
                 }
+                state.automaticError?.let { error ->
+                    item(key = "automatic-error") { Text(error, color = Color(0xFFFFB4CD), fontSize = 12.sp) }
+                }
                 // ── 心声卡列表(dump rv_events,倒序最新在上)──────────────
                 items(state.items, key = { it.id }) { voice ->
-                    VoiceCard(voice)
+                    VoiceCard(voice, state.imageResults[voice.id], onRetryImage)
                 }
                 if (state.items.isEmpty() && !state.generating && !state.loading) {
                     item(key = "empty") {
@@ -200,7 +204,7 @@ fun InnerVoiceScreen(
 
 /** 单张心声卡(dump 每卡:img_cover + tv_title + tv_desc + tv_expire)。 */
 @Composable
-private fun VoiceCard(voice: InnerVoiceEntity) {
+private fun VoiceCard(voice: InnerVoiceEntity, image: com.neethu.gouxiang.ui.ImageGenerationState?, onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -247,6 +251,10 @@ private fun VoiceCard(voice: InnerVoiceEntity) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            if (voice.isStale) {
+                Text("对话已回溯，此内容可能已过时", color = Color(0xFFFFCF88), fontSize = 12.sp)
+            }
+            com.neethu.gouxiang.ui.ImageRetryAction(image, voice.imageFile.isBlank() && !voice.isStale, Color(0xFFFFCF88), onRetryImage)
             Spacer(Modifier.height(10.dp))
             // 日期行(dump tv_expire 位置;范围 3:只显示日期,无「剩余 N 天过期」)
             Text(

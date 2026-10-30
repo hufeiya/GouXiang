@@ -2,9 +2,13 @@ package com.neethu.gouxiang.work
 
 import android.content.Context
 import android.util.Log
+import androidx.room.withTransaction
+import com.neethu.gouxiang.data.DerivativeResultEntity
 import com.neethu.gouxiang.ai.GenerationPrefs
 import com.neethu.gouxiang.chat.ChatOrchestrator
 import com.neethu.gouxiang.chat.DerivativeKind
+import com.neethu.gouxiang.chat.DerivativeTask
+import kotlinx.coroutines.CancellationException
 import com.neethu.gouxiang.chat.InnerVoiceChannel
 import com.neethu.gouxiang.chat.InnerVoiceGenerator
 import com.neethu.gouxiang.chat.MomentsChannel
@@ -23,88 +27,175 @@ import com.neethu.gouxiang.chat.MomentsGenerator
 internal class DerivativeExecutor(private val app: Context) {
 
     /** @return true=完成落库;false=失败应重试。 */
-    suspend fun execute(kind: DerivativeKind, conversationId: Long): Boolean =
+    suspend fun execute(
+        kind: DerivativeKind,
+        conversationId: Long,
+        task: DerivativeTask = DerivativeTask(kind, conversationId),
+        requestId: String = java.util.UUID.randomUUID().toString(),
+    ): Boolean =
         when (kind) {
-            DerivativeKind.INNER_VOICE -> executeInnerVoice(conversationId)
-            DerivativeKind.MOMENT -> executeMoment(conversationId)
+            DerivativeKind.INNER_VOICE -> executeInnerVoice(conversationId, task, requestId)
+            DerivativeKind.MOMENT -> executeMoment(conversationId, task, requestId)
             DerivativeKind.MEMORY_SUMMARY -> executeMemorySummary(conversationId)
             DerivativeKind.PROACTIVE_OUTBOX -> executeProactiveOutbox()
             // M2 接入前不触达(枚举先行,Scheduler/点击均不派发这些 kind;
             // 触达即视为无操作的完成,不烧请求不重试)。
-            DerivativeKind.HANDBOOK, DerivativeKind.NOVEL, DerivativeKind.PHOTO -> true
+            DerivativeKind.HANDBOOK, DerivativeKind.NOVEL, DerivativeKind.PHOTO -> false
         }
 
     // ── 心声(F8 主体搬运;判空/失败语义与 UI 版一致)────────────────
 
-    private suspend fun executeInnerVoice(conversationId: Long): Boolean {
+    private suspend fun executeInnerVoice(conversationId: Long, task: DerivativeTask, requestId: String): Boolean {
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(app)
-        val conv = repo.db.conversationDao().byId(conversationId) ?: return true // 会话已删,任务完成
-        val character = repo.characterById(conv.characterId) ?: return true
-        val memories = repo.memoriesFor(character.id)
-        val recent = repo.recentMessages(conversationId, ChatOrchestrator.HISTORY_LIMIT)
-        val system = InnerVoiceGenerator.systemPrompt(character, memories)
-        val user = InnerVoiceGenerator.userPrompt(character, toMemoryTurns(recent))
-        val raw = innerVoiceChannel.request(system, user)
-        val entities = raw?.let { InnerVoiceGenerator.toEntities(it, character.id, System.currentTimeMillis()) }
-        if (entities.isNullOrEmpty()) {
-            Log.w(TAG, "inner voice generate failed for conv=$conversationId, retryable")
-            return false
-        }
-        val inserted = repo.insertInnerVoices(entities)
-        // 配图异步回填(纯文字卡已可上屏;生图失败保持纯文字卡,与 UI 版同语义)
-        val provider = imageProvider()
-        inserted.forEachIndexed { index, id ->
-            if (id <= 0L) return@forEachIndexed
-            val entity = entities[index]
-            val prompt = buildString {
-                append(character.appearance)
-                append("。情绪:${entity.title},${entity.echo}。")
-                append(character.appearanceStyle)
-                append(",柔和电影感光影,情绪特写,竖版构图")
+        val conv = repo.db.conversationDao().byId(conversationId) ?: return false
+        val character = repo.characterById(conv.characterId) ?: return false
+        if (task.characterId > 0 && task.characterId != character.id) return false
+        var result = repo.db.derivativeResultDao().byRequestId(requestId)
+        if (task.imageRetryRequestId != null && result == null) return false
+        if (result == null) {
+            val source = captureDerivativeSource(repo.db, conversationId, character.id)
+            val memories = source.memories
+            val recent = source.messages
+            val raw = innerVoiceChannel.request(
+                InnerVoiceGenerator.systemPrompt(character, memories),
+                InnerVoiceGenerator.userPrompt(character, toMemoryTurns(recent)),
+                strict = true,
+            )
+            val entities = raw?.let { InnerVoiceGenerator.toEntities(it, character.id, System.currentTimeMillis()) }
+            if (entities.isNullOrEmpty()) throw com.neethu.gouxiang.chat.DerivativeFailure.format()
+            result = repo.db.withTransaction {
+                repo.db.derivativeResultDao().byRequestId(requestId) ?: run {
+                    requireCurrentDerivativeSource(repo.db, conversationId, source.version)
+                    val ids = repo.insertInnerVoices(entities)
+                    DerivativeResultEntity(requestId, DerivativeKind.INNER_VOICE.name, character.id, ids.joinToString(","),
+                        imageStatus = if (GenerationPrefs.innerVoiceImages(app)) "pending" else "skipped",
+                        sourceConversationId = conversationId, sourceStartMessageId = source.firstMessageId,
+                        sourceEndMessageId = source.lastMessageId, sourceVersion = source.version)
+                        .also { repo.db.derivativeResultDao().insert(it) }
+                }
             }
-            val file = runCatching {
-                provider.getOrGenerateInnerVoiceImage(characterKey = "inner-voice-$id", prompt = prompt)
-            }.getOrNull()
-            if (file != null) repo.setInnerVoiceImage(id, file.absolutePath)
         }
-        NotificationPoster.derivative(app, DerivativeKind.INNER_VOICE, character.name, conversationId)
+        var savedResult = result ?: return false
+        if (task.imageRetryRequestId != null && savedResult.imageStatus in setOf("failed", "skipped")) {
+            repo.db.withTransaction {
+                requireCurrentDerivativeSource(repo.db, savedResult.sourceConversationId, savedResult.sourceVersion)
+                repo.db.derivativeResultDao().setImageStatus(requestId, "pending")
+            }
+            savedResult = savedResult.copy(imageStatus = "pending")
+        } else if (task.imageRetryRequestId == null && savedResult.imageStatus == "pending" && !GenerationPrefs.innerVoiceImages(app)) {
+            repo.db.withTransaction {
+                requireCurrentDerivativeSource(repo.db, savedResult.sourceConversationId, savedResult.sourceVersion)
+                repo.db.derivativeResultDao().setImageStatus(requestId, "skipped")
+            }
+            savedResult = savedResult.copy(imageStatus = "skipped")
+        }
+        repo.db.withTransaction { requireCurrentDerivativeSource(repo.db, savedResult.sourceConversationId, savedResult.sourceVersion) }
+        if (savedResult.imageStatus == "pending") {
+            val ids = savedResult.resultIds.split(',').mapNotNull { it.toLongOrNull() }.toSet()
+            val voices = repo.innerVoices(character.id).filter { it.id in ids }
+            var imageFailed = false
+            for (voice in voices) {
+                if (voice.imageFile.isNotBlank()) continue
+                val prompt = "${character.appearance}。情绪:${voice.title},${voice.echo}。${character.appearanceStyle},柔和电影感光影,情绪特写,竖版构图"
+                val file = try {
+                    imageProvider().getOrGenerateInnerVoiceImage(characterKey = "inner-voice-${voice.id}", prompt = prompt)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) { null }
+                if (file == null) imageFailed = true else repo.db.withTransaction {
+                    requireCurrentDerivativeSource(repo.db, savedResult.sourceConversationId, savedResult.sourceVersion)
+                    repo.setInnerVoiceImage(voice.id, file.absolutePath)
+                }
+            }
+            repo.db.withTransaction {
+                requireCurrentDerivativeSource(repo.db, savedResult.sourceConversationId, savedResult.sourceVersion)
+                repo.db.derivativeResultDao().setImageStatus(requestId, if (imageFailed) "failed" else "complete")
+            }
+        }
+        postDerivativeNotification(savedResult, DerivativeKind.INNER_VOICE, character.name)
         return true
     }
 
-    // ── 朋友圈(F9 主体搬运;防重复发帖按当日查重)────────────────────
-
-    private suspend fun executeMoment(conversationId: Long): Boolean {
+    private suspend fun executeMoment(conversationId: Long, task: DerivativeTask, requestId: String): Boolean {
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(app)
-        val conv = repo.db.conversationDao().byId(conversationId) ?: return true
-        val character = repo.characterById(conv.characterId) ?: return true
-        // 幂等:今日已发过一条 → 任务完成不重发(§2.2 朋友圈防重复)
-        val dayStart = todayStartMs()
-        if (repo.moments(character.id).any { it.at >= dayStart }) return true
-        val memories = repo.memoriesFor(character.id)
-        val recent = repo.recentMessages(conversationId, ChatOrchestrator.HISTORY_LIMIT)
-        val system = MomentsGenerator.postSystemPrompt(character, memories)
-        val user = MomentsGenerator.postUserPrompt(character, toMemoryTurns(recent))
-        val raw = momentsChannel.requestPost(system, user)
-        val draft = raw?.let { MomentsGenerator.parsePost(it) }
-        if (draft == null) {
-            Log.w(TAG, "moment generate failed for conv=$conversationId, retryable")
-            return false
-        }
-        val postId = repo.insertMoment(MomentsGenerator.toEntity(draft, character.id, System.currentTimeMillis()))
-        if (draft.imagePrompt.isNotBlank() && postId > 0L) {
-            val prompt = buildString {
-                append(character.appearanceStyle)
-                append(",")
-                append(draft.imagePrompt)
-                append(",生活随拍,柔和自然光")
+        val conv = repo.db.conversationDao().byId(conversationId) ?: return false
+        val character = repo.characterById(conv.characterId) ?: return false
+        if (task.characterId > 0 && task.characterId != character.id) return false
+        var result = repo.db.derivativeResultDao().byRequestId(requestId)
+        if (task.imageRetryRequestId != null && result == null) return false
+        if (result == null) {
+            val source = captureDerivativeSource(repo.db, conversationId, character.id)
+            val memories = source.memories
+            val recent = source.messages
+            val raw = momentsChannel.requestPost(
+                MomentsGenerator.postSystemPrompt(character, memories),
+                MomentsGenerator.postUserPrompt(character, toMemoryTurns(recent)),
+                strict = true,
+            )
+            val draft = raw?.let { MomentsGenerator.parsePost(it) } ?: throw com.neethu.gouxiang.chat.DerivativeFailure.format()
+            result = repo.db.withTransaction {
+                repo.db.derivativeResultDao().byRequestId(requestId) ?: run {
+                    requireCurrentDerivativeSource(repo.db, conversationId, source.version)
+                    val id = repo.insertMoment(MomentsGenerator.toEntity(draft, character.id, System.currentTimeMillis()))
+                    DerivativeResultEntity(requestId, DerivativeKind.MOMENT.name, character.id, id.toString(),
+                        imageStatus = if (GenerationPrefs.momentsImages(app)) "pending" else "skipped",
+                        sourceConversationId = conversationId, sourceStartMessageId = source.firstMessageId,
+                        sourceEndMessageId = source.lastMessageId, sourceVersion = source.version)
+                        .also { repo.db.derivativeResultDao().insert(it) }
+                }
             }
-            val file = runCatching {
-                imageProvider().getOrGenerateMomentImage(characterKey = "moment-$postId", prompt = prompt)
-            }.getOrNull()
-            if (file != null) repo.setMomentImage(postId, file.absolutePath)
         }
-        NotificationPoster.derivative(app, DerivativeKind.MOMENT, character.name, conversationId)
+        var savedResult = result ?: return false
+        if (task.imageRetryRequestId != null && savedResult.imageStatus in setOf("failed", "skipped")) {
+            repo.db.withTransaction {
+                requireCurrentDerivativeSource(repo.db, savedResult.sourceConversationId, savedResult.sourceVersion)
+                repo.db.derivativeResultDao().setImageStatus(requestId, "pending")
+            }
+            savedResult = savedResult.copy(imageStatus = "pending")
+        } else if (task.imageRetryRequestId == null && savedResult.imageStatus == "pending" && !GenerationPrefs.momentsImages(app)) {
+            repo.db.withTransaction {
+                requireCurrentDerivativeSource(repo.db, savedResult.sourceConversationId, savedResult.sourceVersion)
+                repo.db.derivativeResultDao().setImageStatus(requestId, "skipped")
+            }
+            savedResult = savedResult.copy(imageStatus = "skipped")
+        }
+        repo.db.withTransaction { requireCurrentDerivativeSource(repo.db, savedResult.sourceConversationId, savedResult.sourceVersion) }
+        if (savedResult.imageStatus == "pending") {
+            val post = savedResult.resultIds.toLongOrNull()?.let { repo.db.momentDao().byId(it) }
+            var imageFailed = false
+            if (post != null && post.imagePrompt.isNotBlank() && post.imageFile.isBlank()) {
+                val prompt = "${character.appearanceStyle},${post.imagePrompt},生活随拍,柔和自然光"
+                val file = try {
+                    imageProvider().getOrGenerateMomentImage(characterKey = "moment-${post.id}", prompt = prompt)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) { null }
+                if (file == null) imageFailed = true else repo.db.withTransaction {
+                    requireCurrentDerivativeSource(repo.db, savedResult.sourceConversationId, savedResult.sourceVersion)
+                    repo.setMomentImage(post.id, file.absolutePath)
+                }
+            }
+            repo.db.withTransaction {
+                requireCurrentDerivativeSource(repo.db, savedResult.sourceConversationId, savedResult.sourceVersion)
+                repo.db.derivativeResultDao().setImageStatus(requestId, if (imageFailed) "failed" else "complete")
+            }
+        }
+        postDerivativeNotification(savedResult, DerivativeKind.MOMENT, character.name)
         return true
+    }
+
+    private suspend fun postDerivativeNotification(result: DerivativeResultEntity, kind: DerivativeKind, name: String) {
+        val db = com.neethu.gouxiang.data.GouXiangRepo.get(app).db
+        // Notifications use a stable ID, so a crash between posting and recording it replaces
+        // the same notification on retry. Successful scans do not post it repeatedly.
+        db.withTransaction {
+            requireCurrentDerivativeSource(db, result.sourceConversationId, result.sourceVersion)
+            val current = db.derivativeResultDao().byRequestId(result.requestId) ?: return@withTransaction
+            if (!current.notificationDone) {
+                NotificationPoster.derivative(app, kind, name, result.sourceConversationId)
+                db.derivativeResultDao().markNotificationDone(result.requestId)
+            }
+        }
     }
 
     // ── 隔夜记忆总结兜底(A16;§4 M1.5)──────────────────────────────
@@ -117,14 +208,10 @@ internal class DerivativeExecutor(private val app: Context) {
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(app)
         val conv = repo.db.conversationDao().byId(conversationId) ?: return true
         val character = repo.characterById(conv.characterId) ?: return true
-        val store = com.neethu.gouxiang.data.RoomMemoryWindowStore(repo)
-        val payload = store.loadPayload()
-        val turns = payload?.let { com.neethu.gouxiang.data.deserializeWindow(it) }.orEmpty()
-        if (turns.isEmpty()) return true // 窗口空 = 无待提炼内容,完成
         val idleMs = System.currentTimeMillis() - conv.lastAt
         if (idleMs < MEMORY_OVERNIGHT_IDLE_MS) {
             Log.i(TAG, "conversation not idle enough ($idleMs < $MEMORY_OVERNIGHT_IDLE_MS), defer")
-            return false // 未达标 → retry,WorkManager 退避后再次自查
+            return true // 未达标，等待下一次周期扫描
         }
         val book = com.neethu.gouxiang.chat.MemoryBook(com.neethu.gouxiang.data.RoomMemorySource(repo)).also {
             it.characterNameResolver = { id -> repo.characterById(id)?.name.orEmpty() }
@@ -140,14 +227,7 @@ internal class DerivativeExecutor(private val app: Context) {
                 )
             },
         )
-        // 直连总结通道(不经协调器窗口快照——窗口由本任务消费后清空)
-        val ok = runCatching { extractor.summarize(turns, character) }
-            .onFailure { Log.w(TAG, "overnight summarize failed: ${it.message}") }
-            .getOrDefault(false)
-        if (!ok) return false
-        // 成功即清窗口(与 ChatMemoryCoordinator.summarizeNow 成功路径同语义)
-        store.save("")
-        return true
+        return com.neethu.gouxiang.chat.DurableMemoryProcessor(repo.db, extractor).run(character, conversationId)
     }
 
     // ── 离线主动消息 outbox(B9;§4 M1.2)────────────────────────────
@@ -179,8 +259,7 @@ internal class DerivativeExecutor(private val app: Context) {
                 val burst = com.neethu.gouxiang.chat.BurstParams.resolve(
                     com.neethu.gouxiang.chat.ReplyLength.MEDIUM, phone, com.neethu.gouxiang.chat.DialogMode.DEFAULT,
                 )
-                com.neethu.gouxiang.chat.ChatContextBuilder.withPhoneStyle(phone) {
-                    buildOutboxOrchestrator().respondProactively(
+                buildOutboxOrchestrator().respondProactively(
                         conversationId = conv.id,
                         characterId = character.id,
                         sceneLine = com.neethu.gouxiang.protocol.ProactiveMessages.sceneLine(
@@ -189,8 +268,8 @@ internal class DerivativeExecutor(private val app: Context) {
                         onAssistantSaved = { },
                         burst = burst,
                         mode = com.neethu.gouxiang.chat.DialogMode.DEFAULT,
+                        phoneStyle = phone,
                     )
-                }
             }.onFailure { Log.w(TAG, "outbox round failed conv=${conv.id}: ${it.message}") }
                 .isSuccess
             if (ok) {

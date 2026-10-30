@@ -50,4 +50,6 @@ data class GenerationSettingsSnapshot(
     val proactiveOutbox: Boolean = true,
     val derivativeAuto: Boolean = false,
     val notifyEnabled: Boolean = true,
+    val innerVoiceImages: Boolean = true,
+    val momentsImages: Boolean = true,
 )

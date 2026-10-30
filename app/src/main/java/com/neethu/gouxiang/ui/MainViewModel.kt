@@ -4,7 +4,6 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.neethu.gouxiang.chat.BurstParams
-import com.neethu.gouxiang.chat.ChatContextBuilder
 import com.neethu.gouxiang.chat.ChatMemoryCoordinator
 import com.neethu.gouxiang.chat.ChatOrchestrator
 import com.neethu.gouxiang.chat.ChatPrefs
@@ -68,10 +67,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         windowStore = com.neethu.gouxiang.data.RoomMemoryWindowStore(repo),
     )
 
+    private val durableMemory = com.neethu.gouxiang.chat.DurableMemoryProcessor(repo.db, memoryExtractor)
+
     init {
-        // 回合收尾:用户/助手文本进待提炼窗口,达标即画像判定+事件总结
-        orchestrator.memoryHook = ChatOrchestrator.TurnMemoryHook { character, userText, assistantText ->
-            memoryCoordinator.onTurnCompleted(character, userText, assistantText)
+        orchestrator.detailedMemoryHook = { character, conversationId, _, _, _, _ ->
+            val pending = durableMemory.pending(conversationId)
+            val chars = pending.sumOf { it.user.length + it.assistant.length }
+            if (memoryCoordinator.autoSummarize && (pending.size >= memoryCoordinator.everyTurns || chars >= memoryCoordinator.minChars)) {
+                viewModelScope.launch { durableMemory.run(character, conversationId) }
+            }
         }
     }
 
@@ -290,10 +294,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (body.isEmpty() || state.sending) return
         _chatUi.value = state.copy(sending = true)
         roundJob = viewModelScope.launch {
+            var userMessageId: Long? = null
             try {
                 // 用户消息先落库(单写者约定:编排器只管回复侧)
                 val userMsg = buildUserMessageEntity(conversationId, body, System.currentTimeMillis())
-                repo.insertMessage(userMsg)
+                userMessageId = repo.insertMessage(userMsg)
                 // 会话行摘要按泡型降级(附录 C-I3):用户卡片行 kind=card,摘要走
                 // 载荷摘要,防 [卡片:…] 原始标记泄露;纯文本摘要仍=原文。
                 repo.touchConversation(
@@ -303,14 +308,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 // 回合失败显式化(02 文档 §3.5):失败记 failedTurn 出重试条,
                 // 成功清 failedTurn(失败后另发新消息成功同样撤旧条)
-                _chatUi.value = _chatUi.value.afterTurnResult(runRound(conversationId, character.id, body, phoneMode))
+                _chatUi.value = _chatUi.value.afterTurnResult(runRound(conversationId, character.id, body, phoneMode, userMessageId), userMessageId)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // 编排器内已显式失败,这里防数据库层等硬异常把协程吞掉;
                 // 同样置失败态,发送不再静默无反馈
                 android.util.Log.e("ChatOrchestrator", "round failed", e)
-                _chatUi.value = _chatUi.value.copy(failedTurn = FailedTurn(conversationId, body))
+                _chatUi.value = _chatUi.value.copy(failedTurn = FailedTurn(conversationId, body, userMessageId))
             } finally {
                 _chatUi.value = _chatUi.value.copy(sending = false)
             }
@@ -331,7 +336,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         roundJob = viewModelScope.launch {
             try {
                 _chatUi.value = _chatUi.value.afterTurnResult(
-                    runRound(failed.conversationId, character.id, failed.userText, phoneMode = _isPhoneChat.value),
+                    runRound(failed.conversationId, character.id, failed.userText, phoneMode = _isPhoneChat.value, userMessageId = failed.userMessageId),
+                    failed.userMessageId,
                 )
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -389,7 +395,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         content = userText,
                         at = System.currentTimeMillis(),
                     )
-                    repo.insertMessage(userMsg)
+                    val userMessageId = repo.insertMessage(userMsg)
                     // 同 sendChatMessage:摘要走降级纯函数(语音回合 ASR 文本
                     // kind=text,原样返回,行为不变)。
                     repo.touchConversation(
@@ -401,8 +407,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     // failedTurn(同会话守卫,挂断回聊天页即见「消息发送失败,
                     // 请点击重试」,按原 ASR 文本重试、用户消息已在库不重复落);
                     // 本轮无泡可念,返回空列表不播 TTS。
-                    val result = runRound(convId, character.id, userText, phoneMode = false)
-                    _chatUi.value = _chatUi.value.applyVoiceRoundResult(convId, result)
+                    val result = runRound(convId, character.id, userText, phoneMode = false, userMessageId = userMessageId)
+                    _chatUi.value = _chatUi.value.applyVoiceRoundResult(convId, result, userMessageId)
                     (result as? com.neethu.gouxiang.chat.TurnResult.Completed)?.bubbles
                         ?: emptyList()
                 },
@@ -554,7 +560,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * 返回回合结果(02 文档 §3.5):完成携带全部回复泡(语音通话 F6 的 TTS
      * 念稿来源);失败(流错误/首 delta 超时)显式上抛,由调用侧置 failedTurn。
      */
-    private suspend fun runRound(conversationId: Long, characterId: Long, userText: String, phoneMode: Boolean): com.neethu.gouxiang.chat.TurnResult {
+    private suspend fun runRound(conversationId: Long, characterId: Long, userText: String, phoneMode: Boolean, userMessageId: Long? = null): com.neethu.gouxiang.chat.TurnResult {
         // 对话风格(F5):每回合现读持久化选择(弹层改完立即生效,无需重建编排器),
         // 经 BurstParams 映射为连发参数;默认组合与 F2/F4 既定 prompt 逐字节一致。
         val app = getApplication<Application>()
@@ -570,19 +576,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         draftJob = viewModelScope.launch {
             orchestrator.streamDraft.collect { _streamDraft.value = it }
         }
-        val result = ChatContextBuilder.withPhoneStyle(phoneMode) {
-            orchestrator.respondTo(
-                conversationId = conversationId,
-                characterId = characterId,
-                userText = userText,
-                onAssistantSaved = { /* 上屏走 Room 流;回调留作后续动效钩子 */ },
-                // F5 修复(F5 验收 4c):连发参数整组按回合下发 —— 此前只传
-                // minBubbles,构造期 maxBubbles=3/maxBubbleChars=30 把「更长」
-                // (4,60) 截成 (3,30),更长与适中 prompt 逐字节相同。
-                burst = burst,
-                mode = style.mode,
-            )
-        }
+        val result = orchestrator.respondTo(
+            conversationId = conversationId,
+            characterId = characterId,
+            userText = userText,
+            onAssistantSaved = { /* 上屏走 Room 流;回调留作后续动效钩子 */ },
+            burst = burst,
+            mode = style.mode,
+            phoneStyle = phoneMode,
+            userMessageId = userMessageId,
+        )
         draftJob?.cancel()
         draftJob = null
         _streamDraft.value = ""
@@ -625,16 +628,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 draftJob = viewModelScope.launch {
                     orchestrator.streamDraft.collect { _streamDraft.value = it }
                 }
-                ChatContextBuilder.withPhoneStyle(true) {
-                    orchestrator.respondProactively(
-                        conversationId = conversationId,
-                        characterId = character.id,
-                        sceneLine = com.neethu.gouxiang.protocol.ProactiveMessages.sceneLine(kind, offlineMs),
-                        onAssistantSaved = { },
-                        burst = BurstParams.resolve(ChatPrefs.replyLength(getApplication()), phone = true, ChatPrefs.dialogMode(getApplication())),
-                        mode = ChatPrefs.dialogMode(getApplication()),
-                    )
-                }
+                orchestrator.respondProactively(
+                    conversationId = conversationId,
+                    characterId = character.id,
+                    sceneLine = com.neethu.gouxiang.protocol.ProactiveMessages.sceneLine(kind, offlineMs),
+                    onAssistantSaved = { },
+                    burst = BurstParams.resolve(ChatPrefs.replyLength(getApplication()), phone = true, ChatPrefs.dialogMode(getApplication())),
+                    mode = ChatPrefs.dialogMode(getApplication()),
+                    phoneStyle = true,
+                )
                 draftJob?.cancel()
                 draftJob = null
                 _streamDraft.value = ""
@@ -671,19 +673,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             // 删除前先取锚点(查不到=并发已删,只走消息删除既有语义);
             // characterId 按 simulateOfflineReturn 同款经会话行 byId 解析。
             val anchor = repo.messageById(messageId)
-            val conv = repo.db.conversationDao().byId(conversationId)
-            repo.deleteFromMessage(conversationId, messageId)
-            // 回溯用户触发消息:该条起 turn-user-* 与整个回复回合一并删除;
-            // 主动消息回合同样整删(它只有自己一个 turnId,且位于该条之后)。
-            repo.refreshConversationTail(conversationId)
-            // 回溯联动删记忆:只删 event 且 at >= 锚点时间;锚点查不到或归属
-            // 会话对不上时跳过,防重复回溯/并发下误删。
-            if (anchor != null && anchor.conversationId == conversationId && conv != null) {
-                repo.deleteMemoriesSince(
-                    characterId = conv.characterId,
-                    categories = setOf(MemoryCategories.EVENT),
-                    sinceMs = anchor.at,
-                )
+            if (anchor != null && anchor.conversationId == conversationId) {
+                durableMemory.rewind(conversationId, messageId)
+                repo.refreshConversationTail(conversationId)
             }
         }
     }
@@ -698,13 +690,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val conversationId = state.conversationId
         val character = state.character ?: return
         if (state.sending || conversationId == 0L) return
+        // 与当前页面的发送和重试使用相同形态，避免协程执行期间页面切换影响请求。
+        val phoneMode = _isPhoneChat.value
         roundJob = viewModelScope.launch {
             // 找该回合起点,取其之前(不含该回合)的最后一条用户输入作为重生成语境
             val all = repo.allMessages(conversationId)
             val turnStartIndex = all.indexOfFirst { it.turnId == turnId }
             if (turnStartIndex < 0) return@launch
             val lastUser = all.subList(0, turnStartIndex).lastOrNull { it.role == "user" }
-            repo.deleteFromMessage(conversationId, all[turnStartIndex].id)
+            durableMemory.rewind(conversationId, all[turnStartIndex].id)
             repo.refreshConversationTail(conversationId)
             if (lastUser == null) {
                 // 无用户输入可归因(主动消息回合):重新走主动场景
@@ -714,16 +708,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     draftJob = viewModelScope.launch {
                         orchestrator.streamDraft.collect { _streamDraft.value = it }
                     }
-                    ChatContextBuilder.withPhoneStyle(true) {
-                        orchestrator.respondProactively(
-                            conversationId = conversationId,
-                            characterId = character.id,
-                            sceneLine = "(刚刚那条没说好,重新组织一下)重新发一条主动消息,连发 1~3 条。",
-                            onAssistantSaved = { },
-                            burst = BurstParams.resolve(ChatPrefs.replyLength(getApplication()), phone = true, ChatPrefs.dialogMode(getApplication())),
-                            mode = ChatPrefs.dialogMode(getApplication()),
-                        )
-                    }
+                    orchestrator.respondProactively(
+                        conversationId = conversationId,
+                        characterId = character.id,
+                        sceneLine = "(刚刚那条没说好,重新组织一下)重新发一条主动消息,连发 1~3 条。",
+                        onAssistantSaved = { },
+                        burst = BurstParams.resolve(ChatPrefs.replyLength(getApplication()), phone = phoneMode, ChatPrefs.dialogMode(getApplication())),
+                        mode = ChatPrefs.dialogMode(getApplication()),
+                        phoneStyle = phoneMode,
+                    )
                     draftJob?.cancel()
                     draftJob = null
                     _streamDraft.value = ""
@@ -739,13 +732,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // 重新生成失败(02 文档 §3.5)同样显式化:原用户输入仍在库,
                 // 记 failedTurn 出重试条,避免「删了旧泡又没新回复」的空窗
                 _chatUi.value = _chatUi.value.afterTurnResult(
-                    runRound(conversationId, character.id, lastUser.content, phoneMode = true),
+                    runRound(conversationId, character.id, lastUser.content, phoneMode = phoneMode, userMessageId = lastUser.id),
+                    lastUser.id,
                 )
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e("ChatOrchestrator", "regenerate failed", e)
-                _chatUi.value = _chatUi.value.copy(failedTurn = FailedTurn(conversationId, lastUser.content))
+                _chatUi.value = _chatUi.value.copy(failedTurn = FailedTurn(conversationId, lastUser.content, lastUser.id))
             } finally {
                 _chatUi.value = _chatUi.value.copy(sending = false)
             }
@@ -962,6 +956,28 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             _innerVoiceUi.value = _innerVoiceUi.value.copy(characterName = character.name)
+            com.neethu.gouxiang.work.reconcileDerivativeTasks(getApplication())
+            launch {
+                repo.db.derivativeResultDao().observeImageTasks(character.id, "INNER_VOICE").collect {
+                    repo.db.derivativeResultDao().recoverInterruptedImages()
+                }
+            }
+            launch {
+                repo.db.derivativeTaskDao().observeLatest(character.id, com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE.name).collect { task ->
+                    _innerVoiceUi.value = _innerVoiceUi.value.copy(automaticError = if (task?.source == "AUTOMATIC" && task.state == "failed")
+                        "自动生成失败：${task.failureReason ?: "请检查网络与模型配置"}。可点击生成心声重试。" else null)
+                }
+            }
+            launch {
+                repo.db.derivativeResultDao().observeForCharacter(character.id, "INNER_VOICE").collect { results ->
+                    _innerVoiceUi.value = _innerVoiceUi.value.copy(imageResults = imageStates(results))
+                }
+            }
+            launch {
+                observeManualDerivative(com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE, conversationId) { generating, error ->
+                    _innerVoiceUi.value = _innerVoiceUi.value.copy(generating = generating, error = error)
+                }
+            }
             repo.observeInnerVoices(character.id).collect { voices ->
                 _innerVoiceUi.value = _innerVoiceUi.value.copy(
                     items = voices,
@@ -987,12 +1003,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val conversationId = _innerVoiceConversationId.value ?: return
         if (_innerVoiceUi.value.generating) return
         _innerVoiceUi.value = _innerVoiceUi.value.copy(generating = true, error = null)
-        com.neethu.gouxiang.work.DerivativeWorker.enqueue(
-            getApplication(),
-            com.neethu.gouxiang.chat.DerivativeTask(
-                com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE, conversationId,
-            ),
-        )
+        viewModelScope.launch {
+            try {
+                com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+                    getApplication(),
+                    com.neethu.gouxiang.chat.DerivativeTask(
+                        com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE, conversationId,
+                    ),
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { _innerVoiceUi.value = _innerVoiceUi.value.copy(generating = false, error = "任务入队失败，请重试") }
+        }
     }
 
     /** 心声生图 provider(进程内单例;filesDir/inner_voices 缓存)。 */
@@ -1048,8 +1069,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * 打开朋友圈页:按会话取角色 + 订阅动态流与评论流(生成/评论落库即上屏)。
-     * 范围 3:首次进入若无动态 → 自动生成一条(与点「生成动态」同一链路,
-     * 自动触发生成不置 error 提示之外的中间态)。
+     * 空时间线仅在日更开启时入队自动任务；后台按角色和本地日期去重。
      */
     fun openMoments(conversationId: Long) {
         if (_momentsConversationId.value == conversationId) return
@@ -1064,14 +1084,47 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             _momentsUi.value = _momentsUi.value.copy(characterId = character.id, characterName = character.name)
+            com.neethu.gouxiang.work.reconcileDerivativeTasks(getApplication())
+            launch {
+                repo.db.derivativeResultDao().observeImageTasks(character.id, "MOMENT").collect {
+                    repo.db.derivativeResultDao().recoverInterruptedImages()
+                }
+            }
+            launch {
+                repo.db.derivativeTaskDao().observeLatest(character.id, com.neethu.gouxiang.chat.DerivativeKind.MOMENT.name).collect { task ->
+                    _momentsUi.value = _momentsUi.value.copy(automaticError = if (task?.source == "AUTOMATIC" && task.state == "failed")
+                        "自动生成失败：${task.failureReason ?: "请检查网络与模型配置"}。可点击生成动态重试。" else null)
+                }
+            }
+            launch {
+                repo.db.derivativeResultDao().observeForCharacter(character.id, "MOMENT").collect { results ->
+                    _momentsUi.value = _momentsUi.value.copy(imageResults = imageStates(results))
+                }
+            }
+            launch {
+                observeManualDerivative(com.neethu.gouxiang.chat.DerivativeKind.MOMENT, conversationId) { generating, error ->
+                    _momentsUi.value = _momentsUi.value.copy(generating = generating, error = error)
+                }
+            }
             ensureAvatars(listOf(character))
             var autoGenerated = false
-            // 动态流:倒序时间线;首进无动态自动补一条(范围 3,只触发一次防循环)
-            // ;每条动态单独订阅评论流(新动态出现即挂,旧订阅随 closeMoments 清)。
+            // 每条动态单独订阅评论流，新动态出现即挂。
             repo.observeMoments(character.id).collect { posts ->
                 if (posts.isEmpty() && !autoGenerated && !_momentsUi.value.generating) {
                     autoGenerated = true
-                    generateMoment(conversationId)
+                    val epoch = com.neethu.gouxiang.work.automaticEpoch(getApplication(), com.neethu.gouxiang.chat.DerivativeKind.MOMENT)
+                    if (com.neethu.gouxiang.ai.GenerationPrefs.momentsDaily(getApplication())) {
+                        com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+                            getApplication(),
+                            com.neethu.gouxiang.chat.DerivativeTask(
+                                com.neethu.gouxiang.chat.DerivativeKind.MOMENT,
+                                conversationId,
+                                source = com.neethu.gouxiang.chat.DerivativeSource.AUTOMATIC,
+                                characterId = character.id,
+                                automaticEpoch = epoch,
+                            ),
+                        )
+                    }
                 }
                 _momentsUi.value = _momentsUi.value.copy(items = posts, loading = false)
                 posts.forEach { post ->
@@ -1099,19 +1152,36 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 「生成动态」(或首进自动,§2.4 双路径收敛):点击路径直接入队后台 Worker
-     * (不经开关),页内保留乐观 UI;落库经 observeMoments 流自动上屏,事件流
-     * 回调清 generating 态。首进自动补一条也走同一入队(与点击同链路)。
+     * 「生成动态」为手动请求，不受自动开关限制。落库后由动态流上屏。
      */
     fun generateMoment(conversationId: Long) {
         if (_momentsUi.value.generating) return
         _momentsUi.value = _momentsUi.value.copy(generating = true, error = null)
-        com.neethu.gouxiang.work.DerivativeWorker.enqueue(
-            getApplication(),
-            com.neethu.gouxiang.chat.DerivativeTask(
-                com.neethu.gouxiang.chat.DerivativeKind.MOMENT, conversationId,
-            ),
-        )
+        viewModelScope.launch {
+            try {
+                com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+                    getApplication(),
+                    com.neethu.gouxiang.chat.DerivativeTask(
+                        com.neethu.gouxiang.chat.DerivativeKind.MOMENT, conversationId,
+                    ),
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { _momentsUi.value = _momentsUi.value.copy(generating = false, error = "任务入队失败，请重试") }
+        }
+    }
+
+    /** 单独补图：复用已有文字结果，不再次请求文本模型。 */
+    fun retryDerivativeImage(kind: com.neethu.gouxiang.chat.DerivativeKind, image: ImageGenerationState) {
+        if (image.conversationId <= 0 || kind !in setOf(
+                com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE,
+                com.neethu.gouxiang.chat.DerivativeKind.MOMENT,
+            )) return
+        viewModelScope.launch {
+            com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+                getApplication(),
+                com.neethu.gouxiang.chat.DerivativeTask(kind, image.conversationId, imageRetryRequestId = image.requestId),
+            )
+        }
     }
 
     /** 点赞/取消(F9 互动:本地状态,写库即上屏)。 */
@@ -1208,12 +1278,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             _memoryUi.value = _memoryUi.value.copy(characterName = character.name)
-            // 生成中态跟随协调器(手动/自动总结共用)
-            launch {
-                memoryCoordinator.generating.collect { g ->
-                    _memoryUi.value = _memoryUi.value.copy(generating = g)
-                }
-            }
             reloadMemory()
         }
     }
@@ -1228,6 +1292,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val (banded, capacity) = com.neethu.gouxiang.chat.MemoryCapacity.band(all)
         _memoryUi.value = _memoryUi.value.copy(
             loading = false,
+            legacyWindow = repo.db.memoryWindowDao().loadPayload()?.takeIf { it.isNotEmpty() },
             profileName = profile.name,
             profileIdentity = profile.identity,
             bandedEvents = banded.filter { it.memory.category == com.neethu.gouxiang.chat.MemoryCategories.EVENT },
@@ -1248,9 +1313,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val conv = repo.db.conversationDao().byId(conversationId) ?: return@launch
             val character = repo.characterById(conv.characterId) ?: return@launch
-            val recent = repo.recentMessages(conversationId, ChatOrchestrator.HISTORY_LIMIT)
-            val turns = toMemoryTurns(recent)
-            memoryCoordinator.summarizeNow(character, turns)
+            _memoryUi.value = _memoryUi.value.copy(generating = true)
+            try { durableMemory.run(character, conversationId) } finally {
+                _memoryUi.value = _memoryUi.value.copy(generating = false)
+                reloadMemory()
+            }
+        }
+    }
+
+    fun discardLegacyMemoryWindow() {
+        viewModelScope.launch {
+            repo.db.memoryWindowDao().discardLegacy()
             reloadMemory()
         }
     }
@@ -1301,30 +1374,37 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * 仍打开同一会话才改状态(后台完成时页面可能已关)。
      */
     fun onInnerVoiceTaskSettled(e: com.neethu.gouxiang.work.DerivativeEvents.Event) {
-        if (_innerVoiceConversationId.value != e.conversationId) return
-        if (e.success) {
-            _innerVoiceUi.value = _innerVoiceUi.value.copy(generating = false, error = null)
-            refreshCharacterHomeCounts()
-        } else {
-            _innerVoiceUi.value = _innerVoiceUi.value.copy(
-                generating = false,
-                error = "生成失败,请稍后再试",
-            )
-        }
+        if (e.success) refreshCharacterHomeCounts()
     }
 
-    /** 朋友圈任务收口(语义同 [onInnerVoiceTaskSettled])。 */
     fun onMomentTaskSettled(e: com.neethu.gouxiang.work.DerivativeEvents.Event) {
-        if (_momentsConversationId.value != e.conversationId) return
-        if (e.success) {
-            _momentsUi.value = _momentsUi.value.copy(generating = false, error = null)
-            refreshCharacterHomeCounts()
-        } else {
-            _momentsUi.value = _momentsUi.value.copy(
-                generating = false,
-                error = "生成失败,请稍后再试",
-            )
-        }
+        if (e.success) refreshCharacterHomeCounts()
+    }
+
+    /** WorkManager persists this state, including across process death. */
+    private suspend fun observeManualDerivative(
+        kind: com.neethu.gouxiang.chat.DerivativeKind,
+        conversationId: Long,
+        update: (Boolean, String?) -> Unit,
+    ) {
+        val task = com.neethu.gouxiang.chat.DerivativeTask(kind, conversationId)
+        val name = com.neethu.gouxiang.chat.DerivativeTask.uniqueName(task)
+        androidx.work.WorkManager.getInstance(getApplication<Application>())
+            .getWorkInfosForUniqueWorkFlow(name).collect { infos ->
+                val info = infos.firstOrNull { !it.state.isFinished } ?: infos.lastOrNull()
+                if (info == null) return@collect
+                val active = info.state == androidx.work.WorkInfo.State.ENQUEUED ||
+                    info.state == androidx.work.WorkInfo.State.RUNNING ||
+                    info.state == androidx.work.WorkInfo.State.BLOCKED
+                val error = when (info.state) {
+                    androidx.work.WorkInfo.State.FAILED -> info.outputData.getString("reason")
+                        ?: "生成失败，请检查网络与模型配置后重试"
+                    androidx.work.WorkInfo.State.CANCELLED -> "生成已取消，可以重新尝试"
+                    androidx.work.WorkInfo.State.SUCCEEDED -> info.outputData.getString("warning")?.takeIf { it.isNotBlank() }
+                    else -> null
+                }
+                update(active, error)
+            }
     }
 
     /** 角色主页占位卡尾注同步(若主页仍打开;F8/F9 共用)。 */
@@ -1385,6 +1465,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 proactiveOutbox = com.neethu.gouxiang.ai.GenerationPrefs.proactiveOutbox(app),
                 derivativeAuto = com.neethu.gouxiang.ai.GenerationPrefs.derivativeAuto(app),
                 notifyEnabled = com.neethu.gouxiang.ai.GenerationPrefs.notifyEnabled(app),
+                innerVoiceImages = com.neethu.gouxiang.ai.GenerationPrefs.innerVoiceImages(app),
+                momentsImages = com.neethu.gouxiang.ai.GenerationPrefs.momentsImages(app),
             )
     }
 
@@ -1418,6 +1500,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_NOTIFY_ENABLED -> {
                 com.neethu.gouxiang.ai.GenerationPrefs.setNotifyEnabled(app, enabled)
             }
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_IMAGES ->
+                com.neethu.gouxiang.ai.GenerationPrefs.setInnerVoiceImages(app, enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_IMAGES ->
+                com.neethu.gouxiang.ai.GenerationPrefs.setMomentsImages(app, enabled)
         }
         _generationSettings.value = when (key) {
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_AUTO ->
@@ -1430,6 +1516,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _generationSettings.value.copy(proactiveOutbox = enabled)
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_DERIVATIVE_AUTO ->
                 _generationSettings.value.copy(derivativeAuto = enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_IMAGES ->
+                _generationSettings.value.copy(innerVoiceImages = enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_IMAGES ->
+                _generationSettings.value.copy(momentsImages = enabled)
             else -> _generationSettings.value.copy(notifyEnabled = enabled)
         }
     }
@@ -1477,6 +1567,7 @@ data class CharacterHomeUiState(
 data class FailedTurn(
     val conversationId: Long,
     val userText: String,
+    val userMessageId: Long? = null,
 )
 
 /**
@@ -1503,11 +1594,11 @@ data class ChatUiState(
  * 失败 → 记 failedTurn 等重试条;完成 → 清 failedTurn(重试成功撤条;失败后
  * 另发新消息成功同样撤陈旧条,避免重试到过期回合)。
  */
-internal fun ChatUiState.afterTurnResult(result: com.neethu.gouxiang.chat.TurnResult): ChatUiState =
+internal fun ChatUiState.afterTurnResult(result: com.neethu.gouxiang.chat.TurnResult, userMessageId: Long? = null): ChatUiState =
     when (result) {
         is com.neethu.gouxiang.chat.TurnResult.Completed -> copy(failedTurn = null)
         is com.neethu.gouxiang.chat.TurnResult.Failed ->
-            copy(failedTurn = FailedTurn(conversationId = conversationId, userText = result.userText))
+            copy(failedTurn = FailedTurn(conversationId = conversationId, userText = result.userText, userMessageId = userMessageId))
     }
 
 /**
@@ -1516,8 +1607,8 @@ internal fun ChatUiState.afterTurnResult(result: com.neethu.gouxiang.chat.TurnRe
  * 迁移(失败→记 failedTurn,挂断回页即见重试条;成功→清旧条),不同会话
  * 不污染当前页状态(纯函数,JVM 单测锁守卫语义)。
  */
-internal fun ChatUiState.applyVoiceRoundResult(conversationId: Long, result: com.neethu.gouxiang.chat.TurnResult): ChatUiState =
-    if (conversationId == this.conversationId) afterTurnResult(result) else this
+internal fun ChatUiState.applyVoiceRoundResult(conversationId: Long, result: com.neethu.gouxiang.chat.TurnResult, userMessageId: Long? = null): ChatUiState =
+    if (conversationId == this.conversationId) afterTurnResult(result, userMessageId) else this
 
 /**
  * 一组连发气泡(同一 turnId 的 assistant 消息合并;渲染层按"首泡带尖角、

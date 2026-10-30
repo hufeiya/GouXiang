@@ -440,6 +440,7 @@ class MainActivity : ComponentActivity() {
                     state = innerVoiceUi,
                     onGenerate = { vm.generateInnerVoices() },
                     onDismiss = { vm.closeInnerVoices() },
+                    onRetryImage = { vm.retryDerivativeImage(com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE, it) },
                 )
             }
         }
@@ -456,6 +457,7 @@ class MainActivity : ComponentActivity() {
                     onGenerate = { momentsId?.let { vm.generateMoment(it) } },
                     onLike = { post -> vm.toggleMomentLike(post) },
                     onSendComment = { post, text -> vm.sendMomentComment(post, text) },
+                    onRetryImage = { vm.retryDerivativeImage(com.neethu.gouxiang.chat.DerivativeKind.MOMENT, it) },
                 )
             }
         }
@@ -474,6 +476,7 @@ class MainActivity : ComponentActivity() {
                     state = memoryUi,
                     onBack = { vm.closeMemory() },
                     onSummarizeNow = { vm.summarizeMemoryNow() },
+                    onDiscardLegacy = { vm.discardLegacyMemoryWindow() },
                     onEditProfile = { subtype, value -> vm.editMemoryProfile(subtype, value) },
                     onForget = { id -> vm.forgetMemory(id) },
                 )

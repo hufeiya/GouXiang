@@ -74,6 +74,7 @@ fun MomentsScreen(
     onGenerate: () -> Unit,
     onLike: (MomentEntity) -> Unit,
     onSendComment: (MomentEntity, String) -> Unit,
+    onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler { onBack() }
@@ -237,6 +238,9 @@ fun MomentsScreen(
                     )
                 }
             }
+            state.automaticError?.let { error ->
+                item(key = "automatic-error") { Text(error, color = Color(0xFFE05A5A), fontSize = 13.sp) }
+            }
             items(state.items, key = { it.id }) { post ->
                 MomentCard(
                     post = post,
@@ -245,6 +249,8 @@ fun MomentsScreen(
                     avatarFile = avatarFile,
                     replying = state.replyingToId == post.id,
                     onLike = { onLike(post) },
+                    image = state.imageResults[post.id],
+                    onRetryImage = onRetryImage,
                 )
             }
             if (state.items.isEmpty() && !state.generating && !state.loading) {
@@ -304,6 +310,8 @@ private fun MomentCard(
     avatarFile: String?,
     replying: Boolean,
     onLike: () -> Unit,
+    image: com.neethu.gouxiang.ui.ImageGenerationState?,
+    onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit,
 ) {
     Column(
         Modifier
@@ -348,6 +356,10 @@ private fun MomentCard(
             fontSize = 16.sp,
             lineHeight = 26.sp,
         )
+        if (post.isStale) {
+            Text("对话已回溯，此内容可能已过时", color = Color(0xFFAD6B26), fontSize = 12.sp)
+        }
+        com.neethu.gouxiang.ui.ImageRetryAction(image, post.imageFile.isBlank() && post.imagePrompt.isNotBlank() && !post.isStale, Color(0xFFAD6B26), onRetryImage)
         // 配图(可选增强:纯文字卡不占位;生图失败保持纯文字,与 F8 同约定)
         if (post.imageFile.isNotBlank()) {
             Spacer(Modifier.height(10.dp))
