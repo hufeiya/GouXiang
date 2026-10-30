@@ -112,6 +112,13 @@ fun GenerationSettingsScreen(
             onCheckedChange = { onToggle(com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_IMAGES, it) },
         )
         SwitchRow(
+            title = "番外配图",
+            subtitle = "功能开发中，暂不可开启",
+            checked = false,
+            enabled = false,
+            onCheckedChange = { },
+        )
+        SwitchRow(
             title = "隔夜记忆总结",
             subtitle = "开启后闲置 8 小时以上自动提炼记忆窗口;关闭后记忆窗口等下次聊天时提炼",
             checked = snapshot.memoryOvernight,

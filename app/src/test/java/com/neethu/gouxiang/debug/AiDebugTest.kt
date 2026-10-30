@@ -115,8 +115,11 @@ class AiDebugTest {
             "proactive", "proactive_fire",
             "memory_list", "memory_stats", "memory_forget", "memory_summarize",
             "status", "set_style", "set_length",
+            "tasks", "task_retry", "task_cancel", "open_tasks", "close_tasks",
         ).forEach { cmdName ->
             assertTrue("help 缺命令 $cmdName", help.contains(cmdName))
         }
+        // 热启动排查口径(M0 收尾工作包 4):溯源标签写入 help
+        assertTrue(help.contains("AIDebug.Queue"))
     }
 }

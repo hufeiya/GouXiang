@@ -179,6 +179,33 @@ FAIL load_xxx: No XXX matches 'foo'. Send ai_cmd=help to see options.
 | `set_style` | `ai_arg`=heartbeat \| delicate \| long_dialog \| deep_think \| basic | P0 | `selectDialogMode()`(`MainViewModel.kt:116`),持久化到 `chat_style_prefs`;`state` 回显核对 |
 | `set_length` | `ai_arg`=shorter \| medium \| longer | P0 | `selectReplyLength()`(`MainViewModel.kt:122`) |
 
+### 5.5b 任务历史(M0 收尾,2026-10-31 增补)
+
+| 命令 | 参数 | 作用 |
+|---|---|---|
+| `tasks` | — | 最近任务清单:`workId前8位 来源 状态(失败分类) 类型·会话 结果ID 原因`;失败分类=网络失败/鉴权失败/超时/解析失败/用户取消/未知 |
+| `task_retry` | `ai_arg`=workId前8位 | 重试一条失败任务(与「任务历史」页同一条数据路径;沿用原 requestId,不重复插卡;自动任务重试仍受开关闸门约束,被闸即如实记 skipped) |
+| `task_cancel` | `ai_arg`=workId前8位 | 取消一条排队/进行中任务;已结束的任务回 `already finished` |
+
+### 5.5c 热启动(onNewIntent)验收口径(M0 收尾修复)
+
+应用已启动(进程存活)状态下再次 `am start` 触发 `onNewIntent`。修复后命令入队走**进程级总线**(`debug/AiDebugBus`,Activity 实例重建不丢命令),消费循环不再吞取消。复验步骤:
+
+```bash
+PKG=com.neethu.gouxiang
+# ① 应用保持启动(先打开一个聊天,send_chat 作用于当前打开的会话)
+adb shell am start -n $PKG/.MainActivity --es ai_cmd open_chat --es ai_arg "'苏馨玥'"
+# ② 不杀应用,直接热启动下发消息
+adb shell am start -n $PKG/.MainActivity --es ai_cmd send_chat --es ai_arg "'三二一'"
+# ③ 双标签核对:AIDebug.Queue 是入队溯源(onNewIntent 行),AIDebug 是执行结果(OK send_chat: queued)
+adb logcat -d -s AIDebug.Queue
+adb logcat -d -s AIDebug
+# ④ 轮询确认回合被执行
+adb shell am start -n $PKG/.MainActivity --es ai_cmd msgs
+```
+
+排查口径:`AIDebug.Queue` 无行=Intent 没进 App(检查 am start 形式/MIUI 权限);有行但无 `OK send_chat`=消费侧问题(把 logcat 全量带回)。注意 `send_chat` 作用于当前打开的聊天,未打开会话时按 §9.6 返回 FAIL,需先 `open_chat`。
+
 ### 5.6 衍生内容(06/07/10 号文档域)
 
 | 命令 | 参数 | 分期 | 作用 |

@@ -80,7 +80,12 @@ internal object NotificationPoster {
         }
     }
 
-    /** 衍生内容完成通知(通道一;直跳心声/朋友圈)。 */
+    /**
+     * 衍生内容完成通知(通道一;直跳心声/朋友圈)。通知 ID 走 [stableDerivativeId]:
+     * 同角色/同会话/同类型的后续完成替换同一条通知(重试/中断恢复不重复提醒);
+     * 不同会话或类型各占一条。是否重复提醒另受 `derivative_results.notificationDone`
+     * 门禁(Worker 在同事务标记,崩溃恢复重跑不重复投递)。
+     */
     fun derivative(
         context: Context,
         kind: com.neethu.gouxiang.chat.DerivativeKind,
@@ -97,22 +102,33 @@ internal object NotificationPoster {
         notify(
             context,
             DerivativeCopy.CHANNEL_DERIVATIVE,
-            id = ("deriv$characterName$conversationId${kind.name}").hashCode(),
+            id = stableDerivativeId(kind, characterName, conversationId),
             title = title,
             body = DerivativeCopy.BODY_TAP_TO_VIEW,
             contentIntent = contentIntent(context, conversationId, direct),
         )
     }
 
-    /** 主动消息通知(通道二 HIGH;直跳聊天页)。 */
+    /** 主动消息通知(通道二 HIGH;直跳聊天页)。ID 走 [stableProactiveId]:每会话一条,累计条数原地更新。 */
     fun proactive(context: Context, characterName: String, conversationId: Long, count: Int) {
         notify(
             context,
             DerivativeCopy.CHANNEL_PROACTIVE,
-            id = ("proactive$conversationId").hashCode(),
+            id = stableProactiveId(conversationId),
             title = DerivativeCopy.proactiveTitle(characterName),
             body = DerivativeCopy.proactiveBody(count),
             contentIntent = contentIntent(context, conversationId, EXTRA_OPEN_CHAT),
         )
     }
+
+    /** 衍生内容通知稳定 ID(纯函数,单测锁死:同参同值,异参异值)。 */
+    internal fun stableDerivativeId(
+        kind: com.neethu.gouxiang.chat.DerivativeKind,
+        characterName: String,
+        conversationId: Long,
+    ): Int = ("deriv$characterName$conversationId${kind.name}").hashCode()
+
+    /** 主动消息通知稳定 ID(纯函数:每会话一条)。 */
+    internal fun stableProactiveId(conversationId: Long): Int =
+        ("proactive$conversationId").hashCode()
 }

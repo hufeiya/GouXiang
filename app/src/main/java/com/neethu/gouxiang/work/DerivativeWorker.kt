@@ -9,6 +9,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.neethu.gouxiang.chat.DerivativeFailureKind
 import com.neethu.gouxiang.chat.DerivativeKind
 import com.neethu.gouxiang.chat.DerivativeTask
 import com.neethu.gouxiang.chat.DerivativeSource
@@ -25,6 +26,10 @@ import java.util.concurrent.TimeUnit
  * inputData 取 [DerivativeTask.KEY_KIND]/[KEY_CONVERSATION_ID] →
  * [DerivativeExecutor.execute] → true=success / false=retry(退避不静默丢),
  * 非法 kind/缺参=failure(编程错误,重试无意义)。
+ *
+ * M0 收尾:每次终态迁移同时落失败原因分类([DerivativeFailureKind] →
+ * `derivative_tasks.failureKind`),任务历史页据此展示;时间取 [DerivativeClock]
+ * (测试可注入可控时钟)。
  */
 class DerivativeWorker(
     context: Context,
@@ -47,12 +52,12 @@ class DerivativeWorker(
         val imageRetryRequestId = inputData.getString(DerivativeTask.KEY_IMAGE_RETRY_REQUEST_ID)
         val task = DerivativeTask(kind, conversationId, source, characterId, day, imageRetryRequestId = imageRetryRequestId)
         val dao = GouXiangRepo.get(app).db.derivativeTaskDao()
-        val now = System.currentTimeMillis()
+        val now = DerivativeClock.nowMillis()
         dao.insertIfMissing(DerivativeTaskRecord(id.toString(), requestId, kind.name, source.name,
             conversationId, characterId, "queued", null, now, now, null))
-        suspend fun record(state: String, reason: String? = null, terminal: Boolean = false) {
-            val time = System.currentTimeMillis()
-            dao.setState(id.toString(), state, reason, time, if (terminal) time else null)
+        suspend fun record(state: String, reason: String? = null, terminal: Boolean = false, failureKind: DerivativeFailureKind? = null) {
+            val time = DerivativeClock.nowMillis()
+            dao.setStateWithKind(id.toString(), state, reason, failureKind?.name, time, if (terminal) time else null)
         }
         if (source == DerivativeSource.AUTOMATIC && (
                 !automaticEnabled(app, kind) ||
@@ -63,7 +68,7 @@ class DerivativeWorker(
             return Result.success(androidx.work.workDataOf("disposition" to "skipped"))
         }
         if (kind in setOf(DerivativeKind.HANDBOOK, DerivativeKind.NOVEL, DerivativeKind.PHOTO)) {
-            record("failed", "功能开发中", terminal = true)
+            record("failed", "功能开发中", terminal = true, failureKind = DerivativeFailureKind.UNKNOWN)
             return Result.failure(androidx.work.workDataOf("reason" to "功能开发中"))
         }
         record("running")
@@ -78,23 +83,28 @@ class DerivativeWorker(
                     if (imageStatus == "failed") "文字已保存，配图生成失败" else ""))
             } else {
                 val retry = source == DerivativeSource.AUTOMATIC && runAttemptCount < 2
-                record(if (retry) "queued" else "failed", "生成失败，请检查网络与模型配置后重试", !retry)
+                record(if (retry) "queued" else "failed", "生成失败，请检查网络与模型配置后重试", !retry,
+                    failureKind = if (retry) null else DerivativeFailureKind.UNKNOWN)
                 failureOrRetry(source)
             }
         } catch (cancelled: CancellationException) {
-            withContext(NonCancellable) { record("cancelled", "任务已停止", terminal = true) }
+            withContext(NonCancellable) {
+                record("cancelled", "任务已停止", terminal = true, failureKind = DerivativeFailureKind.USER_CANCEL)
+            }
             throw cancelled
         } catch (stale: StaleDerivativeSourceException) {
-            record("failed", "聊天历史已更改，请重新生成", terminal = true)
+            record("failed", "聊天历史已更改，请重新生成", terminal = true, failureKind = DerivativeFailureKind.UNKNOWN)
             Result.failure(androidx.work.workDataOf("reason" to "聊天历史已更改，请重新生成"))
         } catch (failure: com.neethu.gouxiang.chat.DerivativeFailure) {
             val retry = failure.retryable && source == DerivativeSource.AUTOMATIC && runAttemptCount < 2
-            record(if (retry) "queued" else "failed", failure.reason, !retry)
+            record(if (retry) "queued" else "failed", failure.reason, !retry,
+                failureKind = if (retry) null else failure.kind)
             if (retry) Result.retry() else Result.failure(androidx.work.workDataOf("reason" to failure.reason))
         } catch (failure: Exception) {
             DerivativeEvents.post(kind, conversationId, success = false)
             val retry = source == DerivativeSource.AUTOMATIC && runAttemptCount < 2
-            record(if (retry) "queued" else "failed", "生成失败，请检查网络与模型配置后重试", !retry)
+            record(if (retry) "queued" else "failed", "生成失败，请检查网络与模型配置后重试", !retry,
+                failureKind = if (retry) null else DerivativeFailureKind.UNKNOWN)
             failureOrRetry(source)
         }
     }
@@ -116,13 +126,17 @@ class DerivativeWorker(
          * 入队一条衍生任务(幂等 KEEP:同唯一名在队/在跑即跳过本次重复入队)。
          * 点击路径与自动路径共用本入口;自动路径的开关闸门在调用方
          * (Scheduler)与 Worker 执行时双闸。
+         *
+         * [requestIdOverride] 供任务历史「重试」沿用原请求 ID(文字任务未出结果
+         * 则完整重跑且结果事务按同 requestId 幂等;已出文字则走补图重试),不传
+         * 时按任务来源生成(手动=新 UUID,自动=按角色+本地日期)。
          */
-        suspend fun enqueue(context: Context, task: DerivativeTask) = withContext(Dispatchers.IO) {
+        suspend fun enqueue(context: Context, task: DerivativeTask, requestIdOverride: String? = null) = withContext(Dispatchers.IO) {
             val db = GouXiangRepo.get(context).db
             val characterId = if (task.characterId > 0) task.characterId
                 else db.conversationDao().byId(task.conversationId)?.characterId ?: -1L
             val resolved = task.copy(characterId = characterId)
-            val requestId = task.imageRetryRequestId ?: if (task.source == DerivativeSource.AUTOMATIC && characterId > 0L)
+            val requestId = requestIdOverride ?: task.imageRetryRequestId ?: if (task.source == DerivativeSource.AUTOMATIC && characterId > 0L)
                 DerivativeTask.automaticKey(resolved) else java.util.UUID.randomUUID().toString()
             val request = OneTimeWorkRequestBuilder<DerivativeWorker>()
                 .setConstraints(constraints)
@@ -131,7 +145,7 @@ class DerivativeWorker(
                 .build()
             val manager = WorkManager.getInstance(context)
             val dao = db.derivativeTaskDao()
-            val now = System.currentTimeMillis()
+            val now = DerivativeClock.nowMillis()
             val workId = request.id.toString()
             dao.insertIfMissing(DerivativeTaskRecord(workId, requestId, task.kind.name, task.source.name,
                 task.conversationId, characterId, "queued", null, now, now, null))
@@ -140,8 +154,8 @@ class DerivativeWorker(
                 // KEEP rejected this request; there is no corresponding WorkManager item.
                 if (manager.getWorkInfoById(request.id).get() == null) dao.deleteById(workId)
             } catch (failure: Exception) {
-                val at = System.currentTimeMillis()
-                dao.setState(workId, "failed", "任务入队失败，请重试", at, at)
+                val at = DerivativeClock.nowMillis()
+                dao.setStateWithKind(workId, "failed", "任务入队失败，请重试", DerivativeFailureKind.UNKNOWN.name, at, at)
                 throw failure
             }
         }
@@ -157,7 +171,7 @@ internal fun automaticEnabled(context: Context, kind: DerivativeKind): Boolean =
     else -> false
 }
 
-private const val KEY_AUTOMATIC_EPOCH = "derivative_automatic_epoch"
+internal const val KEY_AUTOMATIC_EPOCH = "derivative_automatic_epoch"
 private const val EPOCH_PREFS = "derivative_automatic_epochs"
 
 internal fun automaticEpoch(context: Context, kind: DerivativeKind): Long =

@@ -100,6 +100,8 @@ dependencies {
     // GenerationPrefs/WorkManager 面的 JVM 单测(SharedPreferences 需要 Context)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
+    // M0 收尾工作包 1:WorkManager 测试环境(可控调度/可控时钟跑 Worker 单测)
+    testImplementation(libs.androidx.work.testing)
     // 冒烟测试:协程驱动流式收集
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))

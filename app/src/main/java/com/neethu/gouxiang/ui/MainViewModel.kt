@@ -864,6 +864,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 离线回归阈值(PhoneChatPrefs;调试/后续设置页可调)。 */
     private var thresholdMs: Long = com.neethu.gouxiang.protocol.ProactiveMessages.DEFAULT_OFFLINE_THRESHOLD_MS
 
+    /** 任务历史页一次载入的行数上限(本地全量有限,非真分页)。 */
+    private val TASK_HISTORY_LIMIT = 100
+
     /** 语音条播放器(页面退出 stop;进程内单例挂在 VM 生命周期)。 */
     private val voicePlayer by lazy {
         com.neethu.gouxiang.phone.VoicePlayer(getApplication()).also {
@@ -1521,6 +1524,79 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_IMAGES ->
                 _generationSettings.value.copy(momentsImages = enabled)
             else -> _generationSettings.value.copy(notifyEnabled = enabled)
+        }
+    }
+
+    // ── 任务历史页(M0 收尾工作包 1)────────────────────────────────
+
+    /** 任务历史页打开态(MainActivity 全屏覆盖层导航惯例)。 */
+    private val _taskHistoryOpen = MutableStateFlow(false)
+    val taskHistoryOpen: StateFlow<Boolean> = _taskHistoryOpen.asStateFlow()
+
+    /** 任务历史行(打开期间订阅 Room 流;失败可重试、进行中可取消)。 */
+    private val _taskHistoryItems = MutableStateFlow<List<com.neethu.gouxiang.work.TaskHistoryItem>>(emptyList())
+    val taskHistoryItems: StateFlow<List<com.neethu.gouxiang.work.TaskHistoryItem>> =
+        _taskHistoryItems.asStateFlow()
+
+    private val _taskHistoryLoading = MutableStateFlow(false)
+    val taskHistoryLoading: StateFlow<Boolean> = _taskHistoryLoading.asStateFlow()
+
+    /** 任务历史操作提示(重试/取消已提交;一次性 Toast 事件)。 */
+    private val _taskHistoryNotice = MutableStateFlow("")
+    val taskHistoryNotice: StateFlow<String> = _taskHistoryNotice.asStateFlow()
+
+    fun consumeTaskHistoryNotice() {
+        _taskHistoryNotice.value = ""
+    }
+
+    private var taskHistoryJob: Job? = null
+
+    /** 打开任务历史页:先对账进程中断遗留,再订阅持久化历史(最新在前)。 */
+    fun openTaskHistory() {
+        if (_taskHistoryOpen.value) return
+        _taskHistoryOpen.value = true
+        _taskHistoryLoading.value = true
+        taskHistoryJob?.cancel()
+        taskHistoryJob = viewModelScope.launch {
+            runCatching { com.neethu.gouxiang.work.reconcileDerivativeTasks(getApplication()) }
+            repo.db.derivativeTaskDao().observeHistory(TASK_HISTORY_LIMIT).collect { rows ->
+                val names = mutableMapOf<Long, String?>()
+                _taskHistoryItems.value = rows.map { row ->
+                    val name = names.getOrPut(row.characterId) {
+                        if (row.characterId > 0) repo.characterById(row.characterId)?.name else null
+                    }
+                    com.neethu.gouxiang.work.TaskHistoryItem(record = row, characterName = name)
+                }
+                _taskHistoryLoading.value = false
+            }
+        }
+    }
+
+    fun closeTaskHistory() {
+        taskHistoryJob?.cancel()
+        taskHistoryJob = null
+        _taskHistoryOpen.value = false
+        _taskHistoryItems.value = emptyList()
+        _taskHistoryLoading.value = false
+    }
+
+    /** 重试一条失败任务(同 requestId 幂等;结果提示走 Toast)。 */
+    fun retryTask(workId: String) {
+        viewModelScope.launch {
+            val ok = runCatching {
+                com.neethu.gouxiang.work.TaskHistoryController.retry(getApplication(), workId)
+            }.getOrDefault(false)
+            _taskHistoryNotice.value = if (ok) "已重新排队，稍后刷新查看结果" else "重试失败，请稍后再试"
+        }
+    }
+
+    /** 取消一条排队/进行中任务(WorkManager + 持久化行条件更新)。 */
+    fun cancelTask(workId: String) {
+        viewModelScope.launch {
+            val ok = runCatching {
+                com.neethu.gouxiang.work.TaskHistoryController.cancel(getApplication(), workId)
+            }.getOrDefault(false)
+            _taskHistoryNotice.value = if (ok) "任务已取消" else "任务已结束，无需取消"
         }
     }
 

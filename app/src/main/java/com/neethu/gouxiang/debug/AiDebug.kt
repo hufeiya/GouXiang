@@ -127,6 +127,14 @@ fun aiDebugHelp(): String = """
     |  status                   当前会话状态条(StatusRule): emoji+text+判定依据
     |  set_style <arg>          heartbeat | delicate | long_dialog | deep_think | basic
     |  set_length <arg>         shorter | medium | longer
+    |Tasks (生成任务历史,M0 收尾):
+    |  tasks                    最近任务清单: workId前8位 来源 状态(失败分类) 类型·会话·结果ID
+    |  task_retry <arg>         重试一条失败任务(arg=workId前8位,见 tasks);同 requestId 幂等
+    |  task_cancel <arg>        取消一条排队/进行中任务(arg=workId前8位)
+    |  open_tasks / close_tasks 打开/关闭「任务历史」页(我的→任务历史的命令漫游)
+    |
+    |Hot start: 应用已启动时再次 am start 走 onNewIntent(命令经进程级总线入队);
+    |排查入队用 adb logcat -d -s AIDebug.Queue,执行结果用 -s AIDebug。
     |
     |Example:
     |  adb shell am start -n com.neethu.gouxiang/.MainActivity --es ai_cmd state

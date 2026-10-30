@@ -91,7 +91,7 @@ class DerivativeTaskTest {
 
     @Test
     fun `settings copy has no billing words`() {
-        // 设置页副标题一并纳入扫描(§6)
+        // 设置页/任务历史页副标题一并纳入扫描(§6)
         val all = listOf(
             "开启后会在后台自动生成对应内容;关闭后仅当你点击对应按钮时才生成。自动生成消耗大模型调用,请按需开启。",
             "开启后定期自动写心声,消耗大模型调用;关闭后仅点「生成心声」时生成",
@@ -101,6 +101,9 @@ class DerivativeTaskTest {
             "开启后达标自动生成衍生内容;关闭后仅手动生成(功能开发中)",
             "关闭后生成完成仅 App 内可见,不弹系统通知;不消耗任何调用",
             "自动后台生成与通知 · 关闭时点击才生成",
+            "功能开发中，暂不可开启",
+            "任务历史页副标题:生成任务的执行记录：失败任务可重试，排队/进行中的任务可取消。自动任务重试仍受内容生成开关约束。",
+            "生成任务记录 · 失败可重试、进行中可取消",
         )
         for (text in all) {
             assertFalse(text.contains("猫粮"))
@@ -109,5 +112,14 @@ class DerivativeTaskTest {
             assertFalse(text.contains("会员"))
             assertFalse(text.contains("过期"))
         }
+    }
+
+    @Test
+    fun `failure kinds cover the fixed six categories`() {
+        // M0 收尾工作包 1:失败分类固定六类,历史页按此展示
+        assertEquals(
+            listOf("网络失败", "鉴权失败", "超时", "解析失败", "用户取消", "未知"),
+            com.neethu.gouxiang.chat.DerivativeFailureKind.entries.map { it.label },
+        )
     }
 }

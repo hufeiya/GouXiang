@@ -33,6 +33,7 @@ class GouXiangRepo private constructor(context: Context) {
         GouXiangDatabase.MIGRATION_3_4,
         GouXiangDatabase.MIGRATION_4_5,
         GouXiangDatabase.MIGRATION_5_6,
+        GouXiangDatabase.MIGRATION_6_7,
     ).build()
 
     init {

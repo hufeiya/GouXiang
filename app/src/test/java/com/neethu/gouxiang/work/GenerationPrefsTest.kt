@@ -73,4 +73,15 @@ class GenerationPrefsTest {
         assertTrue(GenerationPrefs.innerVoiceImages(c))
         assertFalse(GenerationPrefs.momentsImages(c))
     }
+
+    @Test
+    fun `sidestory images default off and persist independently`() {
+        // M0 收尾:番外配图键先行(默认关,分支随 F 工作包接入)
+        val c = context()
+        assertFalse(GenerationPrefs.sidestoryImages(c))
+        GenerationPrefs.setSidestoryImages(c, true)
+        assertTrue(GenerationPrefs.sidestoryImages(c))
+        GenerationPrefs.setMomentsImages(c, false)
+        assertTrue(GenerationPrefs.sidestoryImages(c))
+    }
 }

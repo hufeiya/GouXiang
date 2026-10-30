@@ -2,6 +2,7 @@ package com.neethu.gouxiang.debug
 
 import android.content.Context
 import android.util.Log
+import kotlinx.coroutines.flow.first
 import com.neethu.gouxiang.chat.DialogMode
 import com.neethu.gouxiang.chat.MemoryCategories
 import com.neethu.gouxiang.chat.ReplyLength
@@ -57,10 +58,25 @@ internal suspend fun executeAiCommand(
             "status" -> cmdStatus(vm)
             "set_style" -> cmdSetStyle(vm, command)
             "set_length" -> cmdSetLength(vm, command)
+            "tasks" -> cmdTasks(context)
+            "task_retry" -> cmdTaskRetry(context, command)
+            "task_cancel" -> cmdTaskCancel(context, command)
+            "open_tasks" -> {
+                vm.openTaskHistory()
+                "task history opened (verify rows on screen or via tasks)"
+            }
+            "close_tasks" -> {
+                vm.closeTaskHistory()
+                "task history closed"
+            }
             else -> throw IllegalArgumentException(
                 "unknown command, send ai_cmd=help (see docs/ai-debug-intents.md)",
             )
         }
+    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+        // M0 收尾(热启动修复):取消必须上抛——吞掉会把消费循环留在「已取消却
+        // 继续跑」的破损态,后续 receive 立即关闭,通道里排队的命令永远不被执行。
+        throw cancelled
     } catch (e: Exception) {
         Log.e(AI_LOG_TAG, "FAIL ${command.name}: ${e.message}")
         return
@@ -199,6 +215,13 @@ private suspend fun cmdSendChat(vm: MainViewModel, command: AiDebugCommand): Str
     // 防「命令回 OK 但消息被丢」的假阳性
     if (vm.chatUi.value.character == null) {
         throw IllegalStateException("chat still loading (character not ready) — resend in a second")
+    }
+    // VM.sendChatMessage 在上一回合进行中会静默丢弃新消息(防重入)——这里显式
+    // FAIL,让热启动重发的命令不会「OK 却没执行」(M0 收尾工作包 4)
+    if (vm.chatUi.value.sending) {
+        throw IllegalStateException(
+            "chat busy — previous turn still streaming; poll msgs/state and resend later",
+        )
     }
     // send_chat 语义 = 「入队即 OK」:内部协程跑 LLM 流不阻塞调用方;
     // 回合结果用 msgs/state 轮询确认(与 AIAvatar 相同)
@@ -456,4 +479,59 @@ private suspend fun cmdSetLength(vm: MainViewModel, command: AiDebugCommand): St
     }
     vm.selectReplyLength(length)
     return "length=${length.name.lowercase()} (persisted; verify via state)"
+}
+
+// ── 5.8 任务历史(M0 收尾工作包 1)────────────────────────────────────
+
+/** 任务历史清单:`workId 前8位 来源 状态(分类) 类型·会话·结果ID 原因`。 */
+private suspend fun cmdTasks(context: Context): String {
+    val repo = com.neethu.gouxiang.data.GouXiangRepo.get(context)
+    val latest = repo.db.derivativeTaskDao().observeHistory(20).first()
+    if (latest.isEmpty()) return "(no derivative tasks yet)"
+    return latest.joinToString("\n") { row ->
+        val stateLine = if (row.state == "failed") {
+            val kind = com.neethu.gouxiang.chat.DerivativeFailureKind.fromName(row.failureKind)
+            "${row.state}(${kind.label})"
+        } else row.state
+        val parts = buildList {
+            add("${row.workId.take(8)} ${row.source.lowercase()} $stateLine " +
+                "${row.kind.lowercase()}·conv${row.conversationId}")
+            row.resultIds?.takeIf { it.isNotBlank() }?.let { add("result=$it") }
+            row.failureReason?.let { add("「${it.take(30)}」") }
+        }
+        parts.joinToString(" ")
+    }
+}
+
+/** workId 前 8 位 → 唯一匹配的完整 workId(歧义列出候选)。 */
+private suspend fun resolveWorkId(context: Context, prefix: String): String {
+    val repo = com.neethu.gouxiang.data.GouXiangRepo.get(context)
+    val candidates = repo.db.derivativeTaskDao().observeHistory(100).first()
+        .filter { it.workId.startsWith(prefix.trim()) }
+    return when {
+        candidates.isEmpty() -> throw IllegalArgumentException(
+            "No task matches workId prefix '$prefix'. Send ai_cmd=tasks to see options.",
+        )
+        candidates.size > 1 -> throw IllegalArgumentException(
+            "ambiguous workId prefix '$prefix': ${candidates.joinToString(", ") { it.workId.take(8) }}",
+        )
+        else -> candidates.first().workId
+    }
+}
+
+private suspend fun cmdTaskRetry(context: Context, command: AiDebugCommand): String {
+    val prefix = requireArg(command)
+    val workId = resolveWorkId(context, prefix)
+    // 与任务历史页「重试任务」同一条数据路径(同 requestId 幂等);页面开着时
+    // 由 Room 流自动刷新
+    val ok = com.neethu.gouxiang.work.TaskHistoryController.retry(context, workId)
+    if (!ok) throw IllegalStateException("task $workId cannot be retried (record missing or invalid)")
+    return "retry queued for $workId (poll tasks to confirm)"
+}
+
+private suspend fun cmdTaskCancel(context: Context, command: AiDebugCommand): String {
+    val prefix = requireArg(command)
+    val workId = resolveWorkId(context, prefix)
+    val cancelled = com.neethu.gouxiang.work.TaskHistoryController.cancel(context, workId)
+    return if (cancelled) "cancelled $workId" else "task $workId already finished (nothing to cancel)"
 }

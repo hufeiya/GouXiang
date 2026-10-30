@@ -26,7 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.neethu.gouxiang.debug.AI_EXTRA_KEYS
 import com.neethu.gouxiang.debug.AI_LOG_TAG
-import com.neethu.gouxiang.debug.AiDebugCommand
+import com.neethu.gouxiang.debug.AiDebugBus
 import com.neethu.gouxiang.debug.EXTRA_AI_CMD
 import com.neethu.gouxiang.debug.executeAiCommand
 import com.neethu.gouxiang.debug.parseAiDebugCommand
@@ -58,9 +58,6 @@ class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
 
-    /** Intent 下发的调试命令,MainFrame 组合后消费(冷启动/运行中同一条通道)。 */
-    private val aiCommands = Channel<AiDebugCommand>(Channel.UNLIMITED)
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -69,14 +66,16 @@ class MainActivity : ComponentActivity() {
                 MainFrame()
             }
         }
-        enqueueAiCommands(intent)
+        enqueueAiCommands(intent, via = "onCreate")
         handleNavigationExtras(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        enqueueAiCommands(intent)
+        // 热启动入口(singleTask 复用既有实例):命令进进程级总线,组合内消费
+        // 循环(无论经历过多少次重建)都会取到——M0 收尾工作包 4。
+        enqueueAiCommands(intent, via = "onNewIntent")
         handleNavigationExtras(intent)
     }
 
@@ -99,8 +98,15 @@ class MainActivity : ComponentActivity() {
         if (hasNavExtra) pendingNavExtras.trySend(extras.clone() as android.os.Bundle)
     }
 
-    /** 解析 ai extras 并入队;带 ai_* extras 但缺 ai_cmd 时 warn(防 LLM 排查无从下手)。 */
-    private fun enqueueAiCommands(intent: Intent?) {
+    /**
+     * 解析 ai extras 并入队;带 ai_* extras 但缺 ai_cmd 时 warn(防 LLM 排查无从下手)。
+     *
+     * M0 收尾(热启动修复):入队走进程级 [AiDebugBus](Activity 实例重建不丢命令);
+     * 另打 `AIDebug.Queue` 一行溯源(经 onCreate 还是 onNewIntent 入队)——
+     * `AIDebug` 主标签仍保持「每条命令恰好一行 OK/FAIL」契约;排查用
+     * `adb logcat -d -s AIDebug.Queue` 区分「Intent 没进 App」与「入队未消费」。
+     */
+    private fun enqueueAiCommands(intent: Intent?, via: String) {
         val extras = intent?.extras ?: return
         val command = parseAiDebugCommand(extras.toAiDebugMap())
         if (command == null) {
@@ -109,8 +115,12 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        aiCommands.trySend(command)
+        AiDebugBus.enqueue(command)
+        Log.d(QUEUE_LOG_TAG, "queued ai_cmd=${command.name} via $via")
     }
+
+    /** 溯源标签(独立于 [AI_LOG_TAG],不破坏逐命令一行契约)。 */
+    private val QUEUE_LOG_TAG = "AIDebug.Queue"
 
     private fun Bundle.toAiDebugMap(): Map<String, Any?> =
         keySet().associateWith { get(it) }
@@ -185,12 +195,13 @@ class MainActivity : ComponentActivity() {
             if (need.isNotEmpty()) vm.ensureAvatars(need)
         }
 
-        // AI 原生调试通道(docs/ai-debug-intents.md):消费 Intent 入队的命令,
-        // UI 就绪即执行(冷启动积压的命令也在此排空);每条命令恰好一行
-        // OK/FAIL 打在 AIDebug 标签下。
+        // AI 原生调试通道(docs/ai-debug-intents.md):消费进程级总线里的命令,
+        // UI 就绪即执行(冷启动积压与热启动新到命令同一条通道);每条命令恰好
+        // 一行 OK/FAIL 打在 AIDebug 标签下。总线在进程级,Activity 实例重建/
+        // 组合重启后新循环继续取队尾,命令不丢(热启动修复,M0 收尾工作包 4)。
         val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
         LaunchedEffect(vm) {
-            for (cmd in aiCommands) {
+            for (cmd in AiDebugBus.commands) {
                 executeAiCommand(appContext, vm, cmd)
             }
         }
@@ -242,6 +253,18 @@ class MainActivity : ComponentActivity() {
         val generationSettings by vm.generationSettings.collectAsState()
         LaunchedEffect(generationSettingsOpen) {
             if (generationSettingsOpen) vm.loadGenerationSettings()
+        }
+
+        // 任务历史页(M0 收尾):打开时订阅持久化历史;操作提示走一次性 Toast
+        val taskHistoryOpen by vm.taskHistoryOpen.collectAsState()
+        val taskHistoryItems by vm.taskHistoryItems.collectAsState()
+        val taskHistoryLoading by vm.taskHistoryLoading.collectAsState()
+        val taskHistoryNotice by vm.taskHistoryNotice.collectAsState()
+        LaunchedEffect(taskHistoryNotice) {
+            if (taskHistoryNotice.isNotBlank()) {
+                android.widget.Toast.makeText(toastContext, taskHistoryNotice, android.widget.Toast.LENGTH_SHORT).show()
+                vm.consumeTaskHistoryNotice()
+            }
         }
 
         // 「完成通知」打开时(≥33)现场请求 POST_NOTIFICATIONS 运行时权限
@@ -308,6 +331,8 @@ class MainActivity : ComponentActivity() {
                         },
                         // 内容生成设置页(后台生成基建 §3.3)
                         onOpenGenerationSettings = { vm.openGenerationSettings() },
+                        // 任务历史页(M0 收尾工作包 1:查看/重试/取消)
+                        onOpenTaskHistory = { vm.openTaskHistory() },
                     )
                 }
             }
@@ -522,6 +547,24 @@ class MainActivity : ComponentActivity() {
                     snapshot = generationSettings,
                     onToggle = settingsToggleWithPermission,
                     onBack = { vm.closeGenerationSettings() },
+                )
+            }
+        }
+
+        // 任务历史页(M0 收尾):ProfileScreen「任务历史」进入的全屏覆盖层;
+        // 渲染序与设置页同级置底(最后声明者在上)。返回 = closeTaskHistory()。
+        if (taskHistoryOpen) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF14141A)),
+            ) {
+                com.neethu.gouxiang.work.TaskHistoryScreen(
+                    items = taskHistoryItems,
+                    loading = taskHistoryLoading,
+                    onBack = { vm.closeTaskHistory() },
+                    onRetry = { vm.retryTask(it) },
+                    onCancel = { vm.cancelTask(it) },
                 )
             }
         }

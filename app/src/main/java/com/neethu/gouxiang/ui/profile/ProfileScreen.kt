@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Tune
@@ -45,6 +46,7 @@ import com.neethu.gouxiang.ai.config.AiConfigStore
 fun ProfileScreen(
     onOpenAiConfig: () -> Unit,
     onOpenGenerationSettings: () -> Unit = {},
+    onOpenTaskHistory: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -101,6 +103,14 @@ fun ProfileScreen(
             title = "内容生成",
             subtitle = "自动后台生成与通知 · 关闭时点击才生成",
             onClick = onOpenGenerationSettings,
+        )
+
+        // 任务历史(M0 收尾工作包 1):全部生成任务的执行记录,失败可重试
+        ProfileEntry(
+            icon = Icons.Filled.History,
+            title = "任务历史",
+            subtitle = "生成任务记录 · 失败可重试、进行中可取消",
+            onClick = onOpenTaskHistory,
         )
 
         Spacer(Modifier.height(24.dp))

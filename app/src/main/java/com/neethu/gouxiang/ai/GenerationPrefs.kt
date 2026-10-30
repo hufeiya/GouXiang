@@ -25,6 +25,13 @@ object GenerationPrefs {
     const val KEY_INNER_VOICE_IMAGES = "gen_inner_voice_images"
     const val KEY_MOMENTS_IMAGES = "gen_moments_images"
 
+    /**
+     * 番外配图(M0 收尾:键先行、分支随 F 工作包接入;生成管线未落地前设置页
+     * 该行禁用并标注「功能开发中」,不制造可用假象)。默认关:番外批量生成
+     * 量大,配图逐张烧 token,接入时按保守默认。
+     */
+    const val KEY_SIDESTORY_IMAGES = "gen_sidestory_images"
+
     /** 隔夜记忆总结兜底(A16:闲置 8h+ 补提炼)。 */
     const val KEY_MEMORY_OVERNIGHT = "gen_memory_overnight"
 
@@ -73,6 +80,12 @@ object GenerationPrefs {
     fun setInnerVoiceImages(context: Context, enabled: Boolean) = write(context, KEY_INNER_VOICE_IMAGES, enabled)
     fun momentsImages(context: Context): Boolean = read(context, KEY_MOMENTS_IMAGES, true)
     fun setMomentsImages(context: Context, enabled: Boolean) = write(context, KEY_MOMENTS_IMAGES, enabled)
+
+    /** 番外配图(默认关;F 工作包接入前无消费方)。 */
+    fun sidestoryImages(context: Context): Boolean = read(context, KEY_SIDESTORY_IMAGES, false)
+
+    fun setSidestoryImages(context: Context, enabled: Boolean) =
+        write(context, KEY_SIDESTORY_IMAGES, enabled)
 
     /** 隔夜记忆总结兜底(默认关:记忆页已有手动「立即总结」兜底)。 */
     fun memoryOvernight(context: Context): Boolean =

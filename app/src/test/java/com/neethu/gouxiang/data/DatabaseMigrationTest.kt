@@ -56,7 +56,7 @@ class DatabaseMigrationTest {
     @Test fun v5DataAndUnattributedWindowSurviveMigration() {
         createV5()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_5_6)
+            .addMigrations(GouXiangDatabase.MIGRATION_5_6, GouXiangDatabase.MIGRATION_6_7)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -83,5 +83,47 @@ class DatabaseMigrationTest {
                 assertEquals("聊天", cursor.getString(0))
             }
         }
+    }
+
+    /** v5 库 + MIGRATION_5_6 的全部语句 = 真实 v6 库(供 6→7 迁移测试)。 */
+    private fun createV6FromV5WithTaskHistoryRow() {
+        createV5()
+        val db = context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null)
+        db.execSQL("CREATE TABLE IF NOT EXISTS `derivative_tasks` (`workId` TEXT NOT NULL, `requestId` TEXT NOT NULL, `kind` TEXT NOT NULL, `source` TEXT NOT NULL, `conversationId` INTEGER NOT NULL, `characterId` INTEGER NOT NULL, `state` TEXT NOT NULL, `failureReason` TEXT, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `finishedAt` INTEGER, PRIMARY KEY(`workId`))")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `derivative_results` (`requestId` TEXT NOT NULL, `kind` TEXT NOT NULL, `characterId` INTEGER NOT NULL, `resultIds` TEXT NOT NULL, `imageStatus` TEXT NOT NULL, `sourceConversationId` INTEGER NOT NULL, `sourceStartMessageId` INTEGER, `sourceEndMessageId` INTEGER, `sourceVersion` INTEGER NOT NULL, `notificationDone` INTEGER NOT NULL, PRIMARY KEY(`requestId`))")
+        db.execSQL("ALTER TABLE moments ADD COLUMN isStale INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE inner_voices ADD COLUMN isStale INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE memories ADD COLUMN sourceConversationId INTEGER")
+        db.execSQL("ALTER TABLE memories ADD COLUMN sourceEndMessageId INTEGER")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `memory_turns` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `conversationId` INTEGER NOT NULL, `characterId` INTEGER NOT NULL, `turnId` TEXT NOT NULL, `startMessageId` INTEGER NOT NULL, `endMessageId` INTEGER NOT NULL, `user` TEXT NOT NULL, `assistant` TEXT NOT NULL, `completed` INTEGER NOT NULL, `profileDone` INTEGER NOT NULL, `eventDone` INTEGER NOT NULL, `profileLease` TEXT NOT NULL, `eventLease` TEXT NOT NULL, `profileLeaseAt` INTEGER NOT NULL, `eventLeaseAt` INTEGER NOT NULL)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_memory_turns_conversationId` ON `memory_turns` (`conversationId`)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_memory_turns_conversationId_turnId` ON `memory_turns` (`conversationId`, `turnId`)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS `memory_conversation_versions` (`conversationId` INTEGER NOT NULL, `version` INTEGER NOT NULL, PRIMARY KEY(`conversationId`))")
+        // 一条开发期失败任务:6→7 后状态/原因保留,新列 failureKind 为 NULL
+        db.execSQL(
+            "INSERT INTO derivative_tasks VALUES ('w1', 'r1', 'MOMENT', 'MANUAL', 2, 1, " +
+                "'failed', '生成失败，请检查网络与模型配置后重试', 10, 10, 10)",
+        )
+        db.version = 6
+        db.close()
+    }
+
+    @Test fun v6TaskHistoryGainsFailureKindColumnAndKeepsRows() {
+        createV6FromV5WithTaskHistoryRow()
+        val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
+            .addMigrations(GouXiangDatabase.MIGRATION_6_7)
+            .allowMainThreadQueries().build()
+        try {
+            val sql = db.openHelper.writableDatabase
+            fun scalar(query: String): String = sql.query(query).use { it.moveToFirst(); it.getString(0) }
+            // 既有行原样保留;新列可读且为 NULL(展示层回落「未知」)
+            assertEquals("w1", scalar("SELECT workId FROM derivative_tasks"))
+            assertEquals("failed", scalar("SELECT state FROM derivative_tasks"))
+            assertEquals("生成失败，请检查网络与模型配置后重试", scalar("SELECT failureReason FROM derivative_tasks"))
+            assertEquals("聊天", scalar("SELECT content FROM messages WHERE id=3"))
+            // 新列可写(Worker 失败收口的落库面)
+            sql.execSQL("UPDATE derivative_tasks SET failureKind = 'NETWORK' WHERE workId = 'w1'")
+            assertEquals("NETWORK", scalar("SELECT failureKind FROM derivative_tasks"))
+        } finally { db.close() }
     }
 }

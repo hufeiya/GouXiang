@@ -23,7 +23,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MomentEntity::class,
         MomentCommentEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -41,6 +41,16 @@ abstract class GouXiangDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        /**
+         * M0 收尾迁移(v6→v7,单列纯增量):`derivative_tasks` 加 `failureKind`
+         * 失败原因分类列(既有行回填 NULL,展示层回落「未知」);其余表不动。
+         */
+        val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE derivative_tasks ADD COLUMN failureKind TEXT")
+            }
+        }
 
         val MIGRATION_5_6: Migration = object : Migration(5, 6) {
             override fun migrate(db: SupportSQLiteDatabase) {
