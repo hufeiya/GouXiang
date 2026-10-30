@@ -108,6 +108,9 @@ class DurableMemoryProcessor(private val db: GouXiangDatabase, private val extra
         db.memoryDao().deleteFromSource(conversationId, messageId)
         db.derivativeResultDao().markMomentsStale(conversationId, messageId)
         db.derivativeResultDao().markInnerVoicesStale(conversationId, messageId)
+        // E3 回溯联动:锚定区间命中被回溯消息的角色状态记录标记失效(同事务收口;
+        // 生成中的在途候选由上方版本 +1 在落库事务内拦截,过期任务不回写)。
+        db.characterStatusDao().markStaleFrom(conversationId, messageId)
         db.messageDao().deleteFromMessage(conversationId, messageId)
     }
 }

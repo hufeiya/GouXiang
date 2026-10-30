@@ -15,7 +15,6 @@ import com.neethu.gouxiang.chat.MemoryBook
 import com.neethu.gouxiang.chat.MemoryCategories
 import com.neethu.gouxiang.chat.MemoryExtractor
 import com.neethu.gouxiang.chat.ReplyLength
-import com.neethu.gouxiang.chat.StatusRule
 import com.neethu.gouxiang.protocol.conversationSummary
 import com.neethu.gouxiang.protocol.toProtocolLine
 import com.neethu.gouxiang.data.CharacterEntity
@@ -79,6 +78,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val durableMemory = com.neethu.gouxiang.chat.DurableMemoryProcessor(repo.db, memoryExtractor)
 
+    // ── 角色状态(E 工作包 E2):回合收尾生成 + 失败保持最近有效 + 规则兜底 ──
+    val statusManager = com.neethu.gouxiang.chat.CharacterStatusManager(
+        db = repo.db,
+        llm = ChatOrchestrator.defaultLlm(),
+        llmConfig = { orchestrator.llmConfigForMemory() },
+        scope = viewModelScope,
+    )
+
     init {
         orchestrator.detailedMemoryHook = { character, conversationId, _, _, _, _ ->
             val pending = durableMemory.pending(conversationId)
@@ -86,6 +93,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             if (memoryCoordinator.autoSummarize && (pending.size >= memoryCoordinator.everyTurns || chars >= memoryCoordinator.minChars)) {
                 viewModelScope.launch { durableMemory.run(character, conversationId) }
             }
+        }
+        // E2 状态收尾:真实生成成功的回合结束后 fire-and-forget 生成角色状态
+        // (冷却/单飞/版本拦截/失败保持都在管理器内部;失败不影响聊天回合)。
+        orchestrator.statusHook = { character, conversationId, turnId, userText, assistantText, userMessageId ->
+            statusManager.onTurnCompleted(character, conversationId, turnId, userText, assistantText, userMessageId)
         }
     }
 
@@ -210,7 +222,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             )
             repo.observeMessages(conversationId).collect { messages ->
                 _characterHomeUi.value = _characterHomeUi.value.copy(
-                    status = StatusRule.generate(character, messages),
+                    // E2 状态条数据源:记录优先,无记录走 StatusRule 规则兜底
+                    // (与聊天页同一 currentLine,主页/聊天页状态一致)。
+                    status = statusManager.currentLine(character, conversationId, messages),
                 )
             }
         }
@@ -277,12 +291,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _chatUi.value = _chatUi.value.copy(
                 bubbleItems = toBubbleItems(all, offlineSeparators(consumed)),
                 separatorTurnIds = offlineSeparators(consumed),
-                status = StatusRule.generate(character, all),
+                status = statusManager.currentLine(character, conversationId, all),
             )
-            repo.observeMessages(conversationId).collect { messages ->
+            // E2 状态条数据源:角色状态记录优先,无记录走 StatusRule 兜底。
+            // 状态生成异步落库(晚于本回合消息流发射),两条流各自驱动:
+            // 消息流刷气泡,状态记录流刷状态条(取当前最新消息快照)。
+            var latestMessages: List<MessageEntity> = all
+            launch {
+                repo.observeMessages(conversationId).collect { messages ->
+                    latestMessages = messages
+                    _chatUi.value = _chatUi.value.copy(
+                        bubbleItems = toBubbleItems(messages, _chatUi.value.separatorTurnIds),
+                    )
+                }
+            }
+            repo.db.characterStatusDao().observeForCharacter(character.id).collect {
                 _chatUi.value = _chatUi.value.copy(
-                    bubbleItems = toBubbleItems(messages, _chatUi.value.separatorTurnIds),
-                    status = StatusRule.generate(character, messages),
+                    status = statusManager.currentLine(character, conversationId, latestMessages),
                 )
             }
         }
@@ -2073,10 +2098,145 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun openMessagesFromNotification() {
         selectedTab.value = BottomTab.MESSAGES
     }
+
+    // ── 状态面板(E 工作包 E3):聊天状态条点击进入的全屏覆盖层 ───────
+
+    /** 状态面板打开的会话 id(null=未进入)。 */
+    private val _statusPanelConversationId = MutableStateFlow<Long?>(null)
+    val statusPanelConversationId: StateFlow<Long?> = _statusPanelConversationId.asStateFlow()
+
+    /** 状态面板 UI 状态(打开期间订阅该角色的状态记录流)。 */
+    private val _statusPanelUi = MutableStateFlow(com.neethu.gouxiang.ui.status.StatusPanelUiState())
+    val statusPanelUi: StateFlow<com.neethu.gouxiang.ui.status.StatusPanelUiState> = _statusPanelUi.asStateFlow()
+
+    private var statusPanelJob: Job? = null
+
+    /** 打开状态面板:解析角色并订阅其状态记录(最新在前;含失效区)。 */
+    fun openStatusPanel(conversationId: Long) {
+        if (_statusPanelConversationId.value == conversationId) return
+        _statusPanelConversationId.value = conversationId
+        _statusPanelUi.value = com.neethu.gouxiang.ui.status.StatusPanelUiState(loading = true)
+        statusPanelJob?.cancel()
+        statusPanelJob = viewModelScope.launch {
+            val conv = repo.db.conversationDao().byId(conversationId)
+            val character = conv?.let { repo.characterById(it.characterId) }
+            if (conv == null || character == null) {
+                _statusPanelUi.value = com.neethu.gouxiang.ui.status.StatusPanelUiState(loadFailed = true)
+                return@launch
+            }
+            repo.db.characterStatusDao().observeForCharacter(character.id).collect { records ->
+                _statusPanelUi.value = com.neethu.gouxiang.ui.status.StatusPanelUiState(
+                    characterName = character.name,
+                    rows = records.map { com.neethu.gouxiang.ui.status.toStatusRow(it) },
+                )
+            }
+        }
+    }
+
+    /** 关闭状态面板。 */
+    fun closeStatusPanel() {
+        statusPanelJob?.cancel()
+        statusPanelJob = null
+        _statusPanelConversationId.value = null
+        _statusPanelUi.value = com.neethu.gouxiang.ui.status.StatusPanelUiState()
+    }
+
+    /** 清理当前角色的失效记录(面板「清理失效记录」;一次删光 stale 行)。 */
+    fun clearStaleStatuses() {
+        val conversationId = _statusPanelConversationId.value ?: return
+        viewModelScope.launch {
+            val conv = repo.db.conversationDao().byId(conversationId) ?: return@launch
+            repo.db.characterStatusDao().clearStale(conv.characterId)
+        }
+    }
+
+    // ── 状态调试命令(ai_cmd:E 工作包验收口)────────────────────────
+
+    /** `status_list`:当前角色近期状态记录(面板同一数据源)。 */
+    suspend fun debugStatusList(limit: Int): List<com.neethu.gouxiang.data.CharacterStatusEntity> {
+        val character = requireOpenChatCharacter()
+        return repo.db.characterStatusDao().forCharacter(character.id, limit)
+    }
+
+    /** `status_now`:当前状态条取值(记录优先/规则兜底)+ 是否来自记录。 */
+    suspend fun debugStatusNow(): Pair<com.neethu.gouxiang.chat.StatusLine, Boolean> {
+        val (character, conversationId) = requireOpenChatCharacterAndConversation()
+        val record = repo.db.characterStatusDao().latestActive(character.id)
+        val line = statusManager.currentLine(
+            character,
+            conversationId,
+            repo.recentMessages(conversationId, 20),
+        )
+        return line to (record != null)
+    }
+
+    /**
+     * `status_inject`:手动注入一条状态(离线验收不依赖 LLM);
+     * arg 格式 = `心情|正在做的事|内心想法[|emoji]`。
+     */
+    suspend fun debugStatusInject(arg: String): com.neethu.gouxiang.data.CharacterStatusEntity {
+        val (character, conversationId) = requireOpenChatCharacterAndConversation()
+        val parts = arg.split('|').map { it.trim() }
+        if (parts.size < 2) {
+            throw IllegalArgumentException("usage: status_inject \"心情|正在做的事|内心想法[|emoji]\"")
+        }
+        return statusManager.injectManual(
+            character = character,
+            conversationId = conversationId,
+            mood = parts[0],
+            doing = parts[1],
+            thought = parts.getOrElse(2) { "" },
+            emoji = parts.getOrNull(3)?.takeIf { it.isNotBlank() },
+        )
+    }
+
+    /**
+     * `status_refresh`:立即生成一次状态(不等回合收尾冷却;与回合通道同一
+     * LLM/schema/版本拦截链路)。入队即返回,结果用 status_list 轮询确认。
+     */
+    fun debugStatusRefresh(): String {
+        val conversationId = _chatUi.value.conversationId
+        if (conversationId == 0L) throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+        val character = _chatUi.value.character
+            ?: throw IllegalStateException("chat not ready (still loading); resend ai_cmd=status_refresh")
+        viewModelScope.launch {
+            runCatching {
+                val recent = repo.recentMessages(conversationId, 6)
+                val lastUser = recent.lastOrNull { it.role == "user" }
+                val lastAssistant = recent.lastOrNull { it.role == "assistant" } ?: return@runCatching
+                statusManager.generate(
+                    character = character,
+                    conversationId = conversationId,
+                    turnId = lastAssistant.turnId,
+                    userText = lastUser?.content.orEmpty(),
+                    assistantText = lastAssistant.content,
+                    userMessageId = lastUser?.id,
+                    sourceKind = com.neethu.gouxiang.data.CharacterStatusEntity.SOURCE_TURN,
+                )
+            }.onFailure { android.util.Log.w("CharacterStatus", "refresh failed: ${it.message}") }
+        }
+        return "status refresh queued for character=${character.name} (poll status_list to confirm)"
+    }
+
+    /** 聊天页打开且就绪的角色(状态调试命令前置校验)。 */
+    private fun requireOpenChatCharacter(): com.neethu.gouxiang.data.CharacterEntity {
+        val chatId = _chatUi.value.conversationId
+        if (chatId == 0L) throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+        return _chatUi.value.character
+            ?: throw IllegalStateException("chat not ready (still loading); resend the command")
+    }
+
+    private fun requireOpenChatCharacterAndConversation(): Pair<com.neethu.gouxiang.data.CharacterEntity, Long> {
+        val chatId = _chatUi.value.conversationId
+        if (chatId == 0L) throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+        val character = _chatUi.value.character
+            ?: throw IllegalStateException("chat not ready (still loading); resend the command")
+        return character to chatId
+    }
 }
 
 /**
- * 角色主页 04 的 UI 状态:角色卡 + 状态条(与聊天页同一 [StatusRule] 数据源,
+ * 角色主页 04 的 UI 状态:角色卡 + 状态条(与聊天页同一 currentLine 数据源,
  * 保证「主页状态条与聊天页状态条数据一致」)。
  */
 data class CharacterHomeUiState(

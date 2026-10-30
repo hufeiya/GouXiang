@@ -131,6 +131,12 @@ fun aiDebugHelp(): String = """
     |  memory_summarize         立即总结(不等 5 轮阈值;会真实请求 LLM)
     |Style:
     |  status                   当前会话状态条(StatusRule): emoji+text+判定依据
+    |  status_now               当前状态条取值+来源(状态记录优先/规则兜底,E 工作包)
+    |  status_list [ai_x=N]     近期状态记录: id emoji 心情/做/想 来源区间 版本 状态
+    |                           (与「TA 的状态」面板同源;含已随回溯失效的行)
+    |  status_inject <arg>      手动注入状态: arg="心情|正在做的事|内心想法[|emoji]"
+    |                           (离线验收不依赖 LLM;入状态面板与状态条)
+    |  status_refresh           立即生成一次状态(真实请求 LLM;失败保持最近有效)
     |  set_style <arg>          heartbeat | delicate | long_dialog | deep_think | basic
     |  set_length <arg>         shorter | medium | longer
 |Tasks (生成任务历史,M0 收尾):

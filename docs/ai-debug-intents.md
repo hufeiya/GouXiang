@@ -182,6 +182,17 @@ FAIL load_xxx: No XXX matches 'foo'. Send ai_cmd=help to see options.
 | `set_style` | `ai_arg`=heartbeat \| delicate \| long_dialog \| deep_think \| basic | P0 | `selectDialogMode()`(`MainViewModel.kt:116`),持久化到 `chat_style_prefs`;`state` 回显核对 |
 | `set_length` | `ai_arg`=shorter \| medium \| longer | P0 | `selectReplyLength()`(`MainViewModel.kt:122`) |
 
+### 5.5a 角色状态(E 工作包,2026-10-31 增补)
+
+| 命令 | 参数 | 作用 |
+|---|---|---|
+| `status_now` | — | 当前状态条取值 + 来源(`status record`=有生效记录 / `rule fallback`=无记录走规则兜底);与聊天页状态条同源 |
+| `status_list` | `ai_x`=条数(默认 10,上限 30) | 近期状态记录:`id emoji 心情= 做= 想= \| src=turn/manual turn= 回合 消息区间 v=会话版本 \| 状态 时间`;与「TA 的状态」面板同源,含已随回溯失效(stale)行 |
+| `status_inject` | `ai_arg`="心情\|正在做的事\|内心想法[\|emoji]" | 手动注入一条状态(sourceKind=manual,不锚定回合);**离线验收不依赖 LLM**;注入后聊天页状态条与面板立即生效,查库归属同 `status_list` |
+| `status_refresh` | — | 立即按最近对话生成一次状态(**真实请求 LLM**;失败保持最近有效状态,返回 queued 用 `status_list` 轮询) |
+
+E 工作包验收口径:两角色各 `status_inject` 不同状态 → `status_list` 各查各的(互不串);`rewind` 后被回溯命中来源区间的记录转 stale(面板「失效记录」区可见,`status_list` 回显 state=stale);断网聊天不崩、无记录时 `status_now` 回 `rule fallback`。
+
 ### 5.5b 任务历史(M0 收尾,2026-10-31 增补)
 
 | 命令 | 参数 | 作用 |

@@ -8,12 +8,13 @@ import com.neethu.gouxiang.data.MemoryEntity
  *
  * - 画像块:我的称呼 / 我的身份 各一行(身份性记忆,容量外也不降权);
  * - 关系块:relationship 行(常驻,不占容量);
- * - 事件块:事件按 at 倒序 TopN([NORMAL_MAX] 条容量内正常行);容量外条目
- *   照常注入但每行带「逐渐模糊」后缀 + 打分沉底(降权而非删除的用户可见面,
- *   faded 侧另取 [FADED_MAX] 条封顶)。
+ * - 事件块:E1 有界召回([MemoryRecall]:话题相关性 + 重要性 + 时间的可解释
+ *   本地打分)排序后 TopN([NORMAL_MAX] 条容量内正常行);容量外条目照常注入
+ *   但每行带「逐渐模糊」后缀 + 打分沉底(降权而非删除的用户可见面,faded 侧
+ *   另取 [FADED_MAX] 条封顶)。画像/关系与事件、渐忘各自独立预算。
  *
- * 渐忘在检索侧的表现由 [MemoryCapacity.band] 的打标 + 打分驱动;
- * 这里负责把打标结果渲染成 prompt 行。
+ * 渐忘在检索侧的表现由 [MemoryCapacity.band] 的打标 + 打分驱动;排序由
+ * [MemoryRecall](query 无命中时退化为时间+重要性)驱动;这里负责渲染 prompt 行。
  */
 object MemoryInjection {
 
@@ -26,17 +27,18 @@ object MemoryInjection {
     /**
      * 组装 [记忆] 块;无任何可注入内容 → null(零注入,03 §3.2h 槽位约定)。
      * 阈值内条目正常行,容量外条目行尾加 [MemoryCapacity.FADED_SUFFIX]。
+     * [nowMs] 注入便于单测控制时间分档(生产默认当前时刻)。
      */
-    fun block(charName: String, memories: List<MemoryEntity>, query: String): String? {
-        val (banded, state) = MemoryCapacity.band(memories)
-        val profile = memories.filter { it.category == MemoryCategories.PROFILE }
-        val relationship = memories.filter { it.category == MemoryCategories.RELATIONSHIP }
-        val normalEvents = banded.filter { it.memory.category == MemoryCategories.EVENT && !it.faded }
-            .take(NORMAL_MAX)
-        val fadedEvents = banded.filter { it.memory.category == MemoryCategories.EVENT && it.faded }
-            .take(FADED_MAX)
-
-        if (profile.isEmpty() && relationship.isEmpty() && normalEvents.isEmpty() && fadedEvents.isEmpty()) {
+    fun block(
+        charName: String,
+        memories: List<MemoryEntity>,
+        query: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): String? {
+        val recalled = MemoryRecall.recall(memories, query, nowMs)
+        val profile = recalled.identity.filter { it.category == MemoryCategories.PROFILE }
+        val relationship = recalled.identity.filter { it.category == MemoryCategories.RELATIONSHIP }
+        if (recalled.isEmpty) {
             return null
         }
         return buildString {
@@ -47,13 +49,13 @@ object MemoryInjection {
             relationship.forEach { m ->
                 appendLine("- (关系) ${renderContent(m)}")
             }
-            normalEvents.forEach { b ->
-                appendLine("- ${b.memory.content}")
+            recalled.events.forEach { m ->
+                appendLine("- ${m.content}")
             }
-            if (fadedEvents.isNotEmpty()) {
+            if (recalled.faded.isNotEmpty()) {
                 appendLine("(以下记忆逐渐模糊,仅供参考,不确定时不要当作事实断言)")
-                fadedEvents.forEach { b ->
-                    appendLine("- ${b.memory.content}${MemoryCapacity.FADED_SUFFIX}")
+                recalled.faded.forEach { m ->
+                    appendLine("- ${m.content}${MemoryCapacity.FADED_SUFFIX}")
                 }
             }
         }.trim().ifEmpty { null }

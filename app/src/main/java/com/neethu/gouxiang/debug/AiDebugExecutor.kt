@@ -59,6 +59,10 @@ internal suspend fun executeAiCommand(
             "memory_forget" -> cmdMemoryForget(context, vm, command)
             "memory_summarize" -> cmdMemorySummarize(vm)
             "status" -> cmdStatus(vm)
+            "status_now" -> cmdStatusNow(vm)
+            "status_list" -> cmdStatusList(vm, command)
+            "status_inject" -> cmdStatusInject(vm, command)
+            "status_refresh" -> vm.debugStatusRefresh()
             "set_style" -> cmdSetStyle(vm, command)
             "set_length" -> cmdSetLength(vm, command)
             "tasks" -> cmdTasks(context)
@@ -446,6 +450,34 @@ private suspend fun cmdMemorySummarize(vm: MainViewModel): String {
 }
 
 // ── 5.5 状态与风格 ───────────────────────────────────────────────────
+
+/** `status_now`:当前状态条取值 + 是否来自状态记录(E2 记录优先/规则兜底口径)。 */
+private suspend fun cmdStatusNow(vm: MainViewModel): String {
+    val (line, fromRecord) = vm.debugStatusNow()
+    val source = if (fromRecord) "status record" else "rule fallback (no active record)"
+    return "${line.emoji} ${line.text} — source: $source"
+}
+
+/** `status_list`:当前角色近期状态记录(id emoji 心情/正在做/内心想法 来源 时间 状态)。 */
+private suspend fun cmdStatusList(vm: MainViewModel, command: AiDebugCommand): String {
+    val limit = (command.x?.toInt() ?: 10).coerceIn(1, 30)
+    val records = vm.debugStatusList(limit)
+    if (records.isEmpty()) return "(no status records; chat a few turns or status_inject)"
+    return records.joinToString("\n") { r ->
+        buildList {
+            add("${r.id} ${r.emoji} 心情=${r.mood} 做=${r.doing} 想=${r.thought}")
+            add("src=${r.sourceKind} turn=${r.sourceTurnId.take(12)} range=${r.sourceStartMessageId}..${r.sourceEndMessageId} v=${r.sourceVersion}")
+            add("${r.state} @${com.neethu.gouxiang.ui.status.statusTimeLabel(r.generatedAt)}")
+        }.joinToString(" | ")
+    }
+}
+
+/** `status_inject`:手动注入一条状态(arg=心情|正在做的事|内心想法[|emoji])。 */
+private suspend fun cmdStatusInject(vm: MainViewModel, command: AiDebugCommand): String {
+    val arg = requireArg(command)
+    val record = vm.debugStatusInject(arg)
+    return "injected status id=${record.id} ${record.emoji} ${record.doing} (poll status_list)"
+}
 
 private suspend fun cmdStatus(vm: MainViewModel): String {
     val chatId = vm.debugConversationId

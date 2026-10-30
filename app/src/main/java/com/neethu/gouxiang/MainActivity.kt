@@ -160,6 +160,9 @@ class MainActivity : ComponentActivity() {
         // 聊天历史页 11(F7)
         val historyId by vm.historyConversationId.collectAsState()
         val historyUi by vm.historyUi.collectAsState()
+        // 状态面板(E 工作包 E3):聊天页状态条点击进入
+        val statusPanelId by vm.statusPanelConversationId.collectAsState()
+        val statusPanelUi by vm.statusPanelUi.collectAsState()
         // 按住说话·语音输入(F4-P1:录音→ASR 转写→填草稿,不直接发送)
         val voiceInputActive by vm.voiceInputActive.collectAsState()
         val voiceInputRecognizing by vm.voiceInputRecognizing.collectAsState()
@@ -542,6 +545,22 @@ class MainActivity : ComponentActivity() {
                     state = historyUi,
                     onBack = { vm.closeHistory() },
                     onLoadOlder = { vm.loadOlderHistory() },
+                )
+            }
+        }
+
+        // 状态面板(E 工作包 E3):聊天页状态条点击进入的全屏覆盖层;当前状态
+        // 卡 + 近期记录时间轴 + 失效记录区(回溯标记)。渲染序与历史页同层级。
+        if (statusPanelId != null) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF14141A)),
+            ) {
+                com.neethu.gouxiang.ui.status.StatusPanelScreen(
+                    state = statusPanelUi,
+                    onBack = { vm.closeStatusPanel() },
+                    onClearStale = { vm.clearStaleStatuses() },
                 )
             }
         }

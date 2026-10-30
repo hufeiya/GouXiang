@@ -61,6 +61,7 @@ class DatabaseMigrationTest {
                 GouXiangDatabase.MIGRATION_6_7,
                 GouXiangDatabase.MIGRATION_7_8,
                 GouXiangDatabase.MIGRATION_8_9,
+                GouXiangDatabase.MIGRATION_9_10,
             )
             .allowMainThreadQueries().build()
         try {
@@ -116,7 +117,7 @@ class DatabaseMigrationTest {
     @Test fun v6TaskHistoryGainsFailureKindColumnAndKeepsRows() {
         createV6FromV5WithTaskHistoryRow()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9)
+            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -144,7 +145,7 @@ class DatabaseMigrationTest {
     @Test fun v7CharactersGainAvatarVersionColumnAndKeepsRows() {
         createV7FromV6()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9)
+            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -174,7 +175,7 @@ class DatabaseMigrationTest {
     @Test fun v8ProactiveLedgerTablesCreatedAndOldDataKept() {
         createV8FromV7()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_8_9)
+            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -207,6 +208,83 @@ class DatabaseMigrationTest {
             } catch (expected: android.database.sqlite.SQLiteConstraintException) {
                 // 预期:唯一冲突
             }
+        } finally { db.close() }
+    }
+
+    /** v9 库 = v8 全部语句 + 主动消息账本两表(照 8→9 真实迁移顺序)。 */
+    private fun createV9FromV8() {
+        createV8FromV7()
+        val db = context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null)
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `proactive_outbox` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`conversationId` INTEGER NOT NULL, " +
+                "`characterId` INTEGER NOT NULL, " +
+                "`batchId` TEXT NOT NULL, " +
+                "`requestId` TEXT NOT NULL, " +
+                "`kind` TEXT NOT NULL, " +
+                "`turnId` TEXT NOT NULL, " +
+                "`messageIds` TEXT NOT NULL, " +
+                "`count` INTEGER NOT NULL, " +
+                "`state` TEXT NOT NULL, " +
+                "`failureReason` TEXT NOT NULL, " +
+                "`notified` INTEGER NOT NULL, " +
+                "`seen` INTEGER NOT NULL, " +
+                "`seenAt` INTEGER NOT NULL, " +
+                "`createdAt` INTEGER NOT NULL, " +
+                "`updatedAt` INTEGER NOT NULL)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_proactive_outbox_conversationId` ON `proactive_outbox` (`conversationId`)")
+        db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_proactive_outbox_requestId` ON `proactive_outbox` (`requestId`)")
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `proactive_conversation_state` (" +
+                "`conversationId` INTEGER NOT NULL, " +
+                "`characterId` INTEGER NOT NULL, " +
+                "`lastUserActivityAt` INTEGER NOT NULL, " +
+                "`lastProactiveAt` INTEGER NOT NULL, " +
+                "`lastBatchAt` INTEGER NOT NULL, " +
+                "`lastBatchCount` INTEGER NOT NULL, " +
+                "`lastBatchMessageIds` TEXT NOT NULL, " +
+                "`unseenCount` INTEGER NOT NULL, " +
+                "`lastSeenAt` INTEGER NOT NULL, " +
+                "`dailyStamp` TEXT NOT NULL, " +
+                "`dailyCount` INTEGER NOT NULL, " +
+                "`activityOverride` INTEGER NOT NULL DEFAULT 0, " +
+                "PRIMARY KEY(`conversationId`))",
+        )
+        db.version = 9
+        db.close()
+    }
+
+    /** E 工作包 v9→v10:新建角色状态记录表,既有角色/会话/消息/账本原样保留。 */
+    @Test fun v9CharacterStatusRecordsTableCreatedAndOldDataKept() {
+        createV9FromV8()
+        val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
+            .addMigrations(GouXiangDatabase.MIGRATION_9_10)
+            .allowMainThreadQueries().build()
+        try {
+            val sql = db.openHelper.writableDatabase
+            fun scalar(query: String): String = sql.query(query).use { it.moveToFirst(); it.getString(0) }
+            // 既有数据原样保留(角色/会话/消息 + v9 的账本行)
+            assertEquals("角色", scalar("SELECT name FROM characters WHERE id=1"))
+            assertEquals("聊天", scalar("SELECT content FROM messages WHERE id=3"))
+            sql.execSQL(
+                "INSERT INTO proactive_outbox (conversationId, characterId, batchId, requestId, kind, " +
+                    "turnId, messageIds, count, state, failureReason, notified, seen, seenAt, createdAt, updatedAt) " +
+                    "VALUES (2, 1, 'batch-1', 'req-e', 'DAILY_SHARE', '', '', 0, 'PENDING', '', 0, 0, 0, 10, 10)",
+            )
+            assertEquals("PENDING", scalar("SELECT state FROM proactive_outbox WHERE requestId='req-e'"))
+            // 新表可写可读(状态记录落地面);来源区间/版本列语义成立
+            sql.execSQL(
+                "INSERT INTO character_status_records (characterId, conversationId, emoji, mood, doing, thought, " +
+                    "sourceKind, sourceConversationId, sourceTurnId, sourceStartMessageId, sourceEndMessageId, " +
+                    "sourceVersion, state, generatedAt) " +
+                    "VALUES (1, 2, '🤔', '开心', '在等你的消息', '他在忙什么', 'turn', 2, 'turn-1', 3, 3, 0, 'active', 10)",
+            )
+            assertEquals("在等你的消息", scalar("SELECT doing FROM character_status_records WHERE characterId=1"))
+            assertEquals("turn", scalar("SELECT sourceKind FROM character_status_records"))
+            sql.execSQL("UPDATE character_status_records SET state='stale' WHERE conversationId=2 AND sourceEndMessageId >= 3")
+            assertEquals("stale", scalar("SELECT state FROM character_status_records WHERE characterId=1"))
         } finally { db.close() }
     }
 }

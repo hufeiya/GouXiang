@@ -104,6 +104,8 @@ fun ChatMainScreen(
     onOpenVoiceCall: () -> Unit = {},
     /** 右侧互动列末位「历史」(F7:聊天历史页 11,对照 11-history.xml tv_im)。 */
     onOpenHistory: () -> Unit = {},
+    /** 状态条点击(E 工作包 E3:进入「TA 的状态」面板,查看近期状态与来源)。 */
+    onOpenStatusPanel: () -> Unit = {},
     /** 失败回合重试条点击(02 文档 §3.5:IM 用户回合失败也显式出条,按原文本重试)。 */
     onRetryFailedTurn: () -> Unit = {},
     /** 长按「回溯」确认后回调(删除该条及之后消息;F1 与手机聊天页同款 VM 出口)。 */
@@ -225,7 +227,7 @@ fun ChatMainScreen(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            StatusPill(state.status)
+            StatusPill(state.status, onClick = onOpenStatusPanel)
             Spacer(Modifier.height(10.dp))
             NameAndActionsRow(
                 name = state.character?.name.orEmpty(),
@@ -359,13 +361,13 @@ private fun TopBar(onBack: () -> Unit, onOpenMemory: () -> Unit = {}) {
 }
 
 /**
- * 状态条胶囊:「emoji + 在做什么 ›」(点击占位)。
+ * 状态条胶囊:「emoji + 在做什么 ›」(点击进入状态面板,E3)。
  * emoji/text 分字段渲染,绝不按 UTF-16 位切串 —— 实机 F2 验收证据:
  * take(1) 把 🍔(U+1F354) 切成未配对代理 U+D83C,uiautomator dump 的
  * KXmlSerializer 抛 IllegalArgumentException(U+d83c) 且渲染成「?◆」。
  */
 @Composable
-private fun StatusPill(status: com.neethu.gouxiang.chat.StatusLine) {
+private fun StatusPill(status: com.neethu.gouxiang.chat.StatusLine, onClick: () -> Unit = {}) {
     if (status.emoji.isEmpty() && status.text.isEmpty()) return
     Row(
         modifier = Modifier
@@ -373,7 +375,7 @@ private fun StatusPill(status: com.neethu.gouxiang.chat.StatusLine) {
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-            ) { /* 占位:状态面板后续功能 */ }
+            ) { onClick() }
             .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(999.dp))
             .padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,

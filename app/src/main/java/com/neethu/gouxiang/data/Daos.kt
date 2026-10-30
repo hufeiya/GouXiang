@@ -154,6 +154,10 @@ interface MessageDao {
     @Query("SELECT MIN(id) FROM messages WHERE conversationId = :conversationId AND turnId = :turnId")
     suspend fun firstIdOfTurn(conversationId: Long, turnId: String): Long?
 
+    /** 回合尾消息 id(状态记录锚定来源区间落库前现查;空回合为 null)。 */
+    @Query("SELECT MAX(id) FROM messages WHERE conversationId = :conversationId AND turnId = :turnId")
+    suspend fun lastIdOfTurn(conversationId: Long, turnId: String): Long?
+
     /** 重生成(F4 长按操作):回合最后一条消息(id 倒序取一)。 */
     @Query(
         "SELECT * FROM messages WHERE conversationId = :conversationId AND turnId = :turnId " +

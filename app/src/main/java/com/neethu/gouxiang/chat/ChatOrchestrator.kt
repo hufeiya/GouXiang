@@ -107,6 +107,14 @@ class ChatOrchestrator(
     @Volatile var memoryHook: TurnMemoryHook? = null
     var detailedMemoryHook: (suspend (CharacterEntity, Long, String, String, String, Long?) -> Unit)? = null
 
+    /**
+     * 状态收尾钩子(E 工作包 E2):真实生成成功的回合结束调用,驱动角色状态
+     * 生成([CharacterStatusManager.onTurnCompleted],fire-and-forget)。
+     * 兜底/降级回合(流失败、空输出)不调用 —— 模板文本不应污染状态记录。
+     * 默认空 = 未装配状态通道,行为不变。
+     */
+    var statusHook: (suspend (CharacterEntity, Long, String, String, String, Long?) -> Unit)? = null
+
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
 
@@ -274,6 +282,18 @@ class ChatOrchestrator(
         )
         detailedMemoryHook?.invoke(character, conversationId, turnId, if (proactive) "" else userText,
             (if (proactive) "(TA 主动发来)" else "") + withShare.joinToString("\n") { it.text }, userMessageId)
+        // E2 状态收尾:仅真实生成(parsed 非空、流未失败)的回合触发;解析出
+        // 的主泡序列文本作为状态生成的语境。fire-and-forget 语义在管理器内部。
+        if (!degradedByEmpty) {
+            statusHook?.invoke(
+                character,
+                conversationId,
+                turnId,
+                if (proactive) "" else userText,
+                withShare.joinToString("\n") { it.text },
+                userMessageId,
+            )
+        }
         return RoundOutcome(TurnResult.Completed(withShare), degraded = degradedByEmpty)
     }
 

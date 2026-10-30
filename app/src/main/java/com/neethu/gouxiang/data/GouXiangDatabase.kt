@@ -24,8 +24,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MomentCommentEntity::class,
         ProactiveOutboxEntity::class,
         ProactiveConversationStateEntity::class,
+        CharacterStatusEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -40,10 +41,42 @@ abstract class GouXiangDatabase : RoomDatabase() {
     abstract fun momentDao(): MomentDao
     abstract fun momentCommentDao(): MomentCommentDao
     abstract fun proactiveDao(): ProactiveDao
+    abstract fun characterStatusDao(): CharacterStatusDao
     abstract fun seedDao(): SeedDao
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        /**
+         * E 工作包迁移(v9→v10,单表纯增量):新建角色状态记录表
+         * `character_status_records`(E2 的心情/正在做/内心想法 + 来源范围 +
+         * 会话版本 + 生效/失效状态机);既有角色/会话/消息/记忆不动,存量安装
+         * 无状态记录,升级后从首个状态生成回合开始积累。
+         */
+        val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `character_status_records` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`characterId` INTEGER NOT NULL, " +
+                        "`conversationId` INTEGER NOT NULL, " +
+                        "`emoji` TEXT NOT NULL, " +
+                        "`mood` TEXT NOT NULL, " +
+                        "`doing` TEXT NOT NULL, " +
+                        "`thought` TEXT NOT NULL, " +
+                        "`sourceKind` TEXT NOT NULL, " +
+                        "`sourceConversationId` INTEGER, " +
+                        "`sourceTurnId` TEXT NOT NULL, " +
+                        "`sourceStartMessageId` INTEGER, " +
+                        "`sourceEndMessageId` INTEGER, " +
+                        "`sourceVersion` INTEGER NOT NULL, " +
+                        "`state` TEXT NOT NULL, " +
+                        "`generatedAt` INTEGER NOT NULL)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_character_status_records_characterId` ON `character_status_records` (`characterId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_character_status_records_conversationId` ON `character_status_records` (`conversationId`)")
+            }
+        }
 
         /**
          * D 工作包迁移(v8→v9,双表纯增量):新建主动消息账本两张表
