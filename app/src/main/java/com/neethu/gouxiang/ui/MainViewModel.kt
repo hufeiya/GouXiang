@@ -230,16 +230,26 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 bubbleItems = toBubbleItems(all),
                 status = StatusRule.generate(character, all),
             )
-            // F4 主动消息(范围 5):进入手机聊天页时按阈值判定(首次进入 /
-            // 距上次对话超过阈值),命中即让角色先连发 1~3 条。放在 character
-            // 就绪之后、订阅 collect 之前(同一协程顺序执行,避免竞态)。
+            // F4 主动消息(F4 范围 5 + §4 M1.3 outbox 优先):进入手机聊天页时
+            // 先查离线 outbox(离线期 Worker 已生成的 proactive 轮次——判据:
+            // 存在晚于最后一条用户消息的 proactive 轮,即离线期间角色先发了话);
+            // 无 outbox 才按阈值判定现场生成(既有行为降级为兜底路径)。
             if (phoneMode) {
-                pickProactiveTrigger(conversationId)?.let { trigger ->
-                    sendProactiveMessages(
-                        trigger,
-                        offlineMs = System.currentTimeMillis() - conv.lastAt,
-                    )
+                val all = repo.allMessages(conversationId)
+                val lastUserAt = all.lastOrNull { it.role == "user" }?.at ?: 0L
+                val hasOutbox = all.any {
+                    it.turnId.startsWith("proactive-") && it.at > lastUserAt
                 }
+                if (!hasOutbox) {
+                    pickProactiveTrigger(conversationId)?.let { trigger ->
+                        sendProactiveMessages(
+                            trigger,
+                            offlineMs = System.currentTimeMillis() - conv.lastAt,
+                        )
+                    }
+                }
+                // outbox 消费:气泡照常经 Room 流上屏,无需额外动作(§2.3
+                // 聊天页红点属于 M1 后续,当前通知直跳即达)。
             }
             repo.observeMessages(conversationId).collect { messages ->
                 _chatUi.value = _chatUi.value.copy(
@@ -969,77 +979,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 「生成心声」:基于记忆 + 最近对话让角色写 2~4 条第一人称心声并落库。
-     * 全链路失败安全:LLM 请求/解析失败 → 置 [InnerVoiceUiState.error]
-     * 提示,不崩溃;成功清错误并刷新角色主页占位卡尾注。配图异步:
-     * 文字先行落库,生图成功逐张回填(失败保持纯文字卡)。
+     * 「生成心声」(§2.4 双路径收敛):点击路径直接入队后台 Worker(明确意图,
+     * 不经 GenerationPrefs 开关),页内保留乐观 UI(立即置 generating);后台
+     * 落库经 observeInnerVoices Room 流自动上屏,生成结束由事件流回调清态。
      */
     fun generateInnerVoices() {
         val conversationId = _innerVoiceConversationId.value ?: return
         if (_innerVoiceUi.value.generating) return
-        viewModelScope.launch {
-            val conv = repo.db.conversationDao().byId(conversationId) ?: return@launch
-            val character = repo.characterById(conv.characterId) ?: return@launch
-            _innerVoiceUi.value = _innerVoiceUi.value.copy(generating = true, error = null)
-            try {
-                val memories = repo.memoriesFor(character.id)
-                val recent = repo.recentMessages(conversationId, ChatOrchestrator.HISTORY_LIMIT)
-                val system = InnerVoiceGenerator.systemPrompt(character, memories)
-                val user = InnerVoiceGenerator.userPrompt(character, toMemoryTurns(recent))
-                val raw = innerVoiceChannel.request(system, user)
-                val entities = raw?.let { InnerVoiceGenerator.toEntities(it, character.id, System.currentTimeMillis()) }
-                if (entities.isNullOrEmpty()) {
-                    _innerVoiceUi.value = _innerVoiceUi.value.copy(
-                        generating = false,
-                        error = "生成失败,请稍后再试",
-                    )
-                    return@launch
-                }
-                val inserted = repo.insertInnerVoices(entities)
-                _innerVoiceUi.value = _innerVoiceUi.value.copy(generating = false)
-                // 配图(可选增强,07 §3.3 心声 prompt):纯文字卡已可上屏,
-                // 生图走火山→硅基→失败保持纯文字卡,成功逐张回填。
-                inserted.forEachIndexed { index, id ->
-                    if (id <= 0L) return@forEachIndexed
-                    val entity = entities[index]
-                    val prompt = buildString {
-                        append(character.appearance)
-                        append("。情绪:${entity.title},${entity.echo}。")
-                        append(character.appearanceStyle)
-                        append(",柔和电影感光影,情绪特写,竖版构图")
-                    }
-                    val file = runCatching {
-                        innerVoiceImageProvider().getOrGenerateInnerVoiceImage(
-                            characterKey = "inner-voice-$id",
-                            prompt = prompt,
-                        )
-                    }.getOrNull()
-                    if (file != null) {
-                        repo.setInnerVoiceImage(id, file.absolutePath)
-                    } else {
-                        android.util.Log.w("InnerVoice", "voice image gen failed, keep text-only card #$id")
-                    }
-                }
-                // 角色主页占位卡尾注同步(若主页仍打开)
-                if (_characterHomeConversationId.value != null) {
-                    val homeConvId = _characterHomeConversationId.value
-                    val homeConv = homeConvId?.let { repo.db.conversationDao().byId(it) }
-                    homeConv?.let {
-                        _characterHomeUi.value = _characterHomeUi.value.copy(
-                            innerVoiceCount = repo.countInnerVoices(it.characterId),
-                        )
-                    }
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                android.util.Log.e("InnerVoice", "generate failed", e)
-                _innerVoiceUi.value = _innerVoiceUi.value.copy(
-                    generating = false,
-                    error = "生成失败,请稍后再试",
-                )
-            }
-        }
+        _innerVoiceUi.value = _innerVoiceUi.value.copy(generating = true, error = null)
+        com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+            getApplication(),
+            com.neethu.gouxiang.chat.DerivativeTask(
+                com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE, conversationId,
+            ),
+        )
     }
 
     /** 心声生图 provider(进程内单例;filesDir/inner_voices 缓存)。 */
@@ -1146,77 +1099,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 「生成动态」(或首进自动):基于记忆 + 近期聊天由 LLM 生成一条动态,
-     * 文字先行落库,配图异步回填(生图失败保持纯文字卡,范围 2)。
-     * 全链路失败安全:LLM/生图失败 → 置 error 提示,不崩溃。
+     * 「生成动态」(或首进自动,§2.4 双路径收敛):点击路径直接入队后台 Worker
+     * (不经开关),页内保留乐观 UI;落库经 observeMoments 流自动上屏,事件流
+     * 回调清 generating 态。首进自动补一条也走同一入队(与点击同链路)。
      */
     fun generateMoment(conversationId: Long) {
         if (_momentsUi.value.generating) return
-        viewModelScope.launch {
-            val conv = repo.db.conversationDao().byId(conversationId) ?: return@launch
-            val character = repo.characterById(conv.characterId) ?: return@launch
-            _momentsUi.value = _momentsUi.value.copy(generating = true, error = null)
-            try {
-                val memories = repo.memoriesFor(character.id)
-                val recent = repo.recentMessages(conversationId, ChatOrchestrator.HISTORY_LIMIT)
-                val system = com.neethu.gouxiang.chat.MomentsGenerator.postSystemPrompt(character, memories)
-                val user = com.neethu.gouxiang.chat.MomentsGenerator.postUserPrompt(character, toMemoryTurns(recent))
-                val raw = momentsChannel.requestPost(system, user)
-                val draft = raw?.let { com.neethu.gouxiang.chat.MomentsGenerator.parsePost(it) }
-                if (draft == null) {
-                    _momentsUi.value = _momentsUi.value.copy(
-                        generating = false,
-                        error = "生成失败,请稍后再试",
-                    )
-                    return@launch
-                }
-                val postId = repo.insertMoment(
-                    com.neethu.gouxiang.chat.MomentsGenerator.toEntity(
-                        draft, character.id, System.currentTimeMillis(),
-                    ),
-                )
-                _momentsUi.value = _momentsUi.value.copy(generating = false)
-                // 配图(可选增强,范围 2):文字已上屏,生图走火山→硅基→失败保持
-                // 纯文字卡,成功后 setImageFile 原地回填(observe 流自动上屏)。
-                if (draft.imagePrompt.isNotBlank() && postId > 0L) {
-                    val prompt = buildString {
-                        append(character.appearanceStyle)
-                        append(",")
-                        append(draft.imagePrompt)
-                        append(",生活随拍,柔和自然光")
-                    }
-                    val file = runCatching {
-                        momentsImageProvider().getOrGenerateMomentImage(
-                            characterKey = "moment-$postId",
-                            prompt = prompt,
-                        )
-                    }.getOrNull()
-                    if (file != null) {
-                        repo.setMomentImage(postId, file.absolutePath)
-                    } else {
-                        android.util.Log.w("Moments", "moment image gen failed, keep text-only post #$postId")
-                    }
-                }
-                // 角色主页占位卡尾注同步(若主页仍打开;与 F8 心声同约定)
-                if (_characterHomeConversationId.value != null) {
-                    val homeConvId = _characterHomeConversationId.value
-                    val homeConv = homeConvId?.let { repo.db.conversationDao().byId(it) }
-                    homeConv?.let {
-                        _characterHomeUi.value = _characterHomeUi.value.copy(
-                            momentCount = repo.countMoments(it.characterId),
-                        )
-                    }
-                }
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                android.util.Log.e("Moments", "generate moment failed", e)
-                _momentsUi.value = _momentsUi.value.copy(
-                    generating = false,
-                    error = "生成失败,请稍后再试",
-                )
-            }
-        }
+        _momentsUi.value = _momentsUi.value.copy(generating = true, error = null)
+        com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+            getApplication(),
+            com.neethu.gouxiang.chat.DerivativeTask(
+                com.neethu.gouxiang.chat.DerivativeKind.MOMENT, conversationId,
+            ),
+        )
     }
 
     /** 点赞/取消(F9 互动:本地状态,写库即上屏)。 */
@@ -1379,35 +1274,184 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** 消息行 → 提炼窗口回合(user 原文 / assistant 各泡合并,泡间 "\n")。 */
-    private fun toMemoryTurns(messages: List<MessageEntity>): List<com.neethu.gouxiang.data.MemoryTurn> {
-        val turns = mutableListOf<com.neethu.gouxiang.data.MemoryTurn>()
-        var pendingUser: String? = null
-        val assistantParts = StringBuilder()
-        fun flush() {
-            val user = pendingUser
-            if (user != null) {
-                turns += com.neethu.gouxiang.data.MemoryTurn(
-                    user = user,
-                    assistant = assistantParts.toString().trim(),
-                )
-            }
-            pendingUser = null
-            assistantParts.setLength(0)
+    private fun toMemoryTurns(messages: List<MessageEntity>): List<com.neethu.gouxiang.data.MemoryTurn> =
+        com.neethu.gouxiang.work.DerivativeExecutor.toMemoryTurns(messages)
+
+    // ── 后台生成事件(§2.4:UI 双路径收敛的回调面)────────────────────
+
+    /**
+     * 衍生任务完成/失败事件(进程级单槽 bus 的 VM 轮询读法):点击路径的乐观
+     * generating 态由它收口;内容落库本身走 Room Flow(UI 不感知后台)。
+     * 心声/朋友圈页打开期间每秒查一次(轻读内存槽,无 IPC)。
+     */
+    private val _derivativeEvent = MutableStateFlow<com.neethu.gouxiang.work.DerivativeEvents.Event?>(
+        null,
+    )
+    val derivativeEvent: StateFlow<com.neethu.gouxiang.work.DerivativeEvents.Event?> =
+        _derivativeEvent.asStateFlow()
+
+    /** 事件消费(UI 侧清 generating/错误态后调用)。 */
+    fun consumeDerivativeEvent() {
+        _derivativeEvent.value = null
+    }
+
+    /**
+     * 心声任务收口(MainActivity 消费事件后回调):成功清 generating 态
+     * (内容已/将经 Room 流上屏);失败清态 + 置 error 提示。仅当心声页
+     * 仍打开同一会话才改状态(后台完成时页面可能已关)。
+     */
+    fun onInnerVoiceTaskSettled(e: com.neethu.gouxiang.work.DerivativeEvents.Event) {
+        if (_innerVoiceConversationId.value != e.conversationId) return
+        if (e.success) {
+            _innerVoiceUi.value = _innerVoiceUi.value.copy(generating = false, error = null)
+            refreshCharacterHomeCounts()
+        } else {
+            _innerVoiceUi.value = _innerVoiceUi.value.copy(
+                generating = false,
+                error = "生成失败,请稍后再试",
+            )
         }
-        for (m in messages) {
-            if (m.role == "user") {
-                flush()
-                if (m.content.isNotBlank()) pendingUser = m.content
-            } else {
-                val line = com.neethu.gouxiang.chat.ChatContextBuilder.encodeBubbleLine(m)
-                if (line.isNotBlank()) {
-                    if (assistantParts.isNotEmpty()) assistantParts.append('\n')
-                    assistantParts.append(line)
-                }
+    }
+
+    /** 朋友圈任务收口(语义同 [onInnerVoiceTaskSettled])。 */
+    fun onMomentTaskSettled(e: com.neethu.gouxiang.work.DerivativeEvents.Event) {
+        if (_momentsConversationId.value != e.conversationId) return
+        if (e.success) {
+            _momentsUi.value = _momentsUi.value.copy(generating = false, error = null)
+            refreshCharacterHomeCounts()
+        } else {
+            _momentsUi.value = _momentsUi.value.copy(
+                generating = false,
+                error = "生成失败,请稍后再试",
+            )
+        }
+    }
+
+    /** 角色主页占位卡尾注同步(若主页仍打开;F8/F9 共用)。 */
+    private fun refreshCharacterHomeCounts() {
+        val homeConvId = _characterHomeConversationId.value ?: return
+        viewModelScope.launch {
+            val conv = repo.db.conversationDao().byId(homeConvId) ?: return@launch
+            _characterHomeUi.value = _characterHomeUi.value.copy(
+                innerVoiceCount = repo.countInnerVoices(conv.characterId),
+                momentCount = repo.countMoments(conv.characterId),
+            )
+        }
+    }
+
+    private fun startDerivativeEventPolling() {
+        viewModelScope.launch {
+            while (true) {
+                val e = com.neethu.gouxiang.work.DerivativeEvents.take()
+                if (e != null) _derivativeEvent.value = e
+                kotlinx.coroutines.delay(1_000)
             }
         }
-        flush()
-        return turns
+    }
+
+    init {
+        startDerivativeEventPolling()
+    }
+
+    // ── 内容生成设置页(§3.3)────────────────────────────────────────
+
+    /** 设置页打开态(MainActivity 全屏覆盖层导航惯例)。 */
+    private val _generationSettingsOpen = MutableStateFlow(false)
+    val generationSettingsOpen: StateFlow<Boolean> = _generationSettingsOpen.asStateFlow()
+
+    fun openGenerationSettings() {
+        _generationSettingsOpen.value = true
+    }
+
+    fun closeGenerationSettings() {
+        _generationSettingsOpen.value = false
+    }
+
+    /** 设置页快照(进页即读一次;切换即写 + 即时 enqueue/cancel)。 */
+    private val _generationSettings = MutableStateFlow(
+        com.neethu.gouxiang.work.GenerationSettingsSnapshot(),
+    )
+    val generationSettings: StateFlow<com.neethu.gouxiang.work.GenerationSettingsSnapshot> =
+        _generationSettings.asStateFlow()
+
+    /** 进设置页时刷新快照(读盘;进页一次,页内切换走 toggle 即时写)。 */
+    fun loadGenerationSettings() {
+        val app = getApplication<Application>()
+        _generationSettings.value =
+            com.neethu.gouxiang.work.GenerationSettingsSnapshot(
+                innerVoiceAuto = com.neethu.gouxiang.ai.GenerationPrefs.innerVoiceAuto(app),
+                momentsDaily = com.neethu.gouxiang.ai.GenerationPrefs.momentsDaily(app),
+                memoryOvernight = com.neethu.gouxiang.ai.GenerationPrefs.memoryOvernight(app),
+                proactiveOutbox = com.neethu.gouxiang.ai.GenerationPrefs.proactiveOutbox(app),
+                derivativeAuto = com.neethu.gouxiang.ai.GenerationPrefs.derivativeAuto(app),
+                notifyEnabled = com.neethu.gouxiang.ai.GenerationPrefs.notifyEnabled(app),
+            )
+    }
+
+    /**
+     * 切一枚开关(即时生效):写盘 + Scheduler applyXxx(开=UPDATE 注册,关=
+     * cancel);返回现场请求运行时通知权限的信号(仅「完成通知」开且 ≥33)。
+     */
+    fun toggleGenerationSetting(key: String, enabled: Boolean) {
+        val app = getApplication<Application>()
+        val sched = com.neethu.gouxiang.work.DerivativeScheduler
+        when (key) {
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_AUTO -> {
+                com.neethu.gouxiang.ai.GenerationPrefs.setInnerVoiceAuto(app, enabled)
+                sched.applyInnerVoiceAuto(app, enabled)
+            }
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_DAILY -> {
+                com.neethu.gouxiang.ai.GenerationPrefs.setMomentsDaily(app, enabled)
+                sched.applyMomentsDaily(app, enabled)
+            }
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_MEMORY_OVERNIGHT -> {
+                com.neethu.gouxiang.ai.GenerationPrefs.setMemoryOvernight(app, enabled)
+                sched.applyMemoryOvernight(app, enabled)
+            }
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_PROACTIVE_OUTBOX -> {
+                com.neethu.gouxiang.ai.GenerationPrefs.setProactiveOutbox(app, enabled)
+                sched.applyProactiveOutbox(app, enabled)
+            }
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_DERIVATIVE_AUTO -> {
+                com.neethu.gouxiang.ai.GenerationPrefs.setDerivativeAuto(app, enabled)
+            }
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_NOTIFY_ENABLED -> {
+                com.neethu.gouxiang.ai.GenerationPrefs.setNotifyEnabled(app, enabled)
+            }
+        }
+        _generationSettings.value = when (key) {
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_AUTO ->
+                _generationSettings.value.copy(innerVoiceAuto = enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_DAILY ->
+                _generationSettings.value.copy(momentsDaily = enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_MEMORY_OVERNIGHT ->
+                _generationSettings.value.copy(memoryOvernight = enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_PROACTIVE_OUTBOX ->
+                _generationSettings.value.copy(proactiveOutbox = enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_DERIVATIVE_AUTO ->
+                _generationSettings.value.copy(derivativeAuto = enabled)
+            else -> _generationSettings.value.copy(notifyEnabled = enabled)
+        }
+    }
+
+    /** 通知直跳入口(通知点入 onNewIntent extras):心声页。 */
+    fun openInnerVoicesFromNotification(conversationId: Long) {
+        openInnerVoices(conversationId)
+    }
+
+    /** 通知直跳入口:朋友圈页。 */
+    fun openMomentsFromNotification(conversationId: Long) {
+        openMoments(conversationId)
+    }
+
+    /** 通知直跳入口:聊天页(手机形态,与消息列表角标入口同参)。 */
+    fun openChatFromNotification(conversationId: Long) {
+        openChat(conversationId, phoneMode = true)
+    }
+
+    /** 通知直跳入口:消息列表(切 tab)。 */
+    fun openMessagesFromNotification() {
+        selectedTab.value = BottomTab.MESSAGES
     }
 }
 

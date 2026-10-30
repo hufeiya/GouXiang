@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +44,7 @@ import com.neethu.gouxiang.ai.config.AiConfigStore
 @Composable
 fun ProfileScreen(
     onOpenAiConfig: () -> Unit,
+    onOpenGenerationSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -91,6 +93,14 @@ fun ProfileScreen(
             title = "AI 服务配置",
             subtitle = "大模型 ${config.provider.label} · 语音通话 TTS/ASR · 改完即生效",
             onClick = onOpenAiConfig,
+        )
+
+        // 内容生成(后台生成基建 §3.3):自动后台生成与完成通知开关
+        ProfileEntry(
+            icon = Icons.Filled.Tune,
+            title = "内容生成",
+            subtitle = "自动后台生成与通知 · 关闭时点击才生成",
+            onClick = onOpenGenerationSettings,
         )
 
         Spacer(Modifier.height(24.dp))

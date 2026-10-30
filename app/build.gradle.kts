@@ -93,7 +93,13 @@ dependencies {
     // 角色头像远程图加载(生成 URL → 本地缓存兜底占位图)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    // 后台生成基建(docs/background-generation-plan-20261030.md):
+    // DerivativeWorker 普通协程 Worker(不引入前台 Service,§6 红线)
+    implementation(libs.androidx.work.runtime.ktx)
     testImplementation(libs.junit)
+    // GenerationPrefs/WorkManager 面的 JVM 单测(SharedPreferences 需要 Context)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
     // 冒烟测试:协程驱动流式收集
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(platform(libs.androidx.compose.bom))

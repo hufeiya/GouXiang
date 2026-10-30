@@ -7,8 +7,12 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- 语音通话 F6:按住说话录音(ASR 输入;TTS 只播不录) -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 后台生成基建:衍生任务完成通知(targetSdk 37 必须;≥33 运行时申请
+         跟随设置页「完成通知」开关,拒绝则降级为仅 App 内可见,任务照跑) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
+        android:name=".GouXiangApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

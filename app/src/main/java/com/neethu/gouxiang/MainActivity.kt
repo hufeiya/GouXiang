@@ -70,12 +70,33 @@ class MainActivity : ComponentActivity() {
             }
         }
         enqueueAiCommands(intent)
+        handleNavigationExtras(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         enqueueAiCommands(intent)
+        handleNavigationExtras(intent)
+    }
+
+    /**
+     * 通知直跳导航 extras(后台生成基建 §2.3;与 ai_cmd 调试 extras 完全分开):
+     * open_inner_voice_conversation_id 直跳心声页、open_moments_conversation_id
+     * 直跳朋友圈、open_chat_conversation_id 直跳手机聊天、open_messages 切消息
+     * 列表。导航态经 VM 落地(通知点击时 VM 可能未就绪,由 MainFrame 组合后
+     * 在 LaunchedEffect 消费 pendingExtras)。
+     */
+    private val pendingNavExtras = Channel<android.os.Bundle>(Channel.UNLIMITED)
+
+    private fun handleNavigationExtras(intent: Intent?) {
+        val extras = intent?.extras ?: return
+        val hasNavExtra =
+            extras.containsKey(com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_INNER_VOICE) ||
+                extras.containsKey(com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_MOMENTS) ||
+                extras.containsKey(com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_CHAT) ||
+                extras.containsKey(com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_MESSAGES)
+        if (hasNavExtra) pendingNavExtras.trySend(extras.clone() as android.os.Bundle)
     }
 
     /** 解析 ai extras 并入队;带 ai_* extras 但缺 ai_cmd 时 warn(防 LLM 排查无从下手)。 */
@@ -174,6 +195,71 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // 通知直跳通道(§2.3):消费 Intent 入队的导航 extras(冷启动积压的
+        // 也在此排空)。数值 extras 经 Bundle 读出可能是 Long 或 String(通知
+        // PendingIntent 放 Long;am 命令行 --el 也是 Long),用类型兼容读取。
+        fun android.os.Bundle.navLong(key: String): Long? = when (val v = get(key)) {
+            is Long -> v
+            is Number -> v.toLong()
+            is String -> v.toLongOrNull()
+            else -> null
+        }
+        LaunchedEffect(vm) {
+            for (extras in pendingNavExtras) {
+                extras.navLong(
+                    com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_INNER_VOICE,
+                )?.let { vm.openInnerVoicesFromNotification(it) }
+                extras.navLong(
+                    com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_MOMENTS,
+                )?.let { vm.openMomentsFromNotification(it) }
+                extras.navLong(
+                    com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_CHAT,
+                )?.let { vm.openChatFromNotification(it) }
+                if (extras.containsKey(
+                        com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_MESSAGES,
+                    )
+                ) {
+                    vm.openMessagesFromNotification()
+                }
+            }
+        }
+
+        // 派生任务事件收口(§2.4):心声/朋友圈点击路径的乐观 generating 态
+        // 按事件结果收口(成功清态,失败清态 + error 提示)。
+        val derivativeEvent by vm.derivativeEvent.collectAsState()
+        LaunchedEffect(derivativeEvent) {
+            val e = derivativeEvent ?: return@LaunchedEffect
+            vm.consumeDerivativeEvent()
+            when (e.kind) {
+                com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE -> vm.onInnerVoiceTaskSettled(e)
+                com.neethu.gouxiang.chat.DerivativeKind.MOMENT -> vm.onMomentTaskSettled(e)
+                else -> Unit
+            }
+        }
+
+        // 设置页(§3.3)打开时刷快照(进页即读 prefs)
+        val generationSettingsOpen by vm.generationSettingsOpen.collectAsState()
+        val generationSettings by vm.generationSettings.collectAsState()
+        LaunchedEffect(generationSettingsOpen) {
+            if (generationSettingsOpen) vm.loadGenerationSettings()
+        }
+
+        // 「完成通知」打开时(≥33)现场请求 POST_NOTIFICATIONS 运行时权限
+        val notifPermissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+        ) { }
+        val settingsToggleWithPermission: (String, Boolean) -> Unit = { key, enabled ->
+            if (key == com.neethu.gouxiang.ai.GenerationPrefs.KEY_NOTIFY_ENABLED && enabled) {
+                if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                    checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                    android.content.pm.PackageManager.PERMISSION_GRANTED
+                ) {
+                    notifPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+            vm.toggleGenerationSetting(key, enabled)
+        }
+
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             // 沉浸式(F1 验收唯一偏差修复):不消费状态栏 inset,首页剧卡全屏图
@@ -220,6 +306,8 @@ class MainActivity : ComponentActivity() {
                                 android.content.Intent(this@MainActivity, AiConfigActivity::class.java),
                             )
                         },
+                        // 内容生成设置页(后台生成基建 §3.3)
+                        onOpenGenerationSettings = { vm.openGenerationSettings() },
                     )
                 }
             }
@@ -415,6 +503,22 @@ class MainActivity : ComponentActivity() {
                     name = chatUi.character?.name.orEmpty(),
                     avatarFile = chatUi.character?.let { avatarFiles[it.id] },
                     onHangUp = { vm.closeVoiceCall() },
+                )
+            }
+        }
+
+        // 内容生成设置页(§3.3):ProfileScreen 入口进入的全屏覆盖层;渲染序
+        // 置底(最后声明者在上,保证盖住其他 overlay)。返回 = closeGenerationSettings()。
+        if (generationSettingsOpen) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF14141A)),
+            ) {
+                com.neethu.gouxiang.work.GenerationSettingsScreen(
+                    snapshot = generationSettings,
+                    onToggle = settingsToggleWithPermission,
+                    onBack = { vm.closeGenerationSettings() },
                 )
             }
         }
