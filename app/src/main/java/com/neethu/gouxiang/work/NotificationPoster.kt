@@ -31,6 +31,9 @@ internal object NotificationPoster {
     /** 直跳聊天页(手机形态)extra。 */
     const val EXTRA_OPEN_CHAT = "open_chat_conversation_id"
 
+    /** 直跳番外/心动页 extra(F 工作包)。 */
+    const val EXTRA_OPEN_SIDESTORY = "open_sidestory_conversation_id"
+
     /** 直跳消息列表(不落具体会话)。 */
     const val EXTRA_OPEN_MESSAGES = "open_messages"
 
@@ -109,6 +112,21 @@ internal object NotificationPoster {
         )
     }
 
+    /**
+     * 番外/心动完成通知(F 工作包;通道一,直跳番外页)。ID 走 [stableSidestoryId]:
+     * 同角色/同会话的后续完成替换同一条(与心声/朋友圈同语义)。
+     */
+    fun sidestory(context: Context, characterName: String, conversationId: Long) {
+        notify(
+            context,
+            DerivativeCopy.CHANNEL_DERIVATIVE,
+            id = stableSidestoryId(characterName, conversationId),
+            title = DerivativeCopy.sidestoryTitle(characterName),
+            body = DerivativeCopy.BODY_TAP_TO_VIEW,
+            contentIntent = contentIntent(context, conversationId, EXTRA_OPEN_SIDESTORY),
+        )
+    }
+
     /** 主动消息通知(通道二 HIGH;直跳聊天页)。ID 走 [stableProactiveId]:每会话一条,累计条数原地更新。 */
     fun proactive(context: Context, characterName: String, conversationId: Long, count: Int) {
         notify(
@@ -131,4 +149,8 @@ internal object NotificationPoster {
     /** 主动消息通知稳定 ID(纯函数:每会话一条)。 */
     internal fun stableProactiveId(conversationId: Long): Int =
         ("proactive$conversationId").hashCode()
+
+    /** 番外/心动通知稳定 ID(纯函数,单测锁死:同参同值,异参异值)。 */
+    internal fun stableSidestoryId(characterName: String, conversationId: Long): Int =
+        ("deriv-sidestory$characterName$conversationId").hashCode()
 }

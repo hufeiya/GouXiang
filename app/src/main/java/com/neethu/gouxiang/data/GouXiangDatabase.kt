@@ -25,8 +25,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ProactiveOutboxEntity::class,
         ProactiveConversationStateEntity::class,
         CharacterStatusEntity::class,
+        SidestoryRecordEntity::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -42,10 +43,47 @@ abstract class GouXiangDatabase : RoomDatabase() {
     abstract fun momentCommentDao(): MomentCommentDao
     abstract fun proactiveDao(): ProactiveDao
     abstract fun characterStatusDao(): CharacterStatusDao
+    abstract fun sidestoryRecordDao(): SidestoryRecordDao
     abstract fun seedDao(): SeedDao
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        /**
+         * F 工作包迁移(v10→v11,单表纯增量):新建统一内容记录表
+         * `sidestory_records`(番外剧场模板产物与心动事件产物同表,kind 分区)。
+         * 既有角色/会话/消息/记忆/心声/朋友圈/状态不动,存量安装无记录可迁,
+         * 升级后从首个生成请求开始积累。
+         */
+        val MIGRATION_10_11: Migration = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `sidestory_records` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`kind` TEXT NOT NULL, " +
+                        "`templateKey` TEXT NOT NULL, " +
+                        "`templateVersion` INTEGER NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`characterId` INTEGER NOT NULL, " +
+                        "`conversationId` INTEGER NOT NULL, " +
+                        "`sourceStartMessageId` INTEGER, " +
+                        "`sourceEndMessageId` INTEGER, " +
+                        "`sourceVersion` INTEGER NOT NULL, " +
+                        "`requestId` TEXT NOT NULL, " +
+                        "`state` TEXT NOT NULL, " +
+                        "`failureReason` TEXT NOT NULL, " +
+                        "`bodyJson` TEXT NOT NULL, " +
+                        "`imageFile` TEXT NOT NULL, " +
+                        "`imageStatus` TEXT NOT NULL, " +
+                        "`notified` INTEGER NOT NULL, " +
+                        "`isStale` INTEGER NOT NULL, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL)",
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sidestory_records_characterId` ON `sidestory_records` (`characterId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sidestory_records_conversationId` ON `sidestory_records` (`conversationId`)")
+            }
+        }
 
         /**
          * E 工作包迁移(v9→v10,单表纯增量):新建角色状态记录表

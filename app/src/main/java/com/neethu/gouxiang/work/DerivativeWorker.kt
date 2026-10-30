@@ -50,7 +50,11 @@ class DerivativeWorker(
         val day = inputData.getString(DerivativeTask.KEY_LOCAL_DAY) ?: DerivativeTask.localDay()
         val requestId = inputData.getString(DerivativeTask.KEY_REQUEST_ID) ?: id.toString()
         val imageRetryRequestId = inputData.getString(DerivativeTask.KEY_IMAGE_RETRY_REQUEST_ID)
-        val task = DerivativeTask(kind, conversationId, source, characterId, day, imageRetryRequestId = imageRetryRequestId)
+        val recordId = inputData.getLong(DerivativeTask.KEY_RECORD_ID, -1L)
+        val task = DerivativeTask(
+            kind, conversationId, source, characterId, day,
+            imageRetryRequestId = imageRetryRequestId, recordId = recordId,
+        )
         val dao = GouXiangRepo.get(app).db.derivativeTaskDao()
         val now = DerivativeClock.nowMillis()
         dao.insertIfMissing(DerivativeTaskRecord(id.toString(), requestId, kind.name, source.name,
@@ -58,6 +62,13 @@ class DerivativeWorker(
         suspend fun record(state: String, reason: String? = null, terminal: Boolean = false, failureKind: DerivativeFailureKind? = null) {
             val time = DerivativeClock.nowMillis()
             dao.setStateWithKind(id.toString(), state, reason, failureKind?.name, time, if (terminal) time else null)
+            // 番外/心动(F 工作包):任务终态同步落记录行,失败状态在记录列表
+            // 可见可重试(与任务历史一致,不假成功);成功态由生成事务收口,
+            // 这里只在失败/取消/跳过时拨记录(条件更新只在 generating 生效)。
+            if (kind == DerivativeKind.SIDESTORY && task.recordId > 0L && state in TERMINAL_FAILURE_STATES) {
+                GouXiangRepo.get(app).db.sidestoryRecordDao()
+                    .markFailedIfGenerating(task.recordId, reason ?: "生成失败，请重试", time)
+            }
         }
         if (source == DerivativeSource.AUTOMATIC && (
                 !automaticEnabled(app, kind) ||
@@ -115,6 +126,9 @@ class DerivativeWorker(
 
     companion object {
 
+        /** 番外/心动记录要同步拨失败的终态(succeeded 由生成事务收口,不在列)。 */
+        internal val TERMINAL_FAILURE_STATES = setOf("failed", "cancelled", "skipped")
+
         /** 网络约束 + 指数退避 30s(§2.2 约定)。 */
         private val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -139,7 +153,7 @@ class DerivativeWorker(
             val requestId = requestIdOverride ?: task.imageRetryRequestId ?: if (task.source == DerivativeSource.AUTOMATIC && characterId > 0L)
                 DerivativeTask.automaticKey(resolved) else java.util.UUID.randomUUID().toString()
             val request = OneTimeWorkRequestBuilder<DerivativeWorker>()
-                .setConstraints(constraints)
+                .setConstraints(if (resolved.requiresNetwork) constraints else Constraints.NONE)
                 .setBackoffCriteria(backoff.first, backoff.second, TimeUnit.SECONDS)
                 .setInputData(resolved.toInputDataCompat(requestId, task.automaticEpoch ?: automaticEpoch(context, task.kind)))
                 .build()
@@ -192,4 +206,5 @@ private fun DerivativeTask.toInputDataCompat(requestId: String, epoch: Long): an
         .putString(DerivativeTask.KEY_REQUEST_ID, requestId)
         .putString(DerivativeTask.KEY_IMAGE_RETRY_REQUEST_ID, imageRetryRequestId)
         .putLong(KEY_AUTOMATIC_EPOCH, epoch)
+        .putLong(DerivativeTask.KEY_RECORD_ID, recordId)
         .build()

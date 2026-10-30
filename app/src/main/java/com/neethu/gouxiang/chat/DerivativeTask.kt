@@ -15,6 +15,9 @@ enum class DerivativeKind {
     /** 朋友圈动态(F9):一条图文。 */
     MOMENT,
 
+    /** 番外剧场/心动事件(F 工作包 F1-F4):一条统一内容记录,recordId 定位。 */
+    SIDESTORY,
+
     /** 手帐(M2 接入;开关与枚举先行落地,分支 M2 施工)。 */
     HANDBOOK,
 
@@ -45,6 +48,14 @@ data class DerivativeTask(
     val localDay: String = localDay(),
     val automaticEpoch: Long? = null,
     val imageRetryRequestId: String? = null,
+    /** 番外/心动记录 id(F 工作包;仅 SIDESTORY 消费,任务由此定位目标记录)。 */
+    val recordId: Long = -1L,
+    /**
+     * 是否要求网络约束(默认 true)。番外/心动手动任务置 false:断网时立即
+     * 请求失败并把记录拨成明确失败态(可重试),而不是挂在「需要网络」的
+     * 排队态让用户看不出结果——与「无假成功/失败可解释」的公共约束一致。
+     */
+    val requiresNetwork: Boolean = true,
 ) {
     companion object {
 
@@ -60,6 +71,9 @@ data class DerivativeTask(
         const val KEY_REQUEST_ID = "derivative_request_id"
         const val KEY_IMAGE_RETRY_REQUEST_ID = "derivative_image_retry_request_id"
 
+        /** Worker inputData 键(sidestory 记录 id)。 */
+        const val KEY_RECORD_ID = "derivative_record_id"
+
         fun localDay(): String = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT)
             .format(java.util.Date())
 
@@ -68,10 +82,13 @@ data class DerivativeTask(
 
         /**
          * 入队唯一名(§2.2 幂等约定):同会话同类任务 KEEP 去重,不同会话互不
-         * 冲突;-1 批扫任务(如 PROACTIVE_OUTBOX)全局单例名。
+         * 冲突;-1 批扫任务(如 PROACTIVE_OUTBOX)全局单例名;番外/心动按
+         * 记录粒度去重(同会话可同时挂多个模板任务,互不 KEEP 掉)。
          */
         fun uniqueName(task: DerivativeTask): String =
-            if (task.imageRetryRequestId != null) "deriv:image:${task.imageRetryRequestId}"
+            if (task.kind == DerivativeKind.SIDESTORY && task.recordId > 0L) {
+                "deriv:sidestory:${task.recordId}"
+            } else if (task.imageRetryRequestId != null) "deriv:image:${task.imageRetryRequestId}"
             else if (task.source == DerivativeSource.AUTOMATIC) {
                 if (task.characterId > 0L && task.kind in setOf(DerivativeKind.INNER_VOICE, DerivativeKind.MOMENT))
                     "deriv:auto:${automaticKey(task)}"

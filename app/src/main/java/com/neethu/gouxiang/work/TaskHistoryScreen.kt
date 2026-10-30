@@ -234,6 +234,7 @@ data class TaskHistoryItem(
 internal fun taskKindLabel(kind: String): String = when (runCatching { DerivativeKind.valueOf(kind) }.getOrNull()) {
     DerivativeKind.INNER_VOICE -> "心声"
     DerivativeKind.MOMENT -> "朋友圈动态"
+    DerivativeKind.SIDESTORY -> "番外/心动"
     DerivativeKind.MEMORY_SUMMARY -> "记忆总结"
     DerivativeKind.PROACTIVE_OUTBOX -> "主动消息"
     DerivativeKind.HANDBOOK -> "手帐"

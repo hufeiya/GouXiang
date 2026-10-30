@@ -111,6 +111,9 @@ class DurableMemoryProcessor(private val db: GouXiangDatabase, private val extra
         // E3 回溯联动:锚定区间命中被回溯消息的角色状态记录标记失效(同事务收口;
         // 生成中的在途候选由上方版本 +1 在落库事务内拦截,过期任务不回写)。
         db.characterStatusDao().markStaleFrom(conversationId, messageId)
+        // F 工作包回溯联动:番外/心动记录同语义标失效(来源区间命中即标,
+        // 不删除不重写;生成中的在途候选由版本拦截拒绝落库)。
+        db.sidestoryRecordDao().markStaleFrom(conversationId, messageId)
         db.messageDao().deleteFromMessage(conversationId, messageId)
     }
 }

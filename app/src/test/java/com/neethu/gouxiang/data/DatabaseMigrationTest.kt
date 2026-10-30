@@ -62,6 +62,7 @@ class DatabaseMigrationTest {
                 GouXiangDatabase.MIGRATION_7_8,
                 GouXiangDatabase.MIGRATION_8_9,
                 GouXiangDatabase.MIGRATION_9_10,
+                GouXiangDatabase.MIGRATION_10_11,
             )
             .allowMainThreadQueries().build()
         try {
@@ -117,7 +118,7 @@ class DatabaseMigrationTest {
     @Test fun v6TaskHistoryGainsFailureKindColumnAndKeepsRows() {
         createV6FromV5WithTaskHistoryRow()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10)
+            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -145,7 +146,7 @@ class DatabaseMigrationTest {
     @Test fun v7CharactersGainAvatarVersionColumnAndKeepsRows() {
         createV7FromV6()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10)
+            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -175,7 +176,7 @@ class DatabaseMigrationTest {
     @Test fun v8ProactiveLedgerTablesCreatedAndOldDataKept() {
         createV8FromV7()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10)
+            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -260,7 +261,7 @@ class DatabaseMigrationTest {
     @Test fun v9CharacterStatusRecordsTableCreatedAndOldDataKept() {
         createV9FromV8()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_9_10)
+            .addMigrations(GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -285,6 +286,75 @@ class DatabaseMigrationTest {
             assertEquals("turn", scalar("SELECT sourceKind FROM character_status_records"))
             sql.execSQL("UPDATE character_status_records SET state='stale' WHERE conversationId=2 AND sourceEndMessageId >= 3")
             assertEquals("stale", scalar("SELECT state FROM character_status_records WHERE characterId=1"))
+        } finally { db.close() }
+    }
+
+    /** v10 库 = v9 全部语句 + 角色状态记录表(照 9→10 真实迁移顺序)。 */
+    private fun createV10FromV9() {
+        createV9FromV8()
+        val db = context.openOrCreateDatabase(name, Context.MODE_PRIVATE, null)
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS `character_status_records` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`characterId` INTEGER NOT NULL, " +
+                "`conversationId` INTEGER NOT NULL, " +
+                "`emoji` TEXT NOT NULL, " +
+                "`mood` TEXT NOT NULL, " +
+                "`doing` TEXT NOT NULL, " +
+                "`thought` TEXT NOT NULL, " +
+                "`sourceKind` TEXT NOT NULL, " +
+                "`sourceConversationId` INTEGER, " +
+                "`sourceTurnId` TEXT NOT NULL, " +
+                "`sourceStartMessageId` INTEGER, " +
+                "`sourceEndMessageId` INTEGER, " +
+                "`sourceVersion` INTEGER NOT NULL, " +
+                "`state` TEXT NOT NULL, " +
+                "`generatedAt` INTEGER NOT NULL)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_character_status_records_characterId` ON `character_status_records` (`characterId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_character_status_records_conversationId` ON `character_status_records` (`conversationId`)")
+        db.version = 10
+        db.close()
+    }
+
+    /** F 工作包 v10→v11:新建统一内容记录表,既有角色/会话/消息/状态记录原样保留。 */
+    @Test fun v10SidestoryRecordsTableCreatedAndOldDataKept() {
+        createV10FromV9()
+        val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
+            .addMigrations(GouXiangDatabase.MIGRATION_10_11)
+            .allowMainThreadQueries().build()
+        try {
+            val sql = db.openHelper.writableDatabase
+            fun scalar(query: String): String = sql.query(query).use { it.moveToFirst(); it.getString(0) }
+            fun longScalar(query: String): Long = sql.query(query).use { it.moveToFirst(); it.getLong(0) }
+            // 既有数据原样保留(角色/会话/消息 + v10 的状态记录行)
+            assertEquals("角色", scalar("SELECT name FROM characters WHERE id=1"))
+            assertEquals("聊天", scalar("SELECT content FROM messages WHERE id=3"))
+            sql.execSQL(
+                "INSERT INTO character_status_records (characterId, conversationId, emoji, mood, doing, thought, " +
+                    "sourceKind, sourceConversationId, sourceTurnId, sourceStartMessageId, sourceEndMessageId, " +
+                    "sourceVersion, state, generatedAt) " +
+                    "VALUES (1, 2, '🤔', '开心', '在等你的消息', '他在忙什么', 'turn', 2, 'turn-1', 3, 3, 0, 'active', 10)",
+            )
+            assertEquals("在等你的消息", scalar("SELECT doing FROM character_status_records WHERE characterId=1"))
+            // 新表可写可读(番外/心动记录落地面);类型分区与来源区间列语义成立
+            sql.execSQL(
+                "INSERT INTO sidestory_records (kind, templateKey, templateVersion, title, characterId, " +
+                    "conversationId, sourceStartMessageId, sourceEndMessageId, sourceVersion, requestId, state, " +
+                    "failureReason, bodyJson, imageFile, imageStatus, notified, isStale, createdAt, updatedAt) " +
+                    "VALUES ('heartbeat', 'checkphone', 1, '', 1, 2, 3, 3, 0, 'req-f1', 'generating', '', '', '', " +
+                    "'pending', 0, 0, 10, 10)",
+            )
+            assertEquals("heartbeat", scalar("SELECT kind FROM sidestory_records WHERE requestId='req-f1'"))
+            assertEquals("checkphone", scalar("SELECT templateKey FROM sidestory_records WHERE requestId='req-f1'"))
+            // 状态机条件更新语义成立(生成中→失败收口)
+            sql.execSQL(
+                "UPDATE sidestory_records SET state='failed', failureReason='生成失败' " +
+                    "WHERE id=(SELECT id FROM sidestory_records WHERE requestId='req-f1') AND state='generating'",
+            )
+            assertEquals("failed", scalar("SELECT state FROM sidestory_records WHERE requestId='req-f1'"))
+            assertEquals("生成失败", scalar("SELECT failureReason FROM sidestory_records WHERE requestId='req-f1'"))
+            assertEquals(1L, longScalar("SELECT characterId FROM sidestory_records WHERE requestId='req-f1'"))
         } finally { db.close() }
     }
 }

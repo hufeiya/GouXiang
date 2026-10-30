@@ -37,6 +37,7 @@ class GouXiangRepo private constructor(context: Context) {
         GouXiangDatabase.MIGRATION_7_8,
         GouXiangDatabase.MIGRATION_8_9,
         GouXiangDatabase.MIGRATION_9_10,
+        GouXiangDatabase.MIGRATION_10_11,
     ).build()
 
     init {
@@ -194,6 +195,29 @@ class GouXiangRepo private constructor(context: Context) {
     /** 消息落库后刷新会话行摘要(最近时间/预览文案,消息列表 02 同步可见)。 */
     suspend fun touchConversation(conversationId: Long, summary: String, at: Long) =
         db.conversationDao().touch(conversationId, summary, at)
+
+    // ── 番外剧场与心动事件(F 工作包 F1-F4;统一内容记录)────────────
+
+    /** 会话内番外/心动记录流(番外页列表,落库即上屏)。 */
+    fun observeSidestoryRecords(conversationId: Long): Flow<List<SidestoryRecordEntity>> =
+        db.sidestoryRecordDao().observeForConversation(conversationId)
+
+    suspend fun sidestoryRecords(conversationId: Long): List<SidestoryRecordEntity> =
+        db.sidestoryRecordDao().forConversation(conversationId)
+
+    /** 角色主页「番外剧场」尾注(「全部 N」;心声/朋友圈同约定)。 */
+    suspend fun countSidestoryRecords(characterId: Long): Int =
+        db.sidestoryRecordDao().countForCharacter(characterId)
+
+    suspend fun sidestoryRecordById(id: Long): SidestoryRecordEntity? =
+        db.sidestoryRecordDao().byId(id)
+
+    /** 删除一条记录(列表/详情管理;配图文件由调用方按需清理)。 */
+    suspend fun deleteSidestoryRecord(id: Long): Int = db.sidestoryRecordDao().deleteById(id)
+
+    /** 回溯联动标记(与心声/朋友圈 isStale 同语义;不删除不重写)。 */
+    suspend fun markSidestoryStaleFrom(conversationId: Long, messageId: Long): Int =
+        db.sidestoryRecordDao().markStaleFrom(conversationId, messageId)
 
     // ── 主动消息账本(D 工作包 D1-D4)────────────────────────────────
 

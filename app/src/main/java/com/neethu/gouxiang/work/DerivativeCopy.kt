@@ -30,6 +30,9 @@ internal object DerivativeCopy {
 
     fun momentTitle(name: String): String = "${name}发布了新的朋友圈"
 
+    /** 番外/心动完成标题(F 工作包;心动事件同通道,不再细分以免文案发散)。 */
+    fun sidestoryTitle(name: String): String = "${name}的番外内容已生成"
+
     /** 通用兜底标题(M2 kind 接入前不触达;保证任意 kind 有合法文案)。 */
     fun genericTitle(name: String): String = "${name}有新内容"
 

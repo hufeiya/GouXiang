@@ -87,6 +87,10 @@ fun CharacterHomeScreen(
     innerVoiceCount: Int = 0,
     /** 「Ta 的朋友圈」占位卡尾注计数(F9;>0 时展示「全部 N」)。 */
     momentCount: Int = 0,
+    /** 「番外剧场」占位卡尾注计数(F 工作包;>0 时展示「全部 N」)。 */
+    sidestoryCount: Int = 0,
+    /** 番外剧场页入口(F3/F4;番外模板 + 心动事件 + 记录管理)。 */
+    onOpenSidestory: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var modeSheet by remember { mutableStateOf(false) }
@@ -363,6 +367,13 @@ fun CharacterHomeScreen(
                 "Ta 的朋友圈",
                 tail = if (momentCount > 0) "全部 $momentCount" else null,
                 onClick = onOpenMoments,
+            )
+            Spacer(Modifier.height(12.dp))
+            // 番外剧场(F 工作包 F3/F4):番外模板 + 心动事件入口与记录管理
+            PlaceholderCard(
+                "番外剧场",
+                tail = if (sidestoryCount > 0) "全部 $sidestoryCount" else null,
+                onClick = onOpenSidestory,
             )
             Spacer(Modifier.height(18.dp))
             Spacer(Modifier.navigationBarsPadding())

@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity() {
         val hasNavExtra =
             extras.containsKey(com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_INNER_VOICE) ||
                 extras.containsKey(com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_MOMENTS) ||
+                extras.containsKey(com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_SIDESTORY) ||
                 extras.containsKey(com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_CHAT) ||
                 extras.containsKey(com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_MESSAGES)
         if (hasNavExtra) pendingNavExtras.trySend(extras.clone() as android.os.Bundle)
@@ -153,6 +154,9 @@ class MainActivity : ComponentActivity() {
         // 朋友圈页 06(F9)
         val momentsId by vm.momentsConversationId.collectAsState()
         val momentsUi by vm.momentsUi.collectAsState()
+        // 番外剧场与心动事件(F 工作包 F3/F4)
+        val sidestoryId by vm.sidestoryConversationId.collectAsState()
+        val sidestoryUi by vm.sidestoryUi.collectAsState()
         // 对话风格(F5:弹层 09/10 的当前选择)
         val chatStyle by vm.chatStyle.collectAsState()
         // 语音通话 12(F6)
@@ -230,6 +234,9 @@ class MainActivity : ComponentActivity() {
                     com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_MOMENTS,
                 )?.let { vm.openMomentsFromNotification(it) }
                 extras.navLong(
+                    com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_SIDESTORY,
+                )?.let { vm.openSidestoryFromNotification(it) }
+                extras.navLong(
                     com.neethu.gouxiang.work.NotificationPoster.EXTRA_OPEN_CHAT,
                 )?.let { vm.openChatFromNotification(it) }
                 if (extras.containsKey(
@@ -250,6 +257,7 @@ class MainActivity : ComponentActivity() {
             when (e.kind) {
                 com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE -> vm.onInnerVoiceTaskSettled(e)
                 com.neethu.gouxiang.chat.DerivativeKind.MOMENT -> vm.onMomentTaskSettled(e)
+                com.neethu.gouxiang.chat.DerivativeKind.SIDESTORY -> vm.onSidestoryTaskSettled(e)
                 else -> Unit
             }
         }
@@ -480,6 +488,10 @@ class MainActivity : ComponentActivity() {
                     },
                     innerVoiceCount = characterHomeUi.innerVoiceCount,
                     momentCount = characterHomeUi.momentCount,
+                    sidestoryCount = characterHomeUi.sidestoryCount,
+                    onOpenSidestory = {
+                        characterHomeId?.let { vm.openSidestory(it) }
+                    },
                 )
             }
         }
@@ -511,6 +523,23 @@ class MainActivity : ComponentActivity() {
                     onLike = { post -> vm.toggleMomentLike(post) },
                     onSendComment = { post, text -> vm.sendMomentComment(post, text) },
                     onRetryImage = { vm.retryDerivativeImage(com.neethu.gouxiang.chat.DerivativeKind.MOMENT, it) },
+                )
+            }
+        }
+
+        // 番外剧场与心动事件页(F 工作包):角色主页「番外剧场」卡 / 完成通知
+        // 进入的全屏覆盖层;渲染序在朋友圈页之后(同层后声明者在上,保证盖回
+        // 角色主页)。返回 = closeSidestory();详情层为屏内覆盖。
+        if (sidestoryId != null) {
+            Box(Modifier.fillMaxSize()) {
+                com.neethu.gouxiang.ui.sidestory.SidestoryScreen(
+                    state = sidestoryUi,
+                    onBack = { vm.closeSidestory() },
+                    onGenerateTemplate = { vm.generateSidestoryTemplate(it) },
+                    onOpenDetail = { vm.openSidestoryDetail(it) },
+                    onRetry = { vm.retrySidestory(it) },
+                    onDelete = { vm.deleteSidestoryRecord(it) },
+                    onCloseDetail = { vm.closeSidestoryDetail() },
                 )
             }
         }

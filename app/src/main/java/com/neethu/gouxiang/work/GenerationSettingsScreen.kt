@@ -113,10 +113,9 @@ fun GenerationSettingsScreen(
         )
         SwitchRow(
             title = "番外配图",
-            subtitle = "功能开发中，暂不可开启",
-            checked = false,
-            enabled = false,
-            onCheckedChange = { },
+            subtitle = "关闭后新番外仅生成文字；失败保留文字，可在记录里查看",
+            checked = snapshot.sidestoryImages,
+            onCheckedChange = { onToggle(com.neethu.gouxiang.ai.GenerationPrefs.KEY_SIDESTORY_IMAGES, it) },
         )
         SwitchRow(
             title = "隔夜记忆总结",

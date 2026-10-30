@@ -63,6 +63,14 @@ class AvatarImageProvider(
     suspend fun getOrGenerateMomentImage(characterKey: String, prompt: String): File? =
         getOrGenerateImage(characterKey, prompt, subDir = "moments", size = "1024x1024")
 
+    /**
+     * 番外/心动封面配图(F 工作包):同一生成链,缓存目录 filesDir/sidestory,
+     * 竖版 768×1024(详情卡竖滑构图)。返回 null = 生图失败,调用方保留
+     * 文字成品并把 imageStatus 标 failed。
+     */
+    suspend fun getOrGenerateSidestoryImage(characterKey: String, prompt: String): File? =
+        getOrGenerateImage(characterKey, prompt, subDir = "sidestory", size = "768x1024")
+
     internal suspend fun getOrGenerateImage(
         characterKey: String,
         prompt: String,

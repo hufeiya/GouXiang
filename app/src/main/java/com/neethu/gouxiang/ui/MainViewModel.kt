@@ -3,6 +3,7 @@ package com.neethu.gouxiang.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.withTransaction
 import com.neethu.gouxiang.chat.BurstParams
 import com.neethu.gouxiang.chat.ChatMemoryCoordinator
 import com.neethu.gouxiang.chat.ChatOrchestrator
@@ -219,6 +220,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _characterHomeUi.value = _characterHomeUi.value.copy(
                 innerVoiceCount = repo.countInnerVoices(character.id),
                 momentCount = repo.countMoments(character.id),
+                sidestoryCount = repo.countSidestoryRecords(character.id),
             )
             repo.observeMessages(conversationId).collect { messages ->
                 _characterHomeUi.value = _characterHomeUi.value.copy(
@@ -1725,6 +1727,196 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── 番外剧场与心动事件(F 工作包 F1-F4)──────────────────────────
+
+    /** 番外页打开的会话 id(null=未进入)。 */
+    private val _sidestoryConversationId = MutableStateFlow<Long?>(null)
+    val sidestoryConversationId: StateFlow<Long?> = _sidestoryConversationId.asStateFlow()
+
+    /** 番外页 UI 状态。 */
+    private val _sidestoryUi = MutableStateFlow(com.neethu.gouxiang.ui.sidestory.SidestoryUiState())
+    val sidestoryUi: StateFlow<com.neethu.gouxiang.ui.sidestory.SidestoryUiState> =
+        _sidestoryUi.asStateFlow()
+
+    private var sidestoryJob: Job? = null
+
+    /** 打开番外页:按会话取角色 + 订阅记录流;进页先对账进程中断遗留。 */
+    fun openSidestory(conversationId: Long) {
+        if (_sidestoryConversationId.value == conversationId) return
+        _sidestoryConversationId.value = conversationId
+        _sidestoryUi.value = com.neethu.gouxiang.ui.sidestory.SidestoryUiState(loading = true)
+        sidestoryJob?.cancel()
+        sidestoryJob = viewModelScope.launch {
+            val conv = repo.db.conversationDao().byId(conversationId)
+            val character = conv?.let { repo.characterById(it.characterId) }
+            if (conv == null || character == null) {
+                _sidestoryUi.value = _sidestoryUi.value.copy(loading = false, loadFailed = true)
+                return@launch
+            }
+            _sidestoryUi.value = _sidestoryUi.value.copy(characterName = character.name)
+            // 进页对账:记录行 generating 而任务已终态(进程中断)→ 拨失败可重试。
+            runCatching {
+                com.neethu.gouxiang.sidestory.SidestoryGenerator.production(getApplication())
+                    .reconcileInterrupted()
+            }
+            repo.observeSidestoryRecords(conversationId).collect { records ->
+                _sidestoryUi.value = _sidestoryUi.value.copy(
+                    rows = records.map { com.neethu.gouxiang.ui.sidestory.SidestoryRecordRow.of(it) },
+                    loading = false,
+                )
+            }
+        }
+    }
+
+    fun closeSidestory() {
+        sidestoryJob?.cancel()
+        sidestoryJob = null
+        _sidestoryConversationId.value = null
+        _sidestoryUi.value = com.neethu.gouxiang.ui.sidestory.SidestoryUiState()
+    }
+
+    /**
+     * 生成一条番外/心动记录(F3/F4 入口按钮与 ai_cmd 共用数据路径):同模板
+     * 已有生成中的记录即在事务内拒绝(原子去重,防快速双击重复生成);短事务
+     * 捕获来源范围与会话版本后落 generating 行,再入队 Worker(网络在事务外;
+     * 任务与记录以同 requestId 关联)。
+     *
+     * @return 新记录 id;null = 同模板已有生成中记录(幂等跳过)。
+     */
+    suspend fun generateSidestory(templateKey: String): Long? {
+        val conversationId = _sidestoryConversationId.value
+            ?: throw IllegalStateException("sidestory screen is not open for a conversation")
+        val entry = com.neethu.gouxiang.sidestory.SidestoryCatalog.byKey(templateKey)
+            ?: throw IllegalArgumentException("No sidestory template or heartbeat event matches '$templateKey'")
+        val conv = repo.db.conversationDao().byId(conversationId)
+            ?: throw IllegalStateException("conversation $conversationId not found")
+        val requestId = java.util.UUID.randomUUID().toString()
+        val recordId = repo.db.withTransaction {
+            // 原子去重:同模板已有生成中记录则拒绝(双击/命令重发幂等)。
+            if (repo.db.sidestoryRecordDao().forConversation(conversationId)
+                    .any { it.templateKey == entry.key && it.isGenerating }
+            ) {
+                return@withTransaction -1L
+            }
+            val source = com.neethu.gouxiang.work.captureDerivativeSource(
+                repo.db, conversationId, conv.characterId,
+            )
+            repo.db.sidestoryRecordDao().insert(
+                com.neethu.gouxiang.data.SidestoryRecordEntity(
+                    kind = if (entry.isHeartbeat) com.neethu.gouxiang.data.SidestoryRecordEntity.KIND_HEARTBEAT
+                    else com.neethu.gouxiang.data.SidestoryRecordEntity.KIND_SIDESTORY,
+                    templateKey = entry.key,
+                    templateVersion = com.neethu.gouxiang.sidestory.SidestoryCatalog.VERSION,
+                    characterId = conv.characterId,
+                    conversationId = conversationId,
+                    sourceStartMessageId = source.firstMessageId,
+                    sourceEndMessageId = source.lastMessageId,
+                    sourceVersion = source.version,
+                    requestId = requestId,
+                    state = com.neethu.gouxiang.data.SidestoryRecordEntity.STATE_GENERATING,
+                    imageStatus = com.neethu.gouxiang.data.SidestoryRecordEntity.IMAGE_PENDING,
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                ),
+            )
+        }
+        if (recordId == -1L) return null
+        com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+            getApplication(),
+            com.neethu.gouxiang.chat.DerivativeTask(
+                com.neethu.gouxiang.chat.DerivativeKind.SIDESTORY,
+                conversationId,
+                characterId = conv.characterId,
+                recordId = recordId,
+                requiresNetwork = false,
+            ),
+            requestIdOverride = requestId,
+        )
+        return recordId
+    }
+
+    /** UI 入口(番外页按钮;失败置一次性错误提示)。 */
+    fun generateSidestoryTemplate(templateKey: String) {
+        if (_sidestoryConversationId.value == null) return
+        viewModelScope.launch {
+            try {
+                val recordId = generateSidestory(templateKey)
+                if (recordId == null) {
+                    _sidestoryUi.value = _sidestoryUi.value.copy(error = "该模板正在生成中,请等它完成")
+                } else {
+                    _sidestoryUi.value = _sidestoryUi.value.copy(error = null)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                android.util.Log.e("Sidestory", "enqueue failed", e)
+                _sidestoryUi.value = _sidestoryUi.value.copy(error = "任务入队失败，请重试")
+            }
+        }
+    }
+
+    /** 失败重试(同一记录、同一 requestId;拨回 generating 后重新入队)。 */
+    fun retrySidestory(recordId: Long) {
+        val conversationId = _sidestoryConversationId.value ?: return
+        viewModelScope.launch {
+            try {
+                val record = repo.sidestoryRecordById(recordId) ?: return@launch
+                if (!record.isFailed) return@launch
+                val ok = repo.db.sidestoryRecordDao().markGeneratingForRetry(recordId, System.currentTimeMillis()) > 0
+                if (!ok) return@launch
+                com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+                    getApplication(),
+                    com.neethu.gouxiang.chat.DerivativeTask(
+                        com.neethu.gouxiang.chat.DerivativeKind.SIDESTORY,
+                        conversationId,
+                        characterId = record.characterId,
+                        recordId = recordId,
+                        requiresNetwork = false,
+                    ),
+                    requestIdOverride = record.requestId,
+                )
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                android.util.Log.e("Sidestory", "retry enqueue failed", e)
+                _sidestoryUi.value = _sidestoryUi.value.copy(error = "重试入队失败，请稍后再试")
+            }
+        }
+    }
+
+    /** 删除一条记录(列表与库一致;配图文件一并清理)。 */
+    fun deleteSidestoryRecord(recordId: Long) {
+        viewModelScope.launch {
+            try {
+                val record = repo.sidestoryRecordById(recordId) ?: return@launch
+                repo.deleteSidestoryRecord(recordId)
+                if (record.imageFile.isNotBlank()) {
+                    runCatching { java.io.File(record.imageFile).delete() }
+                }
+                if (_sidestoryUi.value.detailId == recordId) closeSidestoryDetail()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                android.util.Log.e("Sidestory", "delete failed", e)
+                _sidestoryUi.value = _sidestoryUi.value.copy(error = "删除失败，请重试")
+            }
+        }
+    }
+
+    /** 详情开合(记录卡「查看」)。 */
+    fun openSidestoryDetail(recordId: Long) {
+        _sidestoryUi.value = _sidestoryUi.value.copy(detailId = recordId)
+    }
+
+    fun closeSidestoryDetail() {
+        _sidestoryUi.value = _sidestoryUi.value.copy(detailId = null)
+    }
+
+    /** 通知直跳入口(番外/心动完成通知)。 */
+    fun openSidestoryFromNotification(conversationId: Long) {
+        openSidestory(conversationId)
+    }
+
     // ── 记忆页 05(F3)───────────────────────────────────────────────
 
     /** 记忆页打开的会话 id(null=未进入;入口:聊天页顶栏「记忆」图标)。 */
@@ -1855,6 +2047,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (e.success) refreshCharacterHomeCounts()
     }
 
+    /** 番外/心动任务收口(MainActivity 消费事件后回调):成功同步主页尾注计数。 */
+    fun onSidestoryTaskSettled(e: com.neethu.gouxiang.work.DerivativeEvents.Event) {
+        if (e.success) refreshCharacterHomeCounts()
+    }
+
     /** WorkManager persists this state, including across process death. */
     private suspend fun observeManualDerivative(
         kind: com.neethu.gouxiang.chat.DerivativeKind,
@@ -1881,7 +2078,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
     }
 
-    /** 角色主页占位卡尾注同步(若主页仍打开;F8/F9 共用)。 */
+    /** 角色主页占位卡尾注同步(若主页仍打开;F8/F9/番外共用)。 */
     private fun refreshCharacterHomeCounts() {
         val homeConvId = _characterHomeConversationId.value ?: return
         viewModelScope.launch {
@@ -1889,6 +2086,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _characterHomeUi.value = _characterHomeUi.value.copy(
                 innerVoiceCount = repo.countInnerVoices(conv.characterId),
                 momentCount = repo.countMoments(conv.characterId),
+                sidestoryCount = repo.countSidestoryRecords(conv.characterId),
             )
         }
     }
@@ -1941,6 +2139,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 notifyEnabled = com.neethu.gouxiang.ai.GenerationPrefs.notifyEnabled(app),
                 innerVoiceImages = com.neethu.gouxiang.ai.GenerationPrefs.innerVoiceImages(app),
                 momentsImages = com.neethu.gouxiang.ai.GenerationPrefs.momentsImages(app),
+                sidestoryImages = com.neethu.gouxiang.ai.GenerationPrefs.sidestoryImages(app),
             )
     }
 
@@ -1978,6 +2177,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.neethu.gouxiang.ai.GenerationPrefs.setInnerVoiceImages(app, enabled)
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_IMAGES ->
                 com.neethu.gouxiang.ai.GenerationPrefs.setMomentsImages(app, enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_SIDESTORY_IMAGES ->
+                com.neethu.gouxiang.ai.GenerationPrefs.setSidestoryImages(app, enabled)
         }
         _generationSettings.value = when (key) {
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_AUTO ->
@@ -1994,6 +2195,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _generationSettings.value.copy(innerVoiceImages = enabled)
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_IMAGES ->
                 _generationSettings.value.copy(momentsImages = enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_SIDESTORY_IMAGES ->
+                _generationSettings.value.copy(sidestoryImages = enabled)
             else -> _generationSettings.value.copy(notifyEnabled = enabled)
         }
     }
@@ -2150,6 +2353,64 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ── 番外/心动调试命令(ai_cmd:F 工作包验收口)────────────────────
+
+    /** `sidestory_list`:当前会话的番外/心动记录(最新在前)。 */
+    suspend fun debugSidestoryList(limit: Int): List<com.neethu.gouxiang.data.SidestoryRecordEntity> {
+        val (_, conversationId) = requireOpenChatCharacterAndConversation()
+        return repo.sidestoryRecords(conversationId).take(limit)
+    }
+
+    /** `sidestory_generate`:按模板/事件 key 在当前会话生成一条(入队即返回)。 */
+    suspend fun debugSidestoryGenerate(key: String): String {
+        val chatId = _chatUi.value.conversationId
+        if (chatId == 0L) throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+        if (_sidestoryConversationId.value != chatId) openSidestory(chatId)
+        val entry = com.neethu.gouxiang.sidestory.SidestoryCatalog.byKey(key)
+            ?: throw IllegalArgumentException(
+                "No sidestory template or heartbeat event matches '$key'. Send ai_cmd=sidestory_keys to see options.",
+            )
+        val recordId = generateSidestory(entry.key)
+            ?: throw IllegalStateException("'${entry.key}' is already generating — poll sidestory_list")
+        return "queued record $recordId (${entry.name}) for conversation $chatId (poll sidestory_list to confirm)"
+    }
+
+    /** `sidestory_delete`:按记录 id 删除(与 UI「删除」同一数据路径)。 */
+    suspend fun debugSidestoryDelete(recordId: Long): String {
+        val record = repo.sidestoryRecordById(recordId)
+            ?: throw IllegalArgumentException("No sidestory record matches id $recordId — send ai_cmd=sidestory_list")
+        repo.deleteSidestoryRecord(recordId)
+        if (record.imageFile.isNotBlank()) runCatching { java.io.File(record.imageFile).delete() }
+        if (_sidestoryUi.value.detailId == recordId) closeSidestoryDetail()
+        return "deleted record $recordId (${record.templateKey}/${record.state})"
+    }
+
+    /** `sidestory_retry`:按记录 id 重试一次失败记录(与 UI「重试」同一数据路径)。 */
+    suspend fun debugSidestoryRetry(recordId: Long): String {
+        val record = repo.sidestoryRecordById(recordId)
+            ?: throw IllegalArgumentException("No sidestory record matches id $recordId — send ai_cmd=sidestory_list")
+        if (!record.isFailed) throw IllegalStateException("record $recordId is ${record.state}; only failed records can be retried")
+        val reset = repo.db.sidestoryRecordDao().markGeneratingForRetry(recordId, System.currentTimeMillis()) > 0
+        if (!reset) throw IllegalStateException("record $recordId state changed concurrently — poll sidestory_list")
+        com.neethu.gouxiang.work.DerivativeWorker.enqueue(
+            getApplication(),
+            com.neethu.gouxiang.chat.DerivativeTask(
+                com.neethu.gouxiang.chat.DerivativeKind.SIDESTORY,
+                record.conversationId,
+                characterId = record.characterId,
+                recordId = recordId,
+                requiresNetwork = false,
+            ),
+            requestIdOverride = record.requestId,
+        )
+        return "retry queued for record $recordId (poll sidestory_list to confirm)"
+    }
+
+    /** `sidestory_keys`:番外模板与心动事件 key 清单(生成命令的参数来源)。 */
+    fun debugSidestoryKeys(): String =
+        com.neethu.gouxiang.sidestory.SidestoryCatalog.entries.joinToString(" ") { it.key } +
+            " | " + com.neethu.gouxiang.sidestory.SidestoryCatalog.heartbeatKeys().joinToString(" ")
+
     // ── 状态调试命令(ai_cmd:E 工作包验收口)────────────────────────
 
     /** `status_list`:当前角色近期状态记录(面板同一数据源)。 */
@@ -2248,6 +2509,8 @@ data class CharacterHomeUiState(
     val innerVoiceCount: Int = 0,
     /** 「Ta 的朋友圈」占位卡尾注(F9:全部 N;N=0 时不带尾注)。 */
     val momentCount: Int = 0,
+    /** 「番外剧场」占位卡尾注(F 工作包:全部 N;N=0 时不带尾注)。 */
+    val sidestoryCount: Int = 0,
 )
 
 /**

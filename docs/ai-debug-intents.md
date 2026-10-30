@@ -238,6 +238,19 @@ adb shell am start -n $PKG/.MainActivity --es ai_cmd msgs
 | `moments` | `ai_arg`=gen \| like `<postId>` \| comment `<postId> <文本>` | P1 | 对应 `generateMoment:1027` / `toggleMomentLike:1097` / `sendMomentComment:1108` |
 | `moments_list` | — | P1 | 朋友圈帖子清单:`id 点赞数 评论数 文本前40字` |
 
+### 5.6a 番外剧场与心动事件(F 工作包,2026-10-31 增补)
+
+| 命令 | 参数 | 作用 |
+|---|---|---|
+| `sidestory_keys` | — | 番外模板(15)与心动事件(3:`checkphone`/`peekintoheart`/`jealous`)的 key 清单,`sidestory_generate` 的参数来源 |
+| `sidestory_list` | `ai_x`=条数(默认20) | 当前会话的番外/心动记录:`id kind key 状态 配图 请求ID前8位 「标题」`;状态机 generating→succeeded/failed |
+| `sidestory_generate` | `ai_arg`=key | 按 key 生成一条(与 UI 按钮同一数据路径:事务内原子去重→落 generating 行→入队 Worker);**入队即 OK,结果用 `sidestory_list` 轮询**;会真实请求 LLM,断网时任务与记录一致转 failed |
+| `sidestory_retry` | `ai_x`=记录 id | 重试一条 failed 记录(断网失败后的恢复路径;同一 requestId 幂等重跑) |
+| `sidestory_delete` | `ai_x`=记录 id | 删除一条记录(列表与库一致;配图文件一并清理) |
+| `open_sidestory` / `close_sidestory` | — | 打开/关闭番外页(当前会话;uiautomator dump 验证「心动事件/番外模板/记录」三区) |
+
+F 工作包验收 SOP:`open_chat <角色>` → `sidestory_keys` → `sidestory_generate his_collection` 与 `sidestory_generate checkphone` 各一条 → 轮询 `sidestory_list`(状态转 succeeded)→ `sidestory_delete <id>` 对拍;断网失败恢复 = 断网后 `sidestory_generate` → `sidestory_list` 见 failed → 联网后 `sidestory_retry`。
+
 ### 5.7 AI 底座(ai_config_prefs / 语音)
 
 | 命令 | 参数 | 分期 | 作用 |

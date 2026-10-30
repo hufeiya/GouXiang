@@ -52,4 +52,6 @@ data class GenerationSettingsSnapshot(
     val notifyEnabled: Boolean = true,
     val innerVoiceImages: Boolean = true,
     val momentsImages: Boolean = true,
+    /** 番外配图(F 工作包接入;默认关,文本先出图片可选)。 */
+    val sidestoryImages: Boolean = false,
 )

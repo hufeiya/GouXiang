@@ -153,6 +153,14 @@ fun aiDebugHelp(): String = """
 |                           style 保存后按新版本键重生成头像
 |  avatar_retry <ai_x=id>   重试角色头像生成(断网失败后的恢复路径)
 |  open_tab create          切到「创作AI+」tab(角色列表/新建入口)
+|Sidestory (番外剧场与心动事件,F 工作包;需先 open_chat):
+|  sidestory_keys           番外模板 + 心动事件的 key 清单(sidestory_generate 的参数来源)
+|  sidestory_list [ai_x=N]  当前会话记录: id kind key 状态 配图 请求 标题
+|  sidestory_generate <arg> 按 key 生成一条(入队即 OK;查手机/查状态/吃醋为
+|                           心动事件 key);会真实请求 LLM
+|  sidestory_retry <ai_x=id> 重试一条失败记录(断网失败后的恢复路径)
+|  sidestory_delete <ai_x=id> 删除一条记录(列表与库一致)
+|  open_sidestory / close_sidestory 打开/关闭番外页(dump 验证页面)
 |
     |Hot start: 应用已启动时再次 am start 走 onNewIntent(命令经进程级总线入队);
     |排查入队用 adb logcat -d -s AIDebug.Queue,执行结果用 -s AIDebug。

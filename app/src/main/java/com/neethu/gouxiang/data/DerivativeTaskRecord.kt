@@ -74,6 +74,10 @@ interface DerivativeTaskDao {
     @Query("SELECT * FROM derivative_tasks WHERE workId = :workId")
     suspend fun byId(workId: String): DerivativeTaskRecord?
 
+    /** 按请求 ID 查最近一条任务(番外/心动重启对账:记录行 generating 的关联面)。 */
+    @Query("SELECT * FROM derivative_tasks WHERE requestId = :requestId ORDER BY createdAt DESC, rowid DESC LIMIT 1")
+    suspend fun byRequestId(requestId: String): DerivativeTaskRecord?
+
     @Query("SELECT * FROM derivative_tasks WHERE characterId = :characterId AND kind = :kind ORDER BY createdAt DESC, rowid DESC LIMIT 1")
     fun observeLatest(characterId: Long, kind: String): Flow<DerivativeTaskRecord?>
 

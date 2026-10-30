@@ -80,6 +80,16 @@ internal suspend fun executeAiCommand(
             "char_create" -> cmdCharCreate(context, vm, command, create = true)
             "char_edit" -> cmdCharCreate(context, vm, command, create = false)
             "avatar_retry" -> cmdAvatarRetry(context, vm, command)
+            "sidestory_keys" -> vm.debugSidestoryKeys()
+            "sidestory_list" -> cmdSidestoryList(vm, command)
+            "sidestory_generate" -> cmdSidestoryGenerate(vm, command)
+            "sidestory_delete" -> cmdSidestoryDelete(vm, command)
+            "sidestory_retry" -> cmdSidestoryRetry(vm, command)
+            "open_sidestory" -> cmdOpenSidestory(vm)
+            "close_sidestory" -> {
+                vm.closeSidestory()
+                "sidestory screen closed"
+            }
             else -> throw IllegalArgumentException(
                 "unknown command, send ai_cmd=help (see docs/ai-debug-intents.md)",
             )
@@ -648,6 +658,47 @@ private suspend fun cmdAvatarRetry(context: Context, vm: MainViewModel, command:
     }
     vm.retryAvatar(characterId)
     return "avatar retry queued for character $characterId (poll chars for state)"
+}
+
+// ── 5.6a 番外剧场与心动事件(F 工作包)────────────────────────────
+
+/** `sidestory_list`:当前会话记录(id kind key 状态 配图 标题)。 */
+private suspend fun cmdSidestoryList(vm: MainViewModel, command: AiDebugCommand): String {
+    val limit = (command.x?.toInt() ?: 20).coerceIn(1, 100)
+    val records = vm.debugSidestoryList(limit)
+    if (records.isEmpty()) return "(no sidestory/heartbeat records; sidestory_generate one)"
+    return records.joinToString("\n") { r ->
+        val title = r.title.ifBlank { "-" }
+        "${r.id} ${r.kind} ${r.templateKey} ${r.state} img=${r.imageStatus} req=${r.requestId.take(8)} 「$title」"
+    }
+}
+
+/** `sidestory_generate`:按 key 生成一条(入队即 OK;结果用 sidestory_list 轮询)。 */
+private suspend fun cmdSidestoryGenerate(vm: MainViewModel, command: AiDebugCommand): String {
+    val key = requireArg(command)
+    return vm.debugSidestoryGenerate(key)
+}
+
+/** `sidestory_delete`:按记录 id 删除一条(与 UI 同一数据路径)。 */
+private suspend fun cmdSidestoryDelete(vm: MainViewModel, command: AiDebugCommand): String {
+    val id = command.x?.toLong() ?: command.arg?.toLongOrNull()
+        ?: throw IllegalArgumentException("missing record id — pass ai_x=<recordId> (see sidestory_list)")
+    return vm.debugSidestoryDelete(id)
+}
+
+/** `sidestory_retry`:按记录 id 重试失败记录(断网失败后的恢复路径)。 */
+private suspend fun cmdSidestoryRetry(vm: MainViewModel, command: AiDebugCommand): String {
+    val id = command.x?.toLong() ?: command.arg?.toLongOrNull()
+        ?: throw IllegalArgumentException("missing record id — pass ai_x=<recordId> (see sidestory_list)")
+    return vm.debugSidestoryRetry(id)
+}
+
+/** `open_sidestory`:打开番外页(当前会话;dump 验证页面结构)。 */
+private suspend fun cmdOpenSidestory(vm: MainViewModel): String {
+    val chatId = vm.debugConversationId
+        ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+    vm.openSidestory(chatId)
+    return "sidestory screen opened for conversation $chatId (verify via uiautomator dump)"
 }
 
 /** char 载荷容错 JSON 解析(与 MultiBubbleParser 同款 lenient 配置)。 */
