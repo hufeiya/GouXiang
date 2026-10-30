@@ -77,6 +77,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val selectedTab = MutableStateFlow(BottomTab.HOME)
 
+    // ── AI 原生调试出口(docs/ai-debug-intents.md §7.3;均只读,不改状态)──
+
+    /** 当前会话 id 的只读暴露(`msgs` 等命令的默认目标;null=未打开聊天)。 */
+    val debugConversationId: Long? get() = _chatConversationId.value
+
+    /** 是否手机聊天形态(发送侧 phoneMode 参数与 `state` 回显用)。 */
+    val debugPhoneMode: Boolean get() = _isPhoneChat.value
+
+    /** 当前会话最近 N 条消息(`msgs` 命令;穿透 repo 到 MessageDao.recentForConversation)。 */
+    suspend fun debugMessages(conversationId: Long, limit: Int): List<MessageEntity> =
+        repo.recentMessages(conversationId, limit)
+
     /** 首页 01:推荐流剧卡。 */
     val homeFeed: StateFlow<List<HomeFeedCard>> = repo.homeFeed
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())

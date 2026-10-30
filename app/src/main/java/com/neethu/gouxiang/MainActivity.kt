@@ -1,6 +1,8 @@
 package com.neethu.gouxiang
 
+import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
@@ -22,6 +24,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.neethu.gouxiang.debug.AI_EXTRA_KEYS
+import com.neethu.gouxiang.debug.AI_LOG_TAG
+import com.neethu.gouxiang.debug.AiDebugCommand
+import com.neethu.gouxiang.debug.EXTRA_AI_CMD
+import com.neethu.gouxiang.debug.executeAiCommand
+import com.neethu.gouxiang.debug.parseAiDebugCommand
 import com.neethu.gouxiang.ui.GouXiangBottomBar
 import com.neethu.gouxiang.ui.MainViewModel
 import com.neethu.gouxiang.ui.PlaceholderIcons
@@ -37,10 +45,21 @@ import com.neethu.gouxiang.ui.phone.PhoneChatScreen
 import com.neethu.gouxiang.ui.profile.ProfileScreen
 import com.neethu.gouxiang.ui.aiconfig.AiConfigActivity
 import com.neethu.gouxiang.ui.theme.GouXiangTheme
+import kotlinx.coroutines.channels.Channel
 
+/**
+ * 主入口。除触摸 UI 外暴露 AI 原生调试接口(docs/ai-debug-intents.md):任何
+ * 带 `ai_cmd` extras 的启动 Intent 均入队,UI 就绪后逐条执行——冷启动经
+ * [onCreate],运行中经 [onNewIntent](manifest 已设 `launchMode="singleTask"`,
+ * 重复 am start 复用既有实例)。结果打在 `AIDebug` 标签下,代理用
+ * `adb logcat -d -s AIDebug` 读回。
+ */
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+
+    /** Intent 下发的调试命令,MainFrame 组合后消费(冷启动/运行中同一条通道)。 */
+    private val aiCommands = Channel<AiDebugCommand>(Channel.UNLIMITED)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,7 +69,30 @@ class MainActivity : ComponentActivity() {
                 MainFrame()
             }
         }
+        enqueueAiCommands(intent)
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        enqueueAiCommands(intent)
+    }
+
+    /** 解析 ai extras 并入队;带 ai_* extras 但缺 ai_cmd 时 warn(防 LLM 排查无从下手)。 */
+    private fun enqueueAiCommands(intent: Intent?) {
+        val extras = intent?.extras ?: return
+        val command = parseAiDebugCommand(extras.toAiDebugMap())
+        if (command == null) {
+            if (extras.keySet().any { it in AI_EXTRA_KEYS }) {
+                Log.w(AI_LOG_TAG, "Intent ignored: missing or empty '$EXTRA_AI_CMD' string extra")
+            }
+            return
+        }
+        aiCommands.trySend(command)
+    }
+
+    private fun Bundle.toAiDebugMap(): Map<String, Any?> =
+        keySet().associateWith { get(it) }
 
     @Composable
     private fun MainFrame(vm: MainViewModel = viewModel()) {
@@ -89,6 +131,16 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(feed) {
             val need = feed.map { it.character }
             if (need.isNotEmpty()) vm.ensureAvatars(need)
+        }
+
+        // AI 原生调试通道(docs/ai-debug-intents.md):消费 Intent 入队的命令,
+        // UI 就绪即执行(冷启动积压的命令也在此排空);每条命令恰好一行
+        // OK/FAIL 打在 AIDebug 标签下。
+        val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+        LaunchedEffect(vm) {
+            for (cmd in aiCommands) {
+                executeAiCommand(appContext, vm, cmd)
+            }
         }
 
         Scaffold(
