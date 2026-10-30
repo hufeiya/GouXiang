@@ -49,6 +49,8 @@ data class AiConfig(
     val apiKeyDeepseek: String = "",
     /** 阿里云百炼 API Key——chat 专属端点一把通吃。 */
     val apiKeyBailian: String = "",
+    /** xAI Grok API Key——官方 OpenAI 兼容 /v1,只有 chat(无 ASR 端点)。 */
+    val apiKeyGrok: String = "",
     /** 自定义端点 baseUrl(OpenAI 兼容;非空 = 模型名透传不走目录校验)。 */
     val customBaseUrl: String = "",
     /** 自定义端点的 API Key(中转站需要;本地模型随意占位)。 */
@@ -67,6 +69,7 @@ data class AiConfig(
         AiProvider.OPENROUTER -> apiKeyOpenrouter
         AiProvider.DEEPSEEK -> apiKeyDeepseek
         AiProvider.BAILIAN -> apiKeyBailian
+        AiProvider.GROK -> apiKeyGrok
         AiProvider.CUSTOM -> apiKeyCustom
     }
 
@@ -123,6 +126,7 @@ data class AiConfig(
             AiProvider.OPENROUTER -> BuildConfig.OPENROUTER_API_KEY
             AiProvider.DEEPSEEK -> BuildConfig.DEEPSEEK_OFFICIAL_API_KEY
             AiProvider.BAILIAN -> BuildConfig.ALIYUNBAILIAN_API_KEY
+            AiProvider.GROK -> BuildConfig.GROK_API_KEY
             AiProvider.CUSTOM -> ""
         }
     }
@@ -138,6 +142,7 @@ private const val KEY_API_KEY_VOLCANO_TTS = "ai_api_key_volcano_tts"
 private const val KEY_API_KEY_OPENROUTER = "ai_api_key_openrouter"
 private const val KEY_API_KEY_DEEPSEEK = "ai_api_key_deepseek"
 private const val KEY_API_KEY_BAILIAN = "ai_api_key_bailian"
+private const val KEY_API_KEY_GROK = "ai_api_key_grok"
 private const val KEY_CUSTOM_BASE_URL = "ai_custom_base_url"
 private const val KEY_API_KEY_CUSTOM = "ai_api_key_custom"
 private const val KEY_TTS_MODEL = "ai_tts_model"
@@ -170,6 +175,7 @@ object AiConfigStore {
             apiKeyOpenrouter = sp.getString(KEY_API_KEY_OPENROUTER, "").orEmpty(),
             apiKeyDeepseek = sp.getString(KEY_API_KEY_DEEPSEEK, "").orEmpty(),
             apiKeyBailian = sp.getString(KEY_API_KEY_BAILIAN, "").orEmpty(),
+            apiKeyGrok = sp.getString(KEY_API_KEY_GROK, "").orEmpty(),
             customBaseUrl = sp.getString(KEY_CUSTOM_BASE_URL, "").orEmpty(),
             apiKeyCustom = sp.getString(KEY_API_KEY_CUSTOM, "").orEmpty(),
             ttsModel = sp.getString(KEY_TTS_MODEL, "").orEmpty(),
@@ -188,6 +194,7 @@ object AiConfigStore {
             .putString(KEY_API_KEY_OPENROUTER, c.apiKeyOpenrouter.trim())
             .putString(KEY_API_KEY_DEEPSEEK, c.apiKeyDeepseek.trim())
             .putString(KEY_API_KEY_BAILIAN, c.apiKeyBailian.trim())
+            .putString(KEY_API_KEY_GROK, c.apiKeyGrok.trim())
             .putString(KEY_CUSTOM_BASE_URL, c.customBaseUrl.trim())
             .putString(KEY_API_KEY_CUSTOM, c.apiKeyCustom.trim())
             .putString(KEY_TTS_MODEL, c.ttsModel.trim())

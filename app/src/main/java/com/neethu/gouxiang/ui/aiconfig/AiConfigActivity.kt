@@ -235,6 +235,7 @@ private fun withApiKey(config: AiConfig, provider: AiProvider, key: String): AiC
         AiProvider.OPENROUTER -> config.copy(apiKeyOpenrouter = key)
         AiProvider.DEEPSEEK -> config.copy(apiKeyDeepseek = key)
         AiProvider.BAILIAN -> config.copy(apiKeyBailian = key)
+        AiProvider.GROK -> config.copy(apiKeyGrok = key)
         AiProvider.CUSTOM -> config.copy(apiKeyCustom = key)
     }
 

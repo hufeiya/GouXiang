@@ -37,13 +37,15 @@ secrets.properties 键 → `ai_config_prefs.xml` 里的 string 条目名。正�
 | OPENROUTER_API_KEY | ai_api_key_openrouter |
 | DEEPSEEK_OFFICIAL_API_KEY | ai_api_key_deepseek |
 | ALIYUNBAILIAN_API_KEY | ai_api_key_bailian |
+| GROK_API_KEY | ai_api_key_grok |
 
 - 火山有两把互不通用的 key:`VOLCANO_ARK_API_KEY` 是方舟大模型(chat),`VOLCANO_TTS_API_KEY` 是豆包语音控制台(语音通话合成 WebSocket 的 X-Api-Key)。
 - 硅基流动与 OpenRouter 的 key 各自同时用于其 LLM/TTS(OpenRouter 还含 ASR)。
 - DeepSeek 官方只有 chat(无 TTS/ASR 端点):`DEEPSEEK_OFFICIAL_API_KEY` 只喂大模型,语音通话合成走内置火山链路、识别回落硅基流动。
 - 阿里云百炼一把 key 通吃大模型:chat 走企业专属端点(ws-*.maas.aliyuncs.com compatible-mode),语音通话的合成/识别仍走内置火山/硅基链路(与 AIAvatar 的百炼原生 TTS/ASR 矩阵不同)。
+- xAI Grok 官方只有 chat(TTS 端点 key 未授权,TTS 暂不接;ASR 端点 404):`GROK_API_KEY` 只喂大模型(默认 grok-4.5),语音通话合成走内置火山链路、识别回落硅基流动。
 - 推送的值进 prefs 后即成为「我的 → AI 服务配置」页里的**用户填写值**,优先级高于 BuildConfig 内置默认;想回到内置默认,在配置页清空对应输入框即可。
-- `GITHUB_TOKEN`(发布 Release 用)与 `GROK_API_KEY`(暂无应用内消费点)不推送,仅留在仓库文件。
+- `GITHUB_TOKEN`(发布 Release 用)不推送,仅留在仓库文件。
 
 ## 手动验证
 

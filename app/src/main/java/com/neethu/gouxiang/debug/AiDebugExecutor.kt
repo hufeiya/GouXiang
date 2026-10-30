@@ -182,6 +182,7 @@ private suspend fun cmdAiConfig(context: Context): String {
         "openrouter=${keyMask(cfg.apiKeyOpenrouter)}",
         "deepseek=${keyMask(cfg.apiKeyDeepseek)}",
         "bailian=${keyMask(cfg.apiKeyBailian)}",
+        "grok=${keyMask(cfg.apiKeyGrok)}",
         "custom=${keyMask(cfg.apiKeyCustom)} baseUrl=${cfg.customBaseUrl.ifBlank { "-" }}",
         "configured=${cfg.isConfigured}",
     ).joinToString(" ")

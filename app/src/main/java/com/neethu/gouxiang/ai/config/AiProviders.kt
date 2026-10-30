@@ -199,6 +199,39 @@ enum class AiProvider(
         llmKeyLabel = "阿里云百炼 API Key",
         llmKeyHint = "sk-...",
     ),
+    GROK(
+        label = "Grok(xAI 官方)",
+        baseUrl = "https://api.x.ai/v1",
+        // 2026-10-30 实测核验(api.x.ai/v1/models 在册 + chat/流式/视觉逐个真调):
+        // grok-4.x 全系 OpenAI 兼容,流式 SSE + stream_options + 视觉(image_url)
+        // 实测通过;思考默认 low(reasoning_content 走适配器已有兜底通道)。全量
+        // 目录经 /models 实时拉取(grok-imagine-image/video 等生图/视频条目由
+        // NON_CHAT_PATTERNS 的 image|video 规则剔除)。
+        llmModels = listOf(
+            "grok-4.5",
+            "grok-4.6",
+            "grok-4.7",
+            "grok-4.3",
+        ),
+        visionLlmModels = listOf(
+            // 4.5/4.6/4.7 图片输入实测通过(usage.image_tokens>0);4.3 同形实测
+            // 描述出红图。全系数值模型均视觉,视觉清单=LLM 清单(默认模型视觉优先)
+            "grok-4.5",
+            "grok-4.6",
+            "grok-4.7",
+            "grok-4.3",
+        ),
+        // 官方有 /v1/audio/speech 端点但当前 key 团队未授权(403 "Team is not
+        // authorized"),TTS 暂不接;清单留空与 DeepSeek 同款语义(语音通话走
+        // 内置火山优先+硅基兜底链路)
+        ttsModels = emptyList(),
+        defaultTtsModel = "",
+        voicePrefix = null,
+        voices = emptyList(),
+        defaultVoice = "",
+        llmKeyLabel = "xAI Grok API Key",
+        llmKeyHint = "xai-...",
+    ),
     CUSTOM(
         label = "自定义端点(OpenAI 兼容)",
         baseUrl = "",
@@ -282,7 +315,11 @@ fun resolveVoice(provider: AiProvider, configured: String): String {
  * - 硅基流动 Qwen3 系 / 百炼 qwen 系:enable_thinking: false(百炼只对 qwen* 发
  *   ——glm 系「restricted to True」400,kimi/deepseek 系不认识);
  * - OpenRouter Qwen 系:reasoning: {"enabled": false}(gemini/gpt 系强制思考,
- *   发关思考参数直接 400,不发)。
+ *   发关思考参数直接 400,不发);
+ * - Grok:仅 grok-4.3 收 reasoning_effort: "none"(2026-10-30 实测);4.5/4.6/4.7
+ *   默认思考 low 且最低就是 low(发 none 直接 400「does not support value none」),
+ *   默认已是聊天场景最优点,一律不发;4.20-non-reasoning 发 reasoning_effort 任意
+ *   值都 400,靠 /models 目录的 -non-reasoning 后缀自证纯文本,同样不发。
  * 其余模型返回 null 不发,避免严格端点 400。
  */
 fun llmExtraBody(provider: AiProvider, model: String): JsonObject? {
@@ -296,6 +333,10 @@ fun llmExtraBody(provider: AiProvider, model: String): JsonObject? {
             buildJsonObject { put("reasoning", buildJsonObject { put("enabled", false) }) }
         provider == AiProvider.BAILIAN && m.startsWith("qwen") ->
             buildJsonObject { put("enable_thinking", false) }
+        // 只有 4.3 支持显式关思考;清单里的 4.5/4.6/4.7 与目录里的 non-reasoning
+        // 变体发任何 reasoning_effort 都 400,保持静默(思考流进适配器兜底通道)
+        provider == AiProvider.GROK && m.startsWith("grok-4.3") ->
+            buildJsonObject { put("reasoning_effort", "none") }
         else -> null
     }
 }
@@ -303,10 +344,13 @@ fun llmExtraBody(provider: AiProvider, model: String): JsonObject? {
 /**
  * 语音识别(ASR)实际生效的服务商:OpenRouter 的 /audio/transcriptions 与硅基
  * 流动同构(共用 key);百炼走自家 chat+input_audio 形态(GouXiang 语音通话未接,
- * 按同商直连展示);火山与 DeepSeek 官方无云端 ASR 端点,回落硅基流动。
+ * 按同商直连展示);火山、DeepSeek 官方与 Grok 无云端 ASR 端点(Grok 的
+ * /audio/transcriptions 实测 404),回落硅基流动。
  */
 fun asrProviderFor(llmProvider: AiProvider): AiProvider =
-    if (llmProvider == AiProvider.VOLCANO || llmProvider == AiProvider.DEEPSEEK) {
+    if (llmProvider == AiProvider.VOLCANO || llmProvider == AiProvider.DEEPSEEK ||
+        llmProvider == AiProvider.GROK
+    ) {
         AiProvider.SILICONFLOW
     } else {
         llmProvider
@@ -317,7 +361,7 @@ fun asrExplicitAsrModels(provider: AiProvider): List<String> = when (provider) {
     AiProvider.SILICONFLOW -> listOf("Qwen/Qwen3-ASR-1.7B")
     AiProvider.OPENROUTER -> listOf("openai/whisper-large-v3")
     AiProvider.BAILIAN -> listOf("qwen3-asr-flash")
-    AiProvider.VOLCANO, AiProvider.DEEPSEEK -> emptyList()
+    AiProvider.VOLCANO, AiProvider.DEEPSEEK, AiProvider.GROK -> emptyList()
     // 自定义端点按 OpenAI 兼容 multipart 直打同端点;不支持时无候选可选
     AiProvider.CUSTOM -> emptyList()
 }

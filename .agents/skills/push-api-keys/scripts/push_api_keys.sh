@@ -21,6 +21,7 @@ MAPPING=(
   "OPENROUTER_API_KEY:ai_api_key_openrouter"
   "DEEPSEEK_OFFICIAL_API_KEY:ai_api_key_deepseek"
   "ALIYUNBAILIAN_API_KEY:ai_api_key_bailian"
+  "GROK_API_KEY:ai_api_key_grok"
 )
 
 mask() {
