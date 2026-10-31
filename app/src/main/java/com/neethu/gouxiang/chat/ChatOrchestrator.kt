@@ -33,7 +33,7 @@ import kotlin.random.Random
  * → 流文本增量合并 → 回合结束时 MultiBubbleParser 解析为 1~4 条泡
  * → 泡间带间隔地依次入库,回调层逐条上屏(连发节奏)。
  *
- * 解析放流末而非逐 delta:占位符 [sticker:…] 可能被任意拆分,边收边判
+ * 解析放流末而非逐 delta:占位标记 [img:…]/[卡片:…] 可能被任意拆分,边收边判
  * 会把半截占位符当正文渲染(闪错泡);泡间节奏在回调侧补齐即时感。
  *
  * 失败语义(02 文档 §3.5「回合失败显式化」):空输出/主动回合失败仍出一条
@@ -365,7 +365,7 @@ class ChatOrchestrator(
     /**
      * 相邻 TEXT 泡合成一泡(猫箱口径:一轮回复一条文字消息):
      * 按 "\n" 连接各段文本,() 动作保留首泡的(动作描述的是整个回合的场景,
-     * 不该每段重复);表情/图片/语音/卡片泡保持独立一泡不参与合并。
+     * 不该每段重复);图片/语音/卡片泡保持独立一泡不参与合并。
      */
     internal fun mergeConsecutiveTextBubbles(bubbles: List<Bubble>): List<Bubble> {
         val merged = mutableListOf<Bubble>()
@@ -508,7 +508,6 @@ class ChatOrchestrator(
 internal val Bubble.storageKey: String
     get() = when (kind) {
         Bubble.Kind.TEXT -> "text"
-        Bubble.Kind.STICKER -> "sticker"
         Bubble.Kind.IMAGE -> "img"
         Bubble.Kind.VOICE -> "voice"
         Bubble.Kind.CARD -> "card"

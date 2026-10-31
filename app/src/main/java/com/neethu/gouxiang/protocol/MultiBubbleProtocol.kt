@@ -7,24 +7,28 @@ import kotlinx.serialization.json.Json
  * 多泡输出协议 · 消息段(对齐 maoxiang-feature-analysis.md §6.3)。
  *
  * 一次回复 = [MultiBubbleReply](1~4 条 [Bubble]),段类型:
- * - [Bubble.Kind.TEXT]    普通文本气泡(白名单命中的动作文字剥离为 [Bubble.actions],
- *                         非白名单括号文本保留正文)
- * - [Bubble.Kind.STICKER] 表情包占位(渲染为贴图占位卡)
- * - [Bubble.Kind.IMAGE]   图片占位(渲染为图片占位卡,后续接生图)
- * - [Bubble.Kind.VOICE]   语音条占位((语音:…) / [语音:…] 均收,→ 语音条 UI)
- * - [Bubble.Kind.CARD]    卡片整行([卡片:类型 参数|备注] 六型,content 保留
- *                         原行,落库侧解析为 [CardPayload] 存 actionsJson)
+ * - [Bubble.Kind.TEXT]  普通文本气泡(白名单命中的动作文字剥离为 [Bubble.actions],
+ *                       非白名单括号文本保留正文;动作/心理等非语言内容=括号文本
+ *                       直接夹在消息里,猫箱口径 2026-10-31)
+ * - [Bubble.Kind.IMAGE] 图片占位(渲染为图片占位卡,后续接生图)
+ * - [Bubble.Kind.VOICE] 语音条占位((语音:…) / [语音:…] 均收,→ 语音条 UI)
+ * - [Bubble.Kind.CARD]  卡片整行([卡片:类型 参数|备注] 六型,content 保留
+ *                       原行,落库侧解析为 [CardPayload] 存 actionsJson)
+ *
+ * 表情包不再独立成泡(2026-10-31 用户口径:输出协议去掉 sticker 标签,非语言
+ * 内容直接括号;存量 [sticker:…] 标记由 [MultiBubbleParser.normalizeStickerMarkers]
+ * 降级为 `(描述)` 括号文本,与正文同泡上屏)。
  */
 @Serializable
 data class Bubble(
     val kind: Kind,
-    /** 文本内容:TEXT=正文;STICKER/IMAGE=占位描述;VOICE=语音条转写文本;CARD=整行卡片标记。 */
+    /** 文本内容:TEXT=正文;IMAGE=占位描述;VOICE=语音条转写;CARD=整行卡片标记。 */
     val text: String,
     /** TEXT 段内嵌的 () 场景动作(顺序保留,渲染时以淡色斜体/小字展示)。 */
     val actions: List<String> = emptyList(),
 ) {
     @Serializable
-    enum class Kind { TEXT, STICKER, IMAGE, VOICE, CARD }
+    enum class Kind { TEXT, IMAGE, VOICE, CARD }
 }
 
 /** 一次 LLM 回复解析出的完整分段结果。 */
@@ -47,14 +51,13 @@ data class MultiBubbleReply(
  * ```json
  * [
  *   {"kind":"text","text":"老公,","actions":["靠在你肩头"]},
- *   {"kind":"sticker","text":"歪头撒娇"},
- *   {"kind":"text","text":"那房子真的好喜欢,什么时候能搬进去呀?"}
+ *   {"kind":"text","text":"(歪头撒娇)那房子真的好喜欢,什么时候能搬进去呀?"}
  * ]
  * ```
  * 顶层也可为对象 `{"bubbles":[…],"proactivity":{…}}`。
  *
  * B. 分隔符兜底(模型没按 JSON 时):换行或 `|||` 分段 + 行内约定
- * `[sticker:描述]` `[img:描述]` `[卡片:类型 参数|备注]` `(动作)`。
+ * `[img:描述]` `[卡片:类型 参数|备注]` `(动作)`。
  *
  * 解析永不抛异常:畸形 JSON → 回落 B 通路;解析结果超 4 泡 → 截断保留前 4
  * (§6.3 「禁长段落」的硬约束);kind 不识别 → 当 TEXT。
@@ -98,8 +101,13 @@ object MultiBubbleParser {
     internal fun hasValidContent(seg: String): Boolean =
         seg.any { it.isLetterOrDigit() || it.code in 0x4E00..0x9FFF }
 
-    /** [sticker:描述] / [sticker：描述]。 */
-    internal val stickerLineRegex = Regex("^\\[sticker[:：]\\s*(.+?)\\]$", RegexOption.DOT_MATCHES_ALL)
+    /**
+     * 残留表情包标记的行内降级(2026-10-31 口径:协议已无表情泡,但历史 few-shot
+     * /旧习惯仍可能让模型吐出 [sticker:描述]):整串替换为 `(描述)` 括号文本,
+     * 与正文同段同泡——流式草稿里的原文和上屏后的括号文本一致,不再裂出独立
+     * 表情泡。全/半角冒号都收;标记内不允许再嵌方括号(防跨标记误吞)。
+     */
+    internal val stickerInlineRegex = Regex("\\[\\s*sticker[:：]\\s*([^\\[\\]]+?)\\s*\\]")
 
     /** [img:描述] / [img：描述]。 */
     internal val imgLineRegex = Regex("^\\[img[:：]\\s*(.+?)\\]$", RegexOption.DOT_MATCHES_ALL)
@@ -116,6 +124,7 @@ object MultiBubbleParser {
 
     // lenient JSON 通路把「[x:内容]」读成单元素数组时,方括号被消费成定界符,
     // 裸字符串元素只剩「x:内容」——这组正则按同样约定还原占位泡(整行匹配)。
+    // sticker 已无独立泡:裸串形态同样降级为括号文本(bubbleFrom 内处理)。
     internal val stickerBareRegex = Regex("^sticker[:：]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
     internal val imgBareRegex = Regex("^img[:：]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
     internal val voiceBareRegex = Regex("^语音[:：]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
@@ -131,12 +140,14 @@ object MultiBubbleParser {
     internal val cardBareRegex = Regex("^卡片[:：]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
 
     /**
-     * 行尾缀占位(模型不换行把 [sticker:…]/[img:…]/[卡片:…] 直接缀在正文后,
-     * 真机实锤 2026-10-31):组1=占位前的正文(非空,至少一个非空白字符),
-     * 组2=行尾占位标记本身。整行占位不匹配(组1 要求前面有正文),仍走整行判定。
+     * 行尾缀占位(模型不换行把 [img:…]/[卡片:…] 直接缀在正文后,真机实锤
+     * 2026-10-31):组1=占位前的正文(非空,至少一个非空白字符),组2=行尾
+     * 占位标记本身。整行占位不匹配(组1 要求前面有正文),仍走整行判定。
+     * sticker 不再参与拆分——它的行尾缀形态在 [parse] 入口就被
+     * [stickerInlineRegex] 原位降级成括号文本,不裂泡。
      */
     internal val trailingPlaceholderRegex =
-        Regex("^(.*\\S)\\s*(\\[(?:sticker|img|卡片)[:：]\\s*[^\\[\\]]+?\\])\\s*$")
+        Regex("^(.*\\S)\\s*(\\[(?:img|卡片)[:：]\\s*[^\\[\\]]+?\\])\\s*$")
 
     /**
      * 行展开预处理:行尾缀占位的行拆成「正文行 + 独立占位行」两段,交给主
@@ -149,11 +160,18 @@ object MultiBubbleParser {
 
     fun parse(raw: String): MultiBubbleReply {
         val trimmed = raw.trim().trimPrefix("```json").trimPrefix("```").trimSuffix("```").trim()
-        if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-            tryParseJson(trimmed, raw)?.let { return it }
+        // 表情包标记先行降级(JSON 通路与兜底通路共用同一入口,标记不会再
+        // 以 [sticker:…] 形态进入任何解析分支)
+        val normalized = normalizeStickerMarkers(trimmed)
+        if (normalized.startsWith("[") || normalized.startsWith("{")) {
+            tryParseJson(normalized, raw)?.let { return it }
         }
-        return parseFallback(raw)
+        return parseFallback(normalized)
     }
+
+    /** [sticker:…] / [sticker：…] → `(描述)`,全文原位降级(见 [stickerInlineRegex])。 */
+    internal fun normalizeStickerMarkers(text: String): String =
+        stickerInlineRegex.replace(text) { "(${it.groupValues[1].trim()})" }
 
     // ── A. JSON 通路 ────────────────────────────────────────────────
 
@@ -189,22 +207,21 @@ object MultiBubbleParser {
         // 「语音:…」前缀;裸字符串元素按行内约定还原为占位泡。
         if (el !is kotlinx.serialization.json.JsonObject) {
             val text = (el as? kotlinx.serialization.json.JsonPrimitive)?.content ?: el.toString()
-            // 括号仍在的形态((语音:…) / [语音:…] / [sticker:…] / [img:…])
+            // 括号仍在的形态((语音:…) / [语音:…] / [img:…]);sticker 方括号形态
+            // 已在 parse 入口降级为括号文本,不会以 [sticker:…] 到达这里
             voiceLineRegex.find(text)?.let {
                 return Bubble(Bubble.Kind.VOICE, it.groupValues[1].trim())
-            }
-            stickerLineRegex.find(text)?.let {
-                return Bubble(Bubble.Kind.STICKER, it.groupValues[1].trim())
             }
             imgLineRegex.find(text)?.let {
                 return Bubble(Bubble.Kind.IMAGE, it.groupValues[1].trim())
             }
             // 括号已被 JSON 数组定界符消费的形态:裸串直接以 语音/sticker/img 前缀开头
+            // (sticker 裸串同样降级为括号文本,不再出独立表情泡)
             voiceBareRegex.find(text)?.let {
                 return Bubble(Bubble.Kind.VOICE, it.groupValues[1].trim())
             }
             stickerBareRegex.find(text)?.let {
-                return Bubble(Bubble.Kind.STICKER, it.groupValues[1].trim())
+                return Bubble(Bubble.Kind.TEXT, "(${it.groupValues[1].trim()})")
             }
             imgBareRegex.find(text)?.let {
                 return Bubble(Bubble.Kind.IMAGE, it.groupValues[1].trim())
@@ -221,14 +238,17 @@ object MultiBubbleParser {
             return Bubble(Bubble.Kind.TEXT, text)
         }
         val obj = el
+        val stickerKind = obj["kind"]?.toString()?.trim('"')?.lowercase() == "sticker"
         val kind = when (obj["kind"]?.toString()?.trim('"')?.lowercase()) {
-            "sticker" -> Bubble.Kind.STICKER
             "img", "image" -> Bubble.Kind.IMAGE
             "voice" -> Bubble.Kind.VOICE
             "card" -> Bubble.Kind.CARD
             else -> Bubble.Kind.TEXT
         }
-        val text = (obj["text"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+        var text = (obj["text"] as? kotlinx.serialization.json.JsonPrimitive)?.content.orEmpty()
+        // 存量 sticker kind 降级:JSON 里写 {"kind":"sticker","text":"歪头撒娇"}
+        // 的回复按括号文本收进正文,与流式草稿观感一致(不再裂出表情占位卡)
+        if (stickerKind) text = "(${text.trim()})"
         val actions = (obj["actions"] as? kotlinx.serialization.json.JsonArray)
             ?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
             .orEmpty()
@@ -238,7 +258,8 @@ object MultiBubbleParser {
     // ── B. 分隔符兜底 ───────────────────────────────────────────────
 
     /**
-     * 按换行或 `|||` 切段;行内解析 [sticker:…] / [img:…] / (语音:…) / (动作) 约定。
+     * 按换行或 `|||` 切段;行内解析 [img:…] / (语音:…) / (动作) 约定(sticker
+     * 标记已在 [parse] 入口降级为括号文本,不进本通路)。
      * `(动作)` 支持全角(())与半角(())括号,且按 02 文档 §3.3 规则4 只剥白名单
      * ([actionWhitelist])命中词为 Action,非白名单括号文本保留正文;动作行
      * (整行只有动作)不产泡,归并进下一文本泡的 actions。
@@ -251,18 +272,16 @@ object MultiBubbleParser {
         var proactivity: Bubble? = null
 
         for (seg in segments) {
-            // 行内占位约定优先判定([sticker:]/[img:]/[卡片:]/(语音:)在动作剥离前
-            // 识别,否则 (语音:…) 会被 (动作) 规则误吞、[卡片:位置 原地(东门)]
+            // 行内占位约定优先判定([img:]/[卡片:]/(语音:)在动作剥离前识别,
+            // 否则 (语音:…) 会被 (动作) 规则误吞、[卡片:位置 原地(东门)]
             // 这类带括号载荷会被剥掉)
-            val stickerMatch = stickerLineRegex.find(seg)
             val imgMatch = imgLineRegex.find(seg)
             val voiceMatch = voiceLineRegex.find(seg)
             val cardMatch = cardLineRegex.find(seg)
-            if (stickerMatch != null || imgMatch != null || voiceMatch != null) {
+            if (imgMatch != null || voiceMatch != null) {
                 val kind: Bubble.Kind
                 val text: String
                 when {
-                    stickerMatch != null -> { kind = Bubble.Kind.STICKER; text = stickerMatch.groupValues[1].trim() }
                     imgMatch != null -> { kind = Bubble.Kind.IMAGE; text = imgMatch.groupValues[1].trim() }
                     else -> { kind = Bubble.Kind.VOICE; text = voiceMatch!!.groupValues[1].trim() }
                 }

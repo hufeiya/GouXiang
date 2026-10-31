@@ -35,10 +35,13 @@ class ChatOrchestratorTest {
         assertTrue(p.contains("一起看了新房"))
         assertTrue(p.contains("≤20字/条"))
         assertTrue(p.contains("连发 4 条"))
-        assertTrue(p.contains("[sticker:"))
+        // 表情包标记已废除(2026-10-31 口径):prompt 不再示范 sticker 标签,
+        // 非语言内容改教括号文本直接写进消息
+        assertTrue(!p.contains("[sticker:"))
+        assertTrue(p.contains("括号写在消息里"))
         // 连发是硬规则且带 few-shot 示例(实机 F2:只提一句会输出单泡)
         assertTrue(p.contains("必须输出 4 条独立的短消息"))
-        assertTrue(p.contains("[sticker:歪头撒娇]"))
+        assertTrue(p.contains("(歪头撒娇)"))
     }
 
     @Test
@@ -75,7 +78,8 @@ class ChatOrchestratorTest {
         assertEquals(ChatRole.ASSISTANT, h[0].role)
         assertEquals("快了快了", h[1].content)
         assertEquals(ChatRole.USER, h[1].role)
-        assertEquals("[sticker:哼]", h[2].content)
+        // 存量表情行降级为括号文本回放(不再示范 sticker 标记)
+        assertEquals("(哼)", h[2].content)
     }
 
     @Test
@@ -118,6 +122,7 @@ class ChatOrchestratorTest {
     @Test
     fun `full round persists user message and multi-bubbles in order`() = runTest {
         val store = FakeStore(char, memories)
+        // 残留 sticker 标记降级为括号动作文本(歪头撒娇在白名单内→剥离进 actions)
         val llm = fakeLlm(listOf("老公,(靠在你肩头)那房子真的好喜欢!\n[sticker:歪头撒娇]"))
         val orch = ChatOrchestrator(store, llm, bubbleGapMs = 0)
         // ViewModel 契约:用户消息先落库,编排器只管回复侧
@@ -127,19 +132,18 @@ class ChatOrchestratorTest {
 
         // 用户消息已落库(ViewModel 落,非编排器)
         assertEquals("想搬新家了", store.inserted.first { it.role == "user" }.content)
-        // 2 条 assistant 泡:文本(带动作)+ 贴纸
+        // 1 条 assistant 泡:两行文本合成一泡(猫箱口径);「靠在你肩头」在白名单
+        // 内剥离进 actionsJson,降级出的「(歪头撒娇)」不在白名单,按括号口径
+        // 保留为正文,不再出表情泡
         val assistants = store.inserted.filter { it.role == "assistant" }
-        assertEquals(2, assistants.size)
-        // 单个换行不切段(对齐 F1 既定行为,MultiBubbleParserTest 同款):
-        // 第一行整体为一条泡,() 动作剥离进 actionsJson
-        assertEquals("老公,那房子真的好喜欢!", assistants[0].content)
+        assertEquals(1, assistants.size)
+        assertEquals("老公,那房子真的好喜欢!\n(歪头撒娇)", assistants[0].content)
         assertEquals("""["靠在你肩头"]""", assistants[0].actionsJson)
-        assertEquals("sticker", assistants[1].kind)
-        assertEquals("歪头撒娇", assistants[1].content)
+        assertEquals("text", assistants[0].kind)
         // 回调与落库一致(顺序)
         assertEquals(assistants, collected)
-        // 会话摘要刷新为最后一泡,且按泡型降级(附录 C-I3):贴纸泡=「[表情]」
-        assertEquals("[表情]", store.lastSummary)
+        // 会话摘要刷新为最后一泡(文本泡摘要=文本)
+        assertEquals("老公,那房子真的好喜欢!\n(歪头撒娇)", store.lastSummary)
         assertEquals(false, orch.running.value)
     }
 
@@ -301,20 +305,20 @@ class ChatOrchestratorTest {
     }
 
     @Test
-    fun `text and sticker bubbles stay separate across merge`() {
-        // 合并只作用相邻 TEXT 泡;表情/卡片等占位泡保持独立一泡
+    fun `text and placeholder bubbles stay separate across merge`() {
+        // 合并只作用相邻 TEXT 泡;图片/卡片等占位泡保持独立一泡
         val orch = ChatOrchestrator(FakeStore(char, memories), fakeLlm(emptyList()), bubbleGapMs = 0)
         val merged = orch.mergeConsecutiveTextBubbles(
             listOf(
                 com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, "第一句"),
                 com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, "第二句"),
-                com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.STICKER, "歪头撒娇"),
+                com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.IMAGE, "黄昏的天台"),
                 com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, "又冒出一句"),
             ),
         )
         assertEquals(3, merged.size)
         assertEquals("第一句\n第二句", merged[0].text)
-        assertEquals(com.neethu.gouxiang.protocol.Bubble.Kind.STICKER, merged[1].kind)
+        assertEquals(com.neethu.gouxiang.protocol.Bubble.Kind.IMAGE, merged[1].kind)
         assertEquals("又冒出一句", merged[2].text)
     }
 
@@ -352,13 +356,13 @@ class ChatOrchestratorTest {
     fun `persist bubbles delays randomized 600 to 1200ms between bubbles`() = runTest {
         val store = FakeStore(char, memories)
         val orch = ChatOrchestrator(
-            store, fakeLlm(listOf("老公,在呢\n嘿嘿\n[sticker:歪头撒娇]")),
+            store, fakeLlm(listOf("老公,在呢\n嘿嘿\n[img:晚霞照片]")),
             bubbleGapMs = 900, random = Random(42L),
         )
         val savedAt = mutableListOf<Long>()
         orch.respondTo(1L, 1L, "在吗", onAssistantSaved = { savedAt += testScheduler.currentTime })
 
-        // 两行文字合成一泡 + 贴纸泡 = 2 泡 → 1 个泡间间隔(猫箱口径不拆分);
+        // 两行文字合成一泡 + 图片泡 = 2 泡 → 1 个泡间间隔(猫箱口径不拆分);
         // runTest 虚拟时间上,间隔即 delay 抽样值
         assertEquals(2, savedAt.size)
         savedAt.zipWithNext { prev, cur -> cur - prev }.forEach { gap ->
@@ -370,7 +374,7 @@ class ChatOrchestratorTest {
     fun `zero bubble gap skips delay entirely`() = runTest {
         // bubbleGapMs=0 = 完全跳过延迟:虚拟时间零推进(既有测试注入 0 的契约)
         val store = FakeStore(char, memories)
-        val orch = ChatOrchestrator(store, fakeLlm(listOf("老公,在呢\n嘿嘿\n[sticker:歪头撒娇]")), bubbleGapMs = 0)
+        val orch = ChatOrchestrator(store, fakeLlm(listOf("老公,在呢\n嘿嘿\n[img:晚霞照片]")), bubbleGapMs = 0)
         val savedAt = mutableListOf<Long>()
         orch.respondTo(1L, 1L, "在吗", onAssistantSaved = { savedAt += testScheduler.currentTime })
 
@@ -393,12 +397,12 @@ class ChatOrchestratorTest {
         val collected = mutableListOf<MessageEntity>()
         orch.respondTo(1L, 1L, "在忙吗", onAssistantSaved = { collected += it })
 
-        // assistant 行数 = 主泡数(2)+ 分享泡(1),分享泡独立一泡排在主泡之后
+        // 主泡:文本 + 降级括号文本(sticker kind)→ 猫箱口径合并成一泡;
+        // 分享泡独立一泡排在主泡之后 → 共 2 条 assistant 行
         val assistants = store.inserted.filter { it.role == "assistant" }
-        assertEquals(3, assistants.size)
-        assertEquals("老公,", assistants[0].content)
-        assertEquals("sticker", assistants[1].kind)
-        assertEquals("刚煮了奶茶,给你留了一杯", assistants[2].content)
+        assertEquals(2, assistants.size)
+        assertEquals("老公,\n(歪头撒娇)", assistants[0].content)
+        assertEquals("刚煮了奶茶,给你留了一杯", assistants[1].content)
         // 全行同 turnId
         assertEquals(1, assistants.map { it.turnId }.distinct().size)
         // 回调与落库一致(顺序);会话摘要刷到最后一泡(分享泡)

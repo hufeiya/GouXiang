@@ -24,22 +24,32 @@ class CallSpeechTest {
     }
 
     @Test
-    fun `sticker img voice contribute to seen only not speech`() {
+    fun `img voice contribute to seen only not speech`() {
         val (speech, seen) = CallSpeech.composeSpeechText(
             listOf(
                 Bubble(Bubble.Kind.TEXT, "给你看个宝贝"),
-                Bubble(Bubble.Kind.STICKER, "歪头撒娇"),
                 Bubble(Bubble.Kind.IMAGE, "床头的小猫"),
                 Bubble(Bubble.Kind.VOICE, "悄悄话"),
             ),
         )
         assertEquals("给你看个宝贝", speech)
-        assertEquals(listOf("给你看个宝贝", "歪头撒娇", "床头的小猫", "悄悄话"), seen)
+        assertEquals(listOf("给你看个宝贝", "床头的小猫", "悄悄话"), seen)
+    }
+
+    @Test
+    fun `degraded sticker parenthesized text is stripped from speech`() {
+        // 存量表情降级出的括号文本属"给眼睛的"内容,照动作语义剥离不进 TTS
+        // (seen 摘要存的是剥离后的口语正文,同 TEXT 泡口径)
+        val (speech, seen) = CallSpeech.composeSpeechText(
+            listOf(Bubble(Bubble.Kind.TEXT, "(歪头撒娇)给你看个宝贝")),
+        )
+        assertEquals("给你看个宝贝", speech)
+        assertEquals(listOf("给你看个宝贝"), seen)
     }
 
     @Test
     fun `non-text only reply yields empty speech but seen summary`() {
-        val (speech, seen) = CallSpeech.composeSpeechText(listOf(Bubble(Bubble.Kind.STICKER, "捂脸")))
+        val (speech, seen) = CallSpeech.composeSpeechText(listOf(Bubble(Bubble.Kind.IMAGE, "捂脸")))
         assertEquals("", speech)
         assertEquals(listOf("捂脸"), seen)
         // 空念稿走兜底:字幕/TTS 总有内容

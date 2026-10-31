@@ -531,7 +531,10 @@ private fun SingleBubble(bubble: ChatBubble, fromUser: Boolean, onLongPress: (Lo
             .padding(horizontal = 14.dp, vertical = 10.dp),
     ) {
         when {
-            bubble.kind == "sticker" -> StickerContent(bubble.content)
+            // 存量表情行(2026-10-31 前落库)降级为括号灰字动作,与括号口径一致,
+            // 普通聊天页不再出现表情占位卡
+            bubble.kind == "sticker" ->
+                TextContent(bubble.copy(actions = listOf(bubble.content), content = ""), fromUser)
             bubble.kind == "img" -> ImageContent(bubble.content)
             bubble.kind == "voice" -> VoiceContent(bubble.content, fromUser)
             else -> TextContent(bubble, fromUser)
@@ -559,22 +562,6 @@ private fun TextContent(bubble: ChatBubble, fromUser: Boolean) {
         fontSize = 17.sp,
         lineHeight = 26.sp,
     )
-}
-
-/** 表情包占位卡:大 emoji + 描述小字。 */
-@Composable
-private fun StickerContent(desc: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("😄", fontSize = 40.sp)
-        Spacer(Modifier.height(2.dp))
-        Text(
-            desc,
-            color = Color(0xFF9A9A9A),
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
 }
 
 /** 图片占位卡:🖼 + 描述(生图接入为后续功能)。 */

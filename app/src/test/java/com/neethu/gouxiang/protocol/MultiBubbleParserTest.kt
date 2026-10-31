@@ -14,7 +14,7 @@ class MultiBubbleParserTest {
     // ── A. JSON 数组通路 ────────────────────────────────────────────
 
     @Test
-    fun `json array with text sticker and actions`() {
+    fun `json sticker kind degrades to parenthesized text`() {
         val raw = """[
             {"kind":"text","text":"老公,","actions":["靠在你肩头"]},
             {"kind":"sticker","text":"歪头撒娇"},
@@ -24,8 +24,9 @@ class MultiBubbleParserTest {
         assertEquals(3, r.bubbles.size)
         assertEquals(Bubble.Kind.TEXT, r.bubbles[0].kind)
         assertEquals(listOf("靠在你肩头"), r.bubbles[0].actions)
-        assertEquals(Bubble.Kind.STICKER, r.bubbles[1].kind)
-        assertEquals("歪头撒娇", r.bubbles[1].text)
+        // 存量 sticker kind 降级为括号文本(2026-10-31 口径),不再出表情泡
+        assertEquals(Bubble.Kind.TEXT, r.bubbles[1].kind)
+        assertEquals("(歪头撒娇)", r.bubbles[1].text)
         assertNull(r.proactivity)
     }
 
@@ -68,10 +69,11 @@ class MultiBubbleParserTest {
     fun `malformed json falls back to delimiter path`() {
         val raw = "[{not json at all\n老公,(靠在你肩头)吃饭了吗?\n[sticker:哼]"
         val r = MultiBubbleParser.parse(raw)
-        // 兜底通路:第一段是不合法 JSON 残片当文本,第二段带动作,第三段贴纸
-        // (输入词「靠在你肩头」在 actionWhitelist 白名单内,照常剥离为 Action)
-        assertEquals(Bubble.Kind.STICKER, r.bubbles.last().kind)
-        assertEquals("哼", r.bubbles.last().text)
+        // 兜底通路:第一段是不合法 JSON 残片当文本,第二段带动作,第三段
+        // [sticker:哼] 已降级为括号文本(哼)(输入词「靠在你肩头」在
+        // actionWhitelist 白名单内,照常剥离为 Action)
+        assertEquals(Bubble.Kind.TEXT, r.bubbles.last().kind)
+        assertEquals("(哼)", r.bubbles.last().text)
         assertTrue(r.bubbles.any { it.actions.contains("靠在你肩头") })
     }
 
@@ -94,28 +96,27 @@ class MultiBubbleParserTest {
     }
 
     @Test
-    fun `inline sticker img voice markers recognized`() {
+    fun `inline sticker marker degrades img voice keep kinds`() {
         val r = MultiBubbleParser.parse(
             "哈哈\n[sticker:笑到打滚]\n[img:我们今天的合照]\n(语音:老公快回来吃饭!)",
         )
         assertEquals(4, r.bubbles.size)
-        assertEquals(Bubble.Kind.STICKER, r.bubbles[1].kind)
-        assertEquals("笑到打滚", r.bubbles[1].text)
+        // sticker 行内标记降级为括号文本(不裂泡、不出表情占位卡)
+        assertEquals(Bubble.Kind.TEXT, r.bubbles[1].kind)
+        assertEquals("(笑到打滚)", r.bubbles[1].text)
         assertEquals(Bubble.Kind.IMAGE, r.bubbles[2].kind)
         assertEquals(Bubble.Kind.VOICE, r.bubbles[3].kind)
         assertEquals("老公快回来吃饭!", r.bubbles[3].text)
     }
 
     @Test
-    fun `trailing sticker marker on text line splits into its own bubble`() {
-        // 真机实锤(2026-10-31 验收):模型把 [sticker:…] 直接缀在正文行尾不换行,
-        // 此前整行匹配不到,占位标记按字面进了正文;行尾缀占位拆出独立贴纸泡。
+    fun `trailing sticker marker degrades inline into same bubble`() {
+        // 2026-10-31 口径:协议不再有表情泡,[sticker:…] 行尾缀原位降级为括号
+        // 文本留在同一段正文里,流式草稿与上屏观感一致(此前拆出独立贴纸泡)
         val r = MultiBubbleParser.parse("要给你画一面整墙的手绘墙啦[sticker:眼睛亮晶晶]")
-        assertEquals(2, r.bubbles.size)
+        assertEquals(1, r.bubbles.size)
         assertEquals(Bubble.Kind.TEXT, r.bubbles[0].kind)
-        assertEquals("要给你画一面整墙的手绘墙啦", r.bubbles[0].text)
-        assertEquals(Bubble.Kind.STICKER, r.bubbles[1].kind)
-        assertEquals("眼睛亮晶晶", r.bubbles[1].text)
+        assertEquals("要给你画一面整墙的手绘墙啦(眼睛亮晶晶)", r.bubbles[0].text)
     }
 
     @Test
@@ -133,16 +134,17 @@ class MultiBubbleParserTest {
     }
 
     @Test
-    fun `whole line placeholder still parses and fullwidth colon trailing works`() {
-        // 整行占位不受行尾拆分影响;全角冒号行尾缀同样识别
+    fun `whole line sticker marker degrades and fullwidth colon trailing works`() {
+        // 整行 [sticker:…] 降级为一条括号文本泡;全角冒号行尾缀同样原位降级
         val whole = MultiBubbleParser.parse("[sticker:眼睛亮晶晶]")
         assertEquals(1, whole.bubbles.size)
-        assertEquals(Bubble.Kind.STICKER, whole.bubbles[0].kind)
+        assertEquals(Bubble.Kind.TEXT, whole.bubbles[0].kind)
+        assertEquals("(眼睛亮晶晶)", whole.bubbles[0].text)
 
         val fw = MultiBubbleParser.parse("好可爱呀[sticker：揉脸]")
-        assertEquals(2, fw.bubbles.size)
-        assertEquals("好可爱呀", fw.bubbles[0].text)
-        assertEquals("揉脸", fw.bubbles[1].text)
+        assertEquals(1, fw.bubbles.size)
+        assertEquals(Bubble.Kind.TEXT, fw.bubbles[0].kind)
+        assertEquals("好可爱呀(揉脸)", fw.bubbles[0].text)
     }
 
     // ── 语音条格式归一化(F4 验收 medium 修复)────────────────────────
@@ -178,7 +180,8 @@ class MultiBubbleParserTest {
         assertEquals(3, r.bubbles.size)
         assertEquals(Bubble.Kind.TEXT, r.bubbles[0].kind)
         assertEquals(Bubble.Kind.VOICE, r.bubbles[1].kind)
-        assertEquals(Bubble.Kind.STICKER, r.bubbles[2].kind)
+        assertEquals(Bubble.Kind.TEXT, r.bubbles[2].kind)
+        assertEquals("(晚安表情)", r.bubbles[2].text)
     }
 
     @Test

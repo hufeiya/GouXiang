@@ -21,7 +21,8 @@ data class MessageEntity(
     /** "user" / "assistant"。 */
     val role: String,
     /**
-     * 气泡类型:text / sticker / img / voice(默认 text)。
+     * 气泡类型:text / sticker(存量,2026-10-31 起协议不再新产) / img / voice
+     * (默认 text)。
      */
     val kind: String = "text",
     /** 正文;sticker/img = 占位描述;voice = 语音条转写。 */

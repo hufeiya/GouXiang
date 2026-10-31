@@ -6,10 +6,10 @@ import com.neethu.gouxiang.protocol.Bubble
  * 语音通话 F6 的口语文本层:LLM 多泡回复 → TTS 可念的口语词。
  *
  * 屏幕上的气泡与念出来的话不是一回事:
- * - [Bubble.Kind.TEXT] 正文照念;内嵌 () 动作是给"眼睛"的(神态/场景),TTS
- *   念出来就是废话,剥离(实机验收要求"完整念出角色回复文本"指用户能听懂的
- *   口语部分)。
- * - [Bubble.Kind.STICKER]/[IMAGE]/[VOICE] 与手机卡片消息没有可念语义,只给
+ * - [Bubble.Kind.TEXT] 正文照念;内嵌 () 动作是给"眼睛"的(神态/场景,含
+ *   存量表情降级出的括号文本),TTS 念出来就是废话,剥离(实机验收要求
+ *   "完整念出角色回复文本"指用户能听懂的口语部分)。
+ * - [Bubble.Kind.IMAGE]/[VOICE] 与手机卡片消息没有可念语义,只给
  *   [seenBubbles] 摘要(字幕页可见,验证"回复确实来了"),不进 TTS。
  */
 object CallSpeech {

@@ -549,6 +549,10 @@ private fun TextBody(bubble: ChatBubble, fromUser: Boolean) {
     Text(annotated, color = Color(0xFF1A1A1A), fontSize = 17.sp, lineHeight = 24.sp)
 }
 
+/**
+ * 表情体(仅手机聊天页保留的存量渲染,2026-10-31 起输出协议不再产表情泡;
+ * 存量 kind="sticker" 行照常显示,新回复的表情类内容以括号文本随文字同泡)。
+ */
 @Composable
 private fun StickerBody(desc: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {

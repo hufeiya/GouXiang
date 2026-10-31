@@ -122,6 +122,7 @@ class PhoneChatTest {
     @Test
     fun `proactive round persists bubbles under proactive turnId`() = runTest {
         val store = FakeStore(char, memories)
+        // 残留 sticker 标记降级为括号文本,与正文同泡(2026-10-31 口径)
         val llm = fakeLlm(listOf("刚画完一张速写\n(把手机举到你面前)你看你看\n[sticker:得意]"))
         val orch = ChatOrchestrator(store, llm, bubbleGapMs = 0)
         val collected = mutableListOf<MessageEntity>()
@@ -131,13 +132,12 @@ class PhoneChatTest {
             onAssistantSaved = { collected += it },
         )
         assertTrue("主动回合 turnId 应带 proactive- 前缀", store.inserted.first().turnId.startsWith("proactive-"))
-        // 猫箱口径不拆分:两行文字合成一泡 + 贴纸独立一泡 = 2 条
-        // (第二行括号动作不在白名单,按既有口径保留为正文)
-        assertEquals(2, store.inserted.size)
-        assertEquals("刚画完一张速写\n(把手机举到你面前)你看你看", store.inserted[0].content)
-        assertEquals("得意", store.inserted[1].content)
-        // 会话行摘要刷到最后一泡,且按泡型降级(附录 C-I3):贴纸泡摘要=「[表情]」
-        assertEquals("[表情]", store.lastSummary)
+        // 猫箱口径不拆分:三行全部为 TEXT(括号动作不在白名单,保留为正文),
+        // 含降级的 (得意) → 合并成一泡
+        assertEquals(1, store.inserted.size)
+        assertEquals("刚画完一张速写\n(把手机举到你面前)你看你看\n(得意)", store.inserted[0].content)
+        // 会话行摘要刷到最后一泡(文本泡摘要=文本)
+        assertEquals("刚画完一张速写\n(把手机举到你面前)你看你看\n(得意)", store.lastSummary)
         assertEquals(collected, store.inserted)
         assertFalse(orch.running.value)
     }

@@ -12,7 +12,7 @@ import com.neethu.gouxiang.protocol.toProtocolLine
  *
  * system =
  *   [人设] profile(角色设定,「用户」称呼对话者)+ 台词示例 few-shot
- * + [输出协议] 仿真人 IM:1~4 条短消息连发/禁长段落/[sticker:][img:]()动作
+ * + [输出协议] 仿真人 IM:1~4 条短消息连发/禁长段落/[img:]()括号动作
  * + [当前形态] 手机聊天模式 | 台词长度 ≤{maxBubbleChars}字/条 | 连发 {N} 或 {N~M} 条
  *     (参数化:对话风格弹层 F5 经 [BurstParams] 真实改写这两个口径)
  * + [对话模式] 行为段(F5:09 弹层五选一,附加对应行为段,本地版全免费)
@@ -21,8 +21,10 @@ import com.neethu.gouxiang.protocol.toProtocolLine
  *
  * history = 最近 {historyLimit} 条消息,按原输出协议编码回放(泡间 "\n"):
  *   - assistant text 泡:(动作)还原在段前,与 seed 开场白/台词示例语感一致;
- *   - sticker/img/voice 按行内占位约定还原 —— 模型把历史当「自己说过的话」
- *     读,天然续写同样风格。
+ *   - img/voice 按行内占位约定还原 —— 模型把历史当「自己说过的话」
+ *     读,天然续写同样风格;
+ *   - 存量 sticker 行(2026-10-31 起协议已无表情泡)降级为 `(描述)` 括号
+ *     文本,与新口径一致,不再给模型示范表情标记。
  */
 object ChatContextBuilder {
 
@@ -75,12 +77,15 @@ object ChatContextBuilder {
         s.appendLine("[输出协议] 仿真人 IM(像真人一样连发短消息,绝不长段落):")
         s.appendLine(burstRule)
         s.appendLine("2. 每条消息不超过 ${maxBubbleChars}个字;允许把一句话拆成两条连发(真人的打字习惯)。")
-        s.appendLine("3. 可插入:表情包占位 [sticker:描述] / 图片占位 [img:描述] / 语音条 (语音:内容);" +
+        s.appendLine("3. 可插入:图片占位 [img:描述] / 语音条 (语音:内容);" +
             "卡片消息 [卡片:转账 520|备注] / [卡片:位置 地名] / [卡片:音乐 歌名] / [卡片:帖子 标题] / [卡片:代付 金额]。" +
             // 白名单口径(02 文档 §3.3 规则4):解析器只剥白名单命中词,这里枚举
             // 白名单内示例词并要求每次回复至少带一个,否则 mini 档模型实测一次
             // () 都不产出,灰字动作(渲染层斜体小字)整条链路空转。
-            "常用小动作用()放在消息开头描述,如(点头)(微笑)(眨眼)(靠在你肩头),每次回复至少带一个。")
+            // 表情包标记已废除(2026-10-31 用户口径):动作/心理/神态等非语言
+            // 内容直接用括号写在消息文字里,可夹在句中,不再用任何占位标签。
+            "动作、心理、神态等非语言内容直接用括号写在消息里(可夹在文字中间,不要用表情包/贴纸标记)," +
+            "如(点头)(微笑)(靠在你肩头)、真的吗?(眼睛瞬间亮起来)太棒了!每次回复至少带一个。")
         s.appendLine("4. 每次回复可附带 0~1 条与当前话题无关的日常分享,作为单独一行。")
         // F5 实机验收泄漏项修复:mini 档模型会把内心规划当泡发出来
         // (「用户一直在发hello4,可能是想玩重复游戏?…还要分三条短消息。」)。
@@ -90,7 +95,7 @@ object ChatContextBuilder {
         s.appendLine("示例(两轮对话的回复形态,不要复述内容):")
         s.appendLine("在忙吗")
         s.appendLine("(凑过来瞄你的屏幕)让我看看嘛")
-        s.appendLine("[sticker:歪头撒娇]")
+        s.appendLine("(歪头撒娇)先说嘛,我等你看完再告诉我")
         s.appendLine(
             if (lo < hi) "[当前形态] 手机聊天模式 | 台词长度 ≤${maxBubbleChars}字/条 | 连发 $lo~$hi 条"
             else "[当前形态] 手机聊天模式 | 台词长度 ≤${maxBubbleChars}字/条 | 连发 $hi 条",
@@ -107,7 +112,9 @@ object ChatContextBuilder {
     /** 数据库消息行 → 协议上下文行(泡间 "\n" 分隔,统一入口)。 */
     fun encodeBubbleLine(m: MessageEntity): String {
         val body = when (m.kind) {
-            "sticker" -> "[sticker:${m.content}]"
+            // 存量表情行降级为括号文本(2026-10-31 口径:协议已无表情泡,
+            // 历史回放不再示范 sticker 标记,模型读到的是自己的括号动作)
+            "sticker" -> "(${m.content})"
             "img" -> "[img:${m.content}]"
             "voice" -> "(语音:${m.content})"
             // 手机聊天卡片(F4):actionsJson 存 CardPayload,回放为行内标记
