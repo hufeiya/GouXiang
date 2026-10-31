@@ -60,6 +60,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
         /** 用户动态正文字数上限(H3 发布校验;超限拒绝发布,UI 提示)。 */
         const val USER_POST_MAX_CHARS = 500
+
+        /**
+         * 侧移动作场景:确保转写文本被成对小括号包裹(协议口径:动作=括号文本,
+         * 全/半角括号均收,判定同 MultiBubbleParser.actionRegex 口径)。已带成对
+         * 括号的不重复包(防 ASR 自带括号时叠成「((..))」),其余一律补半角括号。
+         */
+        internal fun wrapActionBracket(text: String): String {
+            val t = text.trim()
+            if (t.length >= 2) {
+                val first = t.first()
+                val last = t.last()
+                if ((first == '(' || first == '（') && (last == ')' || last == '）')) return t
+            }
+            return "($t)"
+        }
     }
 
     private val repo = GouXiangRepo.get(app)
@@ -991,7 +1006,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (text.isBlank()) {
                     _voiceInputNotice.value = "没听清,再试一次?"
                 } else if (action == VoiceInputAction.INPUT) {
-                    _voiceInputTranscribed.value = "($text)"
+                    _voiceInputTranscribed.value = wrapActionBracket(text)
                 } else if (_chatUi.value.sending) {
                     // 回合进行中发不进去(sendChatMessage 有 sending 拦截),
                     // 语音转写不丢:填输入框让用户稍后发。
