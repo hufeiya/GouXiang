@@ -41,6 +41,9 @@ import com.neethu.gouxiang.ui.character.splitOpeningLine
 import com.neethu.gouxiang.ui.moments.MomentPermissionField
 import com.neethu.gouxiang.ui.nav.BottomTab
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -180,9 +183,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val _chatSoundEnabled = MutableStateFlow(ChatPrefs.soundEnabled(app))
     val chatSoundEnabled: StateFlow<Boolean> = _chatSoundEnabled.asStateFlow()
-    private val chatSpeechPlayer = com.neethu.gouxiang.ai.speech.ChatSpeechPlayer(viewModelScope) {
+    private val chatSpeechPlayer = com.neethu.gouxiang.ai.speech.ChatSpeechPlayer(app, viewModelScope) {
         com.neethu.gouxiang.ai.config.AiConfigStore.load(getApplication())
     }
+    private val characterVoiceStore by lazy {
+        com.neethu.gouxiang.ai.speech.CharacterVoiceStore(getApplication())
+    }
+
+    private suspend fun speechVoiceForConversation(conversationId: Long): com.neethu.gouxiang.ai.speech.SpeechVoice {
+        val conv = repo.db.conversationDao().byId(conversationId)
+            ?: return com.neethu.gouxiang.ai.speech.SpeechVoice(null)
+        val character = repo.characterById(conv.characterId)
+            ?: return com.neethu.gouxiang.ai.speech.SpeechVoice(null)
+        val assignment = characterVoiceStore.getOrAssign(character)
+        return com.neethu.gouxiang.ai.speech.SpeechVoice(assignment.voiceId, assignment.fallbackVoiceId)
+    }
+
     private var chatSpeechForeground = false
 
     fun setChatSpeechForeground(foreground: Boolean) {
@@ -201,7 +217,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (chatSpeechForeground && !phoneMode && _chatSoundEnabled.value && _chatConversationId.value == conversationId &&
             !_isPhoneChat.value && _voiceCallConversationId.value == null
         ) {
-            (result as? com.neethu.gouxiang.chat.TurnResult.Completed)?.let { chatSpeechPlayer.speak(it.bubbles) }
+            (result as? com.neethu.gouxiang.chat.TurnResult.Completed)?.let {
+                chatSpeechPlayer.speak(it.bubbles, onUnavailable = {
+                    android.widget.Toast.makeText(
+                        getApplication(), "语音播放失败，请检查语音服务和系统文字转语音设置", android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }) { speechVoiceForConversation(conversationId) }
+            }
         }
     }
 
@@ -332,6 +354,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private var messagesJob: Job? = null
     private var draftJob: Job? = null
+    private val chatRoundMutex = Mutex()
 
     /** 在联回合协程(发消息/主动连发/重新生成共用一个槽):回溯时打断它,
      * 防止已回溯回合的后续泡继续落库(新 id 恒大于删除点,成幽灵残尾)。 */
@@ -346,6 +369,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun openChat(conversationId: Long, phoneMode: Boolean = false) {
         if (_chatConversationId.value == conversationId) return
+        cancelVoiceInput()
+        draftJob?.cancel()
+        draftJob = null
+        _streamDraft.value = ""
         chatSpeechPlayer.stop()
         _chatConversationId.value = conversationId
         _isPhoneChat.value = phoneMode
@@ -452,7 +479,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // 退出重进才出现」。
                 val turnResult = runRound(conversationId, character.id, body, phoneMode, userMessageId)
                 speakChatReply(conversationId, phoneMode, turnResult)
-                _chatUi.value = _chatUi.value.afterTurnResult(turnResult, userMessageId)
+                if (_chatUi.value.conversationId == conversationId) {
+                    _chatUi.value = _chatUi.value.afterTurnResult(turnResult, userMessageId)
+                }
                 // 回合收尾兜底刷一次全量(读在全部落库提交之后):Room 流的失效
                 // 通知在并发写(状态生成/记忆收尾同时走库)下存在偶发丢失,
                 // 收尾主动对账,回复泡不再依赖流推送才上屏。
@@ -463,9 +492,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // 编排器内已显式失败,这里防数据库层等硬异常把协程吞掉;
                 // 同样置失败态,发送不再静默无反馈
                 android.util.Log.e("ChatOrchestrator", "round failed", e)
-                _chatUi.value = _chatUi.value.copy(failedTurn = FailedTurn(conversationId, body, userMessageId))
+                if (_chatUi.value.conversationId == conversationId) {
+                    _chatUi.value = _chatUi.value.copy(failedTurn = FailedTurn(conversationId, body, userMessageId))
+                }
             } finally {
-                _chatUi.value = _chatUi.value.copy(sending = false)
+                if (_chatUi.value.conversationId == conversationId) {
+                    _chatUi.value = _chatUi.value.copy(sending = false)
+                }
             }
         }
     }
@@ -532,6 +565,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 aiConfigSource = {
                     com.neethu.gouxiang.ai.config.AiConfigStore.load(getApplication())
                 },
+                voiceSource = { speechVoiceForConversation(convId) },
                 runChatRound = { userText ->
                     val conv = repo.db.conversationDao().byId(convId) ?: return@VoiceCallEngine emptyList()
                     val character = repo.characterById(conv.characterId) ?: return@VoiceCallEngine emptyList()
@@ -714,7 +748,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      * 返回回合结果(02 文档 §3.5):完成携带全部回复泡(语音通话 F6 的 TTS
      * 念稿来源);失败(流错误/首 delta 超时)显式上抛,由调用侧置 failedTurn。
      */
-    private suspend fun runRound(conversationId: Long, characterId: Long, userText: String, phoneMode: Boolean, userMessageId: Long? = null): com.neethu.gouxiang.chat.TurnResult {
+    private suspend fun runRound(conversationId: Long, characterId: Long, userText: String, phoneMode: Boolean, userMessageId: Long? = null): com.neethu.gouxiang.chat.TurnResult = chatRoundMutex.withLock {
         // 对话风格(F5):每回合现读持久化选择(弹层改完立即生效,无需重建编排器),
         // 经 BurstParams 映射为连发参数;默认组合与 F2/F4 既定 prompt 逐字节一致。
         val app = getApplication<Application>()
@@ -727,23 +761,30 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         // 流式草稿:回复逐字累积期间挂到"正在输入"态(跑在独立协程,
         // 编排器回合结束后清空)
         draftJob?.cancel()
-        draftJob = viewModelScope.launch {
-            orchestrator.streamDraft.collect { _streamDraft.value = it }
+        val thisDraftJob = viewModelScope.launch {
+            orchestrator.streamDraft.collect {
+                if (_chatUi.value.conversationId == conversationId) _streamDraft.value = it
+            }
         }
-        val result = orchestrator.respondTo(
-            conversationId = conversationId,
-            characterId = characterId,
-            userText = userText,
-            onAssistantSaved = { /* 上屏走 Room 流;回调留作后续动效钩子 */ },
-            burst = burst,
-            mode = style.mode,
-            phoneStyle = phoneMode,
-            userMessageId = userMessageId,
-        )
-        draftJob?.cancel()
-        draftJob = null
-        _streamDraft.value = ""
-        return result
+        draftJob = thisDraftJob
+        try {
+            orchestrator.respondTo(
+                conversationId = conversationId,
+                characterId = characterId,
+                userText = userText,
+                onAssistantSaved = { /* 上屏走 Room 流 */ },
+                burst = burst,
+                mode = style.mode,
+                phoneStyle = phoneMode,
+                userMessageId = userMessageId,
+            )
+        } finally {
+            thisDraftJob.cancel()
+            if (draftJob === thisDraftJob) {
+                draftJob = null
+                if (_chatUi.value.conversationId == conversationId) _streamDraft.value = ""
+            }
+        }
     }
 
     /**
@@ -785,9 +826,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _chatUi.value = state.copy(sending = true)
         roundJob = viewModelScope.launch {
             try {
+                chatRoundMutex.withLock {
                 draftJob?.cancel()
                 draftJob = viewModelScope.launch {
-                    orchestrator.streamDraft.collect { _streamDraft.value = it }
+                    orchestrator.streamDraft.collect {
+                        if (_chatUi.value.conversationId == conversationId) _streamDraft.value = it
+                    }
                 }
                 orchestrator.respondProactively(
                     conversationId = conversationId,
@@ -800,7 +844,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 draftJob?.cancel()
                 draftJob = null
-                _streamDraft.value = ""
+                if (_chatUi.value.conversationId == conversationId) _streamDraft.value = ""
+                }
                 // 主动连发同样走事务落库,收尾兜底对账(同 sendChatMessage)
                 refreshChatBubbles(conversationId)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -808,7 +853,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 android.util.Log.e("ChatOrchestrator", "proactive round failed", e)
             } finally {
-                _chatUi.value = _chatUi.value.copy(sending = false)
+                if (_chatUi.value.conversationId == conversationId) _chatUi.value = _chatUi.value.copy(sending = false)
             }
         }
     }
@@ -872,9 +917,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // 无用户输入可归因(主动消息回合):重新走主动场景
                 _chatUi.value = state.copy(sending = true)
                 try {
+                    chatRoundMutex.withLock {
                     draftJob?.cancel()
                     draftJob = viewModelScope.launch {
-                        orchestrator.streamDraft.collect { _streamDraft.value = it }
+                        orchestrator.streamDraft.collect {
+                            if (_chatUi.value.conversationId == conversationId) _streamDraft.value = it
+                        }
                     }
                     val result = orchestrator.respondProactively(
                         conversationId = conversationId,
@@ -890,7 +938,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     draftJob?.cancel()
                     draftJob = null
-                    _streamDraft.value = ""
+                    if (_chatUi.value.conversationId == conversationId) _streamDraft.value = ""
+                    }
                     refreshChatBubbles(conversationId)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
@@ -982,15 +1031,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 当前录音区间所属手势态(开录=原位;侧移互切经 [voiceInputModeSwitch] 翻转)。 */
     private var voiceInputCurrentIsAction = false
 
+    // 识别异步完成时仍需确认是发起录音的会话，包括退出后重新进入同一会话。
+    private val voiceInputSession = VoiceInputSession()
+    private var voiceInputToken: VoiceInputSession.Token? = null
+    private var voiceInputRecognitionJob: Job? = null
+    private var voiceRecorderStopping = false
+
     /** 按住说话·按下开录(麦克风被占用/无权限给 notice,不崩)。 */
     fun voiceInputStart() {
         if (_voiceInputActive.value || _voiceInputRecognizing.value) return
+        val conversationId = _chatConversationId.value ?: return
         _voiceInputNotice.value = ""
         _voiceInputLevel.value = 0f
         voiceInputSegments.clear()
         voiceInputCurrentIsAction = false
         try {
             recorder.start()
+            voiceInputToken = voiceInputSession.begin(conversationId)
             _voiceInputActive.value = true
         } catch (e: Exception) {
             android.util.Log.w("VoiceInput", "mic start failed", e)
@@ -1021,25 +1078,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun voiceInputRelease(action: VoiceInputAction = VoiceInputAction.SEND) {
         if (_voiceInputActive.value.not()) return
+        val token = voiceInputToken
+        voiceInputToken = null
         _voiceInputActive.value = false
         _voiceInputLevel.value = 0f
         if (action == VoiceInputAction.CANCEL) {
+            voiceInputSession.invalidate()
+            _voiceInputRecognizing.value = true
             viewModelScope.launch {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    recorder.stop()
-                    recorder.takeWav() // 丢弃
+                try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        recorder.stop()
+                        recorder.takeWav() // 丢弃
+                    }
+                } finally {
+                    _voiceInputRecognizing.value = false
                 }
             }
             voiceInputSegments.clear()
             return
         }
-        viewModelScope.launch {
-            _voiceInputRecognizing.value = true
+        _voiceInputRecognizing.value = true
+        voiceRecorderStopping = true
+        val recognitionJob = viewModelScope.launch {
             try {
-                val lastWav = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    recorder.stop()
-                    recorder.sealSegment() // 最后一段(终态说出的话)
+                val lastWav = try {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable + kotlinx.coroutines.Dispatchers.IO) {
+                        recorder.stop()
+                        recorder.sealSegment() // 最后一段(终态说出的话)
+                    }
+                } finally {
+                    voiceRecorderStopping = false
                 }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
                 if (lastWav != null) voiceInputSegments += (voiceInputCurrentIsAction to lastWav)
                 val pending = voiceInputSegments.toList()
                 voiceInputSegments.clear()
@@ -1055,15 +1126,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                 }.awaitAll()
                 val text = buildSegmentedText(texts)
+                if (token == null || !voiceInputSession.isCurrent(token, _chatConversationId.value)) return@launch
                 if (text.isBlank()) {
                     _voiceInputNotice.value = "没听清,再试一次?"
                 } else if (_chatUi.value.sending) {
-                    // 回合进行中发不进去(sendChatMessage 有 sending 拦截),
-                    // 语音转写不丢:填输入框让用户稍后发。
+                    // 回合进行中发不进去时保留识别文字，避免丢失。
                     _voiceInputTranscribed.value = text
                     _voiceInputNotice.value = "对方正在回复,已转入输入框"
                 } else {
-                    sendChatMessage(text)
+                    sendChatMessage(text, phoneMode = _isPhoneChat.value)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
@@ -1071,9 +1142,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 android.util.Log.w("VoiceInput", "asr failed", e)
                 _voiceInputNotice.value = "识别失败,请重试"
             } finally {
-                _voiceInputRecognizing.value = false
+                if (voiceInputRecognitionJob === kotlinx.coroutines.currentCoroutineContext()[Job]) {
+                    voiceInputRecognitionJob = null
+                    _voiceInputRecognizing.value = false
+                }
             }
         }
+        voiceInputRecognitionJob = recognitionJob
     }
 
     /** 识别:WAV → 文本(Key/模型解析与 VoiceCallEngine 同口径;失败返回空串)。 */
@@ -1089,6 +1164,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     com.neethu.gouxiang.BuildConfig.SILICONFLOW_BASE_URL,
                     key,
                 ).transcribe(wav, "audio/wav", com.neethu.gouxiang.ai.speech.AsrConfig(model = model, language = "zh"))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 android.util.Log.w("VoiceInput", "ASR failed", e)
                 ""
@@ -1106,8 +1183,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 离开聊天页/切后台:若按住态未松手,同步停录丢弃(防录音器悬挂)。 */
     fun cancelVoiceInput() {
+        voiceInputSession.invalidate()
+        voiceInputToken = null
+        voiceInputRecognitionJob?.cancel()
+        if (voiceInputRecognitionJob != null && !voiceRecorderStopping) {
+            voiceInputRecognitionJob = null
+            _voiceInputRecognizing.value = false
+        }
         if (_voiceInputActive.value) {
             _voiceInputActive.value = false
+            _voiceInputLevel.value = 0f
             try { recorder.stop() } catch (_: Exception) { }
         }
     }
@@ -1409,6 +1494,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _editorUi.value = if (existing != null) {
                 CharacterEditorUi(
                     editingCharacterId = existing.id,
+                    originalCharacter = existing,
                     name = existing.name,
                     profile = existing.profile,
                     intro = existing.intro,

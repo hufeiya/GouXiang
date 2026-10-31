@@ -66,7 +66,6 @@ import com.neethu.gouxiang.ai.config.asrExplicitAsrModels
 import com.neethu.gouxiang.ai.config.asrProviderFor
 import com.neethu.gouxiang.ai.config.chatModelOptions
 import com.neethu.gouxiang.ai.config.resolveAsrModel
-import com.neethu.gouxiang.ai.config.resolveVoice
 import com.neethu.gouxiang.ui.theme.GouXiangTheme
 import kotlinx.coroutines.launch
 
@@ -239,14 +238,14 @@ private fun withApiKey(config: AiConfig, provider: AiProvider, key: String): AiC
         AiProvider.CUSTOM -> config.copy(apiKeyCustom = key)
     }
 
-// ── 语音合成(普通聊天与语音通话:火山优先,硅基兜底)────
+// ── 语音合成(普通聊天与语音通话)────
 
 @Composable
 private fun TtsSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
     CollapsibleSection(title = "语音合成(TTS · 聊天朗读和语音通话)") {
         SettingsGroupLabel(
-            "聊天朗读和通话语音:火山豆包语音优先,未配置/失败自动落硅基流动兜底。" +
-                "火山的大模型与语音是两把互不通用的 Key,各填各的。"
+            "聊天朗读和通话优先使用角色音色；角色音色未知时使用下方全局音色，" +
+                "未选择则不播放。火山的大模型与语音是两把互不通用的 Key,各填各的。"
         )
         SettingsTextFieldRow(
             title = AiProvider.VOLCANO.ttsKeyLabel +
@@ -255,20 +254,11 @@ private fun TtsSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
             placeholder = AiProvider.VOLCANO.ttsKeyHint,
             password = true,
         ) { onUpdate(config.copy(apiKeyVolcanoTts = it)) }
-        if (config.provider != AiProvider.SILICONFLOW) {
-            // 大模型不走硅基流动时,兜底链路的 Key 在这里补(与 ASR 共用一份)
-            SettingsTextFieldRow(
-                title = AiProvider.SILICONFLOW.ttsKeyLabel +
-                    if (config.apiKeySiliconflow.isBlank()) "(未填写,用内置默认)" else "",
-                value = config.apiKeySiliconflow,
-                placeholder = AiProvider.SILICONFLOW.ttsKeyHint,
-                password = true,
-            ) { onUpdate(withApiKey(config, AiProvider.SILICONFLOW, it)) }
-        }
         SettingsDropdownRow(
-            title = "语音音色(火山)",
-            options = AiProvider.VOLCANO.voices.map { DropdownOption(it, it) },
-            selectedValue = resolveVoice(AiProvider.VOLCANO, config.ttsVoice),
+            title = "未匹配角色的全局音色(火山)",
+            options = listOf(DropdownOption("", "未选择（不播放）")) +
+                AiProvider.VOLCANO.voices.map { DropdownOption(it, it) },
+            selectedValue = config.ttsVoice,
         ) { value -> onUpdate(config.copy(ttsVoice = value)) }
     }
 }

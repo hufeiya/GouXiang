@@ -58,8 +58,27 @@ class CallSpeechTest {
 
     @Test
     fun `full and half width action parentheses both stripped`() {
-        val speech = CallSpeech.stripActions("(靠在你肩头)今晚月色真美(小声)")
+        val speech = CallSpeech.stripActions("（靠在你肩头）今晚月色真美(小声)")
         assertEquals("今晚月色真美", speech)
+    }
+
+    @Test
+    fun `nested mixed and long actions are never spoken`() {
+        val action = "动作".repeat(40)
+        val speech = CallSpeech.stripActions("你好（$action(轻声（低头）)继续）世界")
+        assertEquals("你好 世界", speech)
+    }
+
+    @Test
+    fun `unfinished and multiline action is omitted to end`() {
+        assertEquals("你好", CallSpeech.stripActions("你好（低头\n看向你"))
+        assertEquals("", CallSpeech.stripActions("（只有旁白"))
+        assertEquals("你好 世界", CallSpeech.stripActions("你好(挥手\n微笑)世界"))
+    }
+
+    @Test
+    fun `empty action and unmatched closing parenthesis preserve dialogue`() {
+        assertEquals("你好 世界)", CallSpeech.stripActions("你好()世界)"))
     }
 
     @Test

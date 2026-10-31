@@ -190,6 +190,7 @@ fun CharacterEditScreen(
                 maxLength = CharacterFormLimits.OPENING_MAX,
                 minLines = 2,
             )
+            ui.originalCharacter?.let { CharacterVoiceSection(it) }
             // ── 形象与风格(喂生图;C3 版本化重生成)──────────────────
             AvatarSection(
                 ui = ui,

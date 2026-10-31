@@ -1,5 +1,7 @@
 package com.neethu.gouxiang.ui.character
 
+import com.neethu.gouxiang.data.CharacterEntity
+
 /**
  * 角色头像生成状态(C 工作包 C3:生成中/失败/重试对用户可见)。
  */
@@ -33,6 +35,8 @@ fun avatarCacheKey(characterId: Long, avatarVersion: Long): String =
 data class CharacterEditorUi(
     /** 被编辑的角色行 id(0 = 新建)。 */
     val editingCharacterId: Long = 0,
+    /** 打开时的完整角色，供角色级设置读取稳定的来源标识。 */
+    val originalCharacter: CharacterEntity? = null,
     val name: String = "",
     val profile: String = "",
     val intro: String = "",

@@ -22,9 +22,18 @@ class ChatSpeechPlayerTest {
 
     private class FakePlayback : ChatSpeechPlayback {
         val played = mutableListOf<TtsResult>()
-        var stops = 0
         override fun play(result: TtsResult) { played += result }
-        override fun stop() { stops++ }
+        override fun stop() = Unit
+    }
+
+    private class FakeSystemSpeech(var succeeds: Boolean = true) : ChatSystemSpeech {
+        val spoken = mutableListOf<String>()
+        override suspend fun play(text: String, isCurrent: () -> Boolean): Boolean {
+            if (!isCurrent()) return false
+            spoken += text
+            return succeeds
+        }
+        override fun stop() = Unit
     }
 
     private fun adapter(block: suspend (String, TtsConfig) -> TtsResult) = object : TtsAdapter {
@@ -32,87 +41,121 @@ class ChatSpeechPlayerTest {
     }
 
     @Test
-    fun `successful synthesis reads text bubbles with primary service only`() = runTest {
+    fun `character voice is passed through and compatible fallback is tried on failure`() = runTest {
         val playback = FakePlayback()
-        var requestedText = ""
-        var fallbackCalls = 0
-        val player = ChatSpeechPlayer(
-            this, { config },
-            { key ->
-                assertEquals("volcano-test", key)
-                adapter { text, _ -> requestedText = text; audio }
-            },
-            { fallbackCalls++; adapter { _, _ -> audio } },
-            playback,
-        )
-
-        player.speak(listOf(text("(微笑)你好"), Bubble(Bubble.Kind.IMAGE, "照片"), text("晚安")))
+        val voices = mutableListOf<String>()
+        val player = ChatSpeechPlayer(this, { config }, {
+            adapter { _, cfg ->
+                voices += cfg.voice
+                if (cfg.voice == "male-primary") throw IllegalStateException("primary failed")
+                audio
+            }
+        }, playback, FakeSystemSpeech())
+        player.speak(listOf(text("你好"))) { SpeechVoice("male-primary", "male-fallback") }
         advanceUntilIdle()
-
-        assertEquals("你好。晚安", requestedText)
-        assertEquals(0, fallbackCalls)
-        assertEquals(1, playback.played.size)
+        assertEquals(listOf("male-primary", "male-fallback"), voices)
         assertSame(audio, playback.played.single())
     }
 
     @Test
-    fun `failed primary synthesis uses fallback audio`() = runTest {
+    fun `successful playback reads text bubbles only`() = runTest {
         val playback = FakePlayback()
-        var fallbackText = ""
-        var fallbackConfig: TtsConfig? = null
-        val player = ChatSpeechPlayer(
-            this, { config },
-            { adapter { _, _ -> throw IllegalStateException("primary failed") } },
-            { key ->
-                assertEquals("silicon-test", key)
-                adapter { text, ttsConfig -> fallbackText = text; fallbackConfig = ttsConfig; audio }
-            },
-            playback,
-        )
-
-        player.speak(listOf(text("你好")))
+        var spoken = ""
+        val player = ChatSpeechPlayer(this, { config }, {
+            adapter { text, _ -> spoken = text; audio }
+        }, playback, FakeSystemSpeech())
+        player.speak(listOf(text("(微笑)你好"), Bubble(Bubble.Kind.IMAGE, "照片"), text("晚安"))) { SpeechVoice("voice") }
         advanceUntilIdle()
-
-        assertEquals("你好", fallbackText)
-        assertEquals(VoiceCallEngine.SILICONFLOW_TTS_MODEL, fallbackConfig?.model)
-        assertEquals("wav", fallbackConfig?.responseFormat)
+        assertEquals("你好。晚安", spoken)
         assertSame(audio, playback.played.single())
     }
 
     @Test
-    fun `stop during synthesis prevents playback and fallback even if backend returns late`() = runTest {
+    fun `unknown character uses system voice instead of a fabricated character voice`() = runTest {
+        val playback = FakePlayback()
+        val system = FakeSystemSpeech()
+        var calls = 0
+        val player = ChatSpeechPlayer(this, { config }, { calls++; adapter { _, _ -> audio } }, playback, system)
+        var notices = 0
+        player.speak(listOf(text("你好")), onUnavailable = { notices++ }) { SpeechVoice(null) }
+        advanceUntilIdle()
+        assertEquals(0, calls)
+        assertEquals(0, notices)
+        assertEquals(listOf("你好"), system.spoken)
+        assertTrue(playback.played.isEmpty())
+    }
+
+    @Test
+    fun `unknown character uses explicitly selected global voice`() = runTest {
+        val playback = FakePlayback()
+        val voices = mutableListOf<String>()
+        val player = ChatSpeechPlayer(this, { config.copy(ttsVoice = "manual-global") }, {
+            adapter { _, cfg -> voices += cfg.voice; audio }
+        }, playback, FakeSystemSpeech())
+        player.speak(listOf(text("你好"))) { SpeechVoice(null) }
+        advanceUntilIdle()
+        assertEquals(listOf("manual-global"), voices)
+        assertSame(audio, playback.played.single())
+    }
+
+    @Test
+    fun `known character failure never uses explicit global or fixed female fallback`() = runTest {
+        val playback = FakePlayback()
+        val system = FakeSystemSpeech()
+        val voices = mutableListOf<String>()
+        val player = ChatSpeechPlayer(this, { config.copy(ttsVoice = "global-female") }, {
+            adapter { _, cfg -> voices += cfg.voice; throw IllegalStateException("failed") }
+        }, playback, system)
+        player.speak(listOf(text("你好"))) { SpeechVoice("male", "male-backup") }
+        advanceUntilIdle()
+        assertEquals(listOf("male", "male-backup"), voices)
+        assertEquals(listOf("你好"), system.spoken)
+        assertTrue(playback.played.isEmpty())
+    }
+
+    @Test
+    fun `stop during synthesis prevents playback even if backend returns late`() = runTest {
         val playback = FakePlayback()
         val gate = CompletableDeferred<Unit>()
-        var fallbackCalls = 0
-        val player = ChatSpeechPlayer(
-            this, { config },
-            { adapter { _, _ -> withContext(NonCancellable) { gate.await() }; audio } },
-            { fallbackCalls++; adapter { _, _ -> audio } },
-            playback,
-        )
-
-        player.speak(listOf(text("你好")))
+        val player = ChatSpeechPlayer(this, { config }, {
+            adapter { _, _ -> withContext(NonCancellable) { gate.await() }; audio }
+        }, playback, FakeSystemSpeech())
+        player.speak(listOf(text("你好"))) { SpeechVoice("voice") }
         runCurrent()
         player.stop()
         gate.complete(Unit)
         advanceUntilIdle()
-
         assertTrue(playback.played.isEmpty())
-        assertEquals(0, fallbackCalls)
-        assertEquals(2, playback.stops) // Starting a new utterance also stops existing playback.
     }
 
     @Test
-    fun `blank speech does not invoke synthesis`() = runTest {
-        val playback = FakePlayback()
-        var calls = 0
-        val factory: (String) -> TtsAdapter = { calls++; adapter { _, _ -> audio } }
-        val player = ChatSpeechPlayer(this, { config }, factory, factory, playback)
-
-        player.speak(listOf(text("(微笑)"), Bubble(Bubble.Kind.IMAGE, "照片")))
+    fun `failure notice is shown only after system voice also fails`() = runTest {
+        val system = FakeSystemSpeech(succeeds = false)
+        val player = ChatSpeechPlayer(this, { config }, { adapter { _, _ -> audio } }, FakePlayback(), system)
+        var notices = 0
+        player.speak(listOf(text("你好")), onUnavailable = { notices++ }) { SpeechVoice(null) }
         advanceUntilIdle()
+        assertEquals(listOf("你好"), system.spoken)
+        assertEquals(1, notices)
+    }
 
-        assertEquals(0, calls)
-        assertTrue(playback.played.isEmpty())
+    @Test
+    fun `stop during system speech prevents a stale failure notice`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val system = object : ChatSystemSpeech {
+            override suspend fun play(text: String, isCurrent: () -> Boolean): Boolean {
+                withContext(NonCancellable) { gate.await() }
+                return false
+            }
+            override fun stop() = Unit
+        }
+        val player = ChatSpeechPlayer(this, { config }, { adapter { _, _ -> audio } }, FakePlayback(), system)
+        var notices = 0
+        player.speak(listOf(text("你好")), onUnavailable = { notices++ }) { SpeechVoice(null) }
+        runCurrent()
+        player.stop()
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(0, notices)
     }
 }

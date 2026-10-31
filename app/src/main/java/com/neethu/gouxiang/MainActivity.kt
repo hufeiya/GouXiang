@@ -22,6 +22,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -35,14 +36,22 @@ import com.neethu.gouxiang.debug.executeAiCommand
 import com.neethu.gouxiang.debug.parseAiDebugCommand
 import com.neethu.gouxiang.ui.GouXiangBottomBar
 import com.neethu.gouxiang.ui.MainViewModel
+import com.neethu.gouxiang.ui.ChatUiState
 import com.neethu.gouxiang.ui.character.CharacterHomeScreen
 import com.neethu.gouxiang.ui.home.HomeFeedScreen
+import com.neethu.gouxiang.ui.home.FeedItem
+import com.neethu.gouxiang.ui.home.stableKey
+import com.neethu.gouxiang.ai.config.AiConfigStore
+import com.neethu.gouxiang.ai.speech.CharacterVoiceStore
+import com.neethu.gouxiang.ai.speech.HomeOpeningSpeechPlayer
+import com.neethu.gouxiang.ai.speech.SpeechVoice
 import com.neethu.gouxiang.ui.hall.CharacterHallScreen
 import com.neethu.gouxiang.data.CatalogCharacter
 import com.neethu.gouxiang.data.CatalogRepository
 import com.neethu.gouxiang.data.GouXiangRepo
 import com.neethu.gouxiang.data.startCatalogChat
 import com.neethu.gouxiang.ui.chat.ChatMainScreen
+import com.neethu.gouxiang.ui.chat.HomeChatPresentation
 import com.neethu.gouxiang.ui.messages.MessagesScreen
 import com.neethu.gouxiang.ui.memory.MemoryScreen
 import com.neethu.gouxiang.ui.nav.BottomTab
@@ -53,6 +62,7 @@ import com.neethu.gouxiang.ui.aiconfig.AiConfigActivity
 import com.neethu.gouxiang.ui.theme.GouXiangTheme
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -66,6 +76,7 @@ import kotlinx.coroutines.withContext
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MainViewModel by viewModels()
+    private var appForeground by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -81,11 +92,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        appForeground = true
         viewModel.setChatSpeechForeground(true)
     }
 
     override fun onStop() {
+        appForeground = false
         viewModel.setChatSpeechForeground(false)
+        viewModel.cancelVoiceInput()
         super.onStop()
     }
 
@@ -157,7 +171,11 @@ class MainActivity : ComponentActivity() {
         var startingCatalogChat by remember { mutableStateOf(false) }
         LaunchedEffect(catalogContext) {
             catalog = withContext(Dispatchers.IO) {
-                runCatching { CatalogRepository.load(catalogContext) }.getOrElse {
+                runCatching {
+                    CatalogRepository.load(catalogContext).also {
+                        com.neethu.gouxiang.ai.speech.CharacterVoiceStore(catalogContext).assignCatalog(it)
+                    }
+                }.getOrElse {
                     Log.e("CharacterCatalog", "Failed to load catalog", it)
                     emptyList()
                 }
@@ -232,6 +250,7 @@ class MainActivity : ComponentActivity() {
         val statusPanelUi by vm.statusPanelUi.collectAsState()
         // 按住说话·语音输入(2026-10-31 口径:原地松手直接发送/上划取消/侧移动作场景输入)
         val voiceInputRecognizing by vm.voiceInputRecognizing.collectAsState()
+        val voiceInputActive by vm.voiceInputActive.collectAsState()
         val voiceInputTranscribed by vm.voiceInputTranscribed.collectAsState()
         val voiceInputLevel by vm.voiceInputLevel.collectAsState()
         val voiceInputNotice by vm.voiceInputNotice.collectAsState()
@@ -343,6 +362,7 @@ class MainActivity : ComponentActivity() {
 
         // 任务历史页(M0 收尾):打开时订阅持久化历史;操作提示走一次性 Toast
         val taskHistoryOpen by vm.taskHistoryOpen.collectAsState()
+        val editorOpen by vm.editorOpen.collectAsState()
         val taskHistoryItems by vm.taskHistoryItems.collectAsState()
         val taskHistoryLoading by vm.taskHistoryLoading.collectAsState()
         val taskHistoryNotice by vm.taskHistoryNotice.collectAsState()
@@ -369,6 +389,150 @@ class MainActivity : ComponentActivity() {
             vm.toggleGenerationSetting(key, enabled)
         }
 
+        // 首页播放器跟随当前卡片和实际可见状态，合成尚未返回时离开也会取消。
+        var activeFeedItem by remember { mutableStateOf<FeedItem?>(null) }
+        var openingFinished by remember { mutableStateOf(false) }
+        var embeddedChatKey by remember { mutableStateOf<String?>(null) }
+        var embeddedConversationId by remember { mutableStateOf<Long?>(null) }
+        var dismissedChatKey by remember { mutableStateOf<String?>(null) }
+        var openingFailureShown by remember { mutableStateOf(false) }
+        var systemOpeningNoticeShown by remember { mutableStateOf(false) }
+        val openingPlayer = remember(catalogContext) {
+            HomeOpeningSpeechPlayer(catalogContext) { AiConfigStore.load(catalogContext) }
+        }
+        val homeVisible = tab == BottomTab.HOME && !hallOpen &&
+            (chatId == null || (embeddedChatKey != null && chatId == embeddedConversationId)) && !phoneGuideOpen && characterHomeId == null &&
+            innerVoiceId == null && momentsId == null && sidestoryId == null && handbookId == null &&
+            novelId == null && photoId == null && memoryId == null && historyId == null &&
+            statusPanelId == null && voiceCallId == null && !generationSettingsOpen &&
+            !taskHistoryOpen && !editorOpen
+        val currentHomeVisible by rememberUpdatedState(homeVisible)
+        val activeFeedKey = activeFeedItem?.stableKey()
+        val chatEmbeddedInHome = tab == BottomTab.HOME && embeddedChatKey != null &&
+            embeddedConversationId != null && chatId == embeddedConversationId
+        LaunchedEffect(chatId, embeddedConversationId) {
+            if (embeddedConversationId != null && chatId != embeddedConversationId) {
+                embeddedChatKey = null
+                embeddedConversationId = null
+            }
+        }
+        suspend fun openHomeChat(item: FeedItem) {
+            val key = item.stableKey()
+            try {
+                val conversationId = when (item) {
+                    is FeedItem.Local -> item.card.conversationId.takeIf { it > 0 } ?: return
+                    is FeedItem.Catalog -> GouXiangRepo.get(catalogContext)
+                        .startCatalogChat(catalogContext, item.character).conversationId
+                }
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                if (activeFeedItem?.stableKey() != key || !currentHomeVisible || !appForeground) return
+                embeddedChatKey = key
+                embeddedConversationId = conversationId
+                dismissedChatKey = null
+                vm.openChat(conversationId)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("HomeChat", "Unable to open conversation", e)
+                android.widget.Toast.makeText(catalogContext, "无法开始聊天，请点击对白重试", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+        LaunchedEffect(activeFeedKey, homeVisible, appForeground, chatSoundEnabled) {
+            val item = activeFeedItem
+            if (item == null || !homeVisible || !appForeground) {
+                openingPlayer.stop()
+                return@LaunchedEffect
+            }
+            if (embeddedChatKey == activeFeedKey || dismissedChatKey == activeFeedKey) {
+                openingPlayer.stop()
+                openingFinished = true
+                return@LaunchedEffect
+            }
+            if (!chatSoundEnabled) {
+                openingFinished = true
+                openHomeChat(item)
+                return@LaunchedEffect
+            }
+            openingFinished = false
+            try {
+                val opening = when (item) {
+                    is FeedItem.Local -> item.card.openingLine
+                    is FeedItem.Catalog -> item.character.openingLine
+                }
+                val assignment = withContext(Dispatchers.IO) {
+                    val store = CharacterVoiceStore(catalogContext)
+                    when (item) {
+                        is FeedItem.Local -> store.getOrAssign(item.card.character)
+                        is FeedItem.Catalog -> store.getOrAssign(item.character)
+                    }
+                }
+                val played = openingPlayer.play(opening, SpeechVoice(assignment.voiceId, assignment.fallbackVoiceId)) {
+                    if (!systemOpeningNoticeShown) {
+                        systemOpeningNoticeShown = true
+                        android.widget.Toast.makeText(catalogContext, "当前使用系统语音朗读", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+                if (!played && opening.isNotBlank() && !openingFailureShown) {
+                    openingFailureShown = true
+                    android.widget.Toast.makeText(catalogContext, "开场白无法朗读，请检查语音服务和系统文字转语音设置", android.widget.Toast.LENGTH_LONG).show()
+                }
+                openingFinished = true
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("HomeOpeningSpeech", "Unable to play opening", e)
+                if (!openingFailureShown) {
+                    openingFailureShown = true
+                    android.widget.Toast.makeText(catalogContext, "开场白无法朗读，请检查语音服务和系统文字转语音设置", android.widget.Toast.LENGTH_LONG).show()
+                }
+                openingFinished = true
+            } finally {
+                openingPlayer.stop()
+            }
+            openHomeChat(item)
+        }
+
+        val chatContent: @Composable (Boolean, HomeChatPresentation?, String?, (() -> Unit)?) -> Unit = { embedded, presentation, itemKey, onNextCharacter ->
+            LaunchedEffect(chatId) { chatId?.let { vm.ensureChatBackground(it) } }
+            ChatMainScreen(
+                state = if (!embedded || (embeddedChatKey == itemKey && embeddedConversationId != null && chatUi.conversationId == embeddedConversationId)) {
+                    chatUi
+                } else ChatUiState(loading = true),
+                embeddedInHome = embedded,
+                homePresentation = presentation,
+                onNextCharacter = onNextCharacter,
+                nextCharacterEnabled = !voiceInputActive && !voiceInputRecognizing,
+                avatarFile = chatUi.character?.let { avatarFiles[it.id] },
+                backgroundFile = chatBackgrounds[chatId],
+                onBack = {
+                    if (embedded) {
+                        dismissedChatKey = embeddedChatKey
+                        embeddedChatKey = null
+                        embeddedConversationId = null
+                    }
+                    vm.closeChat()
+                },
+                onSend = { vm.sendChatMessage(it) },
+                streamDraft = streamDraft,
+                onOpenMemory = { chatId?.let { vm.openMemory(it) } },
+                onOpenCharacterHome = { chatId?.let { vm.openCharacterHome(it) } },
+                onOpenVoiceCall = { chatId?.let { vm.openVoiceCall(it) } },
+                onOpenHistory = { chatId?.let { vm.openHistory(it) } },
+                onRetryFailedTurn = { vm.retryFailedTurn() },
+                onRewind = { vm.rewindToMessage(it) },
+                onRegenerate = { vm.regenerateTurn(it) },
+                onHoldStart = holdStartWithPermission,
+                onHoldRelease = { vm.voiceInputRelease(it) },
+                onHoldModeSwitch = { vm.voiceInputModeSwitch(it) },
+                voiceLevel = voiceInputLevel,
+                recognizing = voiceInputRecognizing,
+                voiceTranscribed = voiceInputTranscribed,
+                onVoiceTranscribedConsumed = { vm.consumeVoiceInputTranscribed() },
+                soundEnabled = chatSoundEnabled,
+                onToggleSound = { vm.toggleChatSound() },
+            )
+        }
+
         Scaffold(
             modifier = Modifier.fillMaxSize(),
             // 沉浸式(F1 验收唯一偏差修复):不消费状态栏 inset,首页剧卡全屏图
@@ -379,7 +543,14 @@ class MainActivity : ComponentActivity() {
             bottomBar = {
                 GouXiangBottomBar(
                     selected = tab,
-                    onSelect = { vm.selectedTab.value = it },
+                    onSelect = {
+                        if (it != BottomTab.HOME && embeddedChatKey != null) {
+                            embeddedChatKey = null
+                            embeddedConversationId = null
+                            vm.closeChat()
+                        }
+                        vm.selectedTab.value = it
+                    },
                     messageBadge = conversations.count { it.conversation.unread > 0 },
                 )
             },
@@ -396,14 +567,43 @@ class MainActivity : ComponentActivity() {
                         avatarFiles = avatarFiles,
                         introBarText = "本地版 · 角色形象由 AI 生成",
                         catalog = catalog,
-                        onOpenHall = { hallInitialCharacter = null; hallOpen = true },
+                        onOpenHall = {
+                            if (embeddedChatKey != null) {
+                                embeddedChatKey = null
+                                embeddedConversationId = null
+                                vm.closeChat()
+                            }
+                            hallInitialCharacter = null
+                            hallOpen = true
+                        },
                         onOpenCatalogCharacter = { hallInitialCharacter = it; hallOpen = true },
-                        onStartCatalogChat = startCatalogChat,
-                        onOpenChat = { vm.openChat(it) },
+                        onStartCatalogChat = { character ->
+                            catalogScope.launch { openHomeChat(FeedItem.Catalog(character)) }
+                        },
+                        onOpenChat = { activeFeedItem?.let { item -> catalogScope.launch { openHomeChat(item) } } },
                         // F3(P1):「名字 >」/「历史」与 im 聊天页同款接线;
                         // feed 卡片对应 im 会话,历史页同理
                         onOpenCharacterHome = { vm.openCharacterHome(it) },
                         onOpenHistory = { vm.openHistory(it) },
+                        onActiveItemChanged = { item ->
+                            if (activeFeedItem?.stableKey() != item?.stableKey()) {
+                                if (embeddedChatKey != null) {
+                                    embeddedChatKey = null
+                                    embeddedConversationId = null
+                                    vm.closeChat()
+                                }
+                                dismissedChatKey = null
+                            }
+                            activeFeedItem = item
+                        },
+                        openingFinished = openingFinished,
+                        soundEnabled = chatSoundEnabled,
+                        onToggleSound = { vm.toggleChatSound() },
+                        embeddedKey = embeddedChatKey,
+                        canSwipe = !voiceInputActive && !voiceInputRecognizing,
+                        chatContent = { item, presentation, onNext ->
+                            chatContent(true, presentation.copy(openingFinished = presentation.openingFinished && item.stableKey() == activeFeedKey), item.stableKey(), onNext)
+                        },
                     )
                     BottomTab.DISCOVER -> com.neethu.gouxiang.ui.discover.DiscoverScreen(
                         characters = allCharacters,
@@ -454,48 +654,10 @@ class MainActivity : ComponentActivity() {
             )
         }
 
-        // 聊天主页 03:全屏覆盖层(自管边缘到边缘,盖住底栏;返回回消息列表)
-        if (chatId != null && !isPhoneChat) {
-            // 合照背景冷启动懒加载(G3/G4):进聊天页把已设背景读进同步态
-            LaunchedEffect(chatId) { vm.ensureChatBackground(chatId) }
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF101014)),
-            ) {
-                ChatMainScreen(
-                    state = chatUi,
-                    avatarFile = chatUi.character?.let { avatarFiles[it.id] },
-                    // 合照设为聊天背景(G3/G4):设置了合照背景的会话优先展示合照
-                    backgroundFile = chatBackgrounds[chatId],
-                    onBack = { vm.closeChat() },
-                    onSend = { vm.sendChatMessage(it) },
-                    streamDraft = streamDraft,
-                    onOpenMemory = {
-                        chatId?.let { vm.openMemory(it) }
-                    },
-                    onOpenCharacterHome = {
-                        chatId?.let { vm.openCharacterHome(it) }
-                    },
-                    onOpenVoiceCall = {
-                        chatId?.let { vm.openVoiceCall(it) }
-                    },
-                    onOpenHistory = {
-                        chatId?.let { vm.openHistory(it) }
-                    },
-                    onRetryFailedTurn = { vm.retryFailedTurn() },
-                    onRewind = { vm.rewindToMessage(it) },
-                    onRegenerate = { vm.regenerateTurn(it) },
-                    onHoldStart = holdStartWithPermission,
-                    onHoldRelease = { vm.voiceInputRelease(it) },
-                    onHoldModeSwitch = { vm.voiceInputModeSwitch(it) },
-                    voiceLevel = voiceInputLevel,
-                    recognizing = voiceInputRecognizing,
-                    voiceTranscribed = voiceInputTranscribed,
-                    onVoiceTranscribedConsumed = { vm.consumeVoiceInputTranscribed() },
-                    soundEnabled = chatSoundEnabled,
-                    onToggleSound = { vm.toggleChatSound() },
-                )
+        // 首页和独立聊天入口使用同一个聊天界面与输入逻辑。
+        if (chatId != null && !isPhoneChat && !chatEmbeddedInHome) {
+            Box(Modifier.fillMaxSize().background(Color(0xFF101014))) {
+                chatContent(false, null, null, null)
             }
         }
 
@@ -821,7 +983,6 @@ class MainActivity : ComponentActivity() {
         // 角色编辑页(C 工作包 C1~C3):创作页「新建/编辑」进入的全屏覆盖层;
         // 渲染序置底最后(最后声明者在上,盖住聊天页等所有 overlay —— 保存成功
         // 即关页并直接进入该角色 IM 续聊)。操作提示走一次性 Toast。
-        val editorOpen by vm.editorOpen.collectAsState()
         val editorUi by vm.editorUi.collectAsState()
         val editorGallery by vm.editorGallery.collectAsState()
         val editorNotice by vm.editorNotice.collectAsState()

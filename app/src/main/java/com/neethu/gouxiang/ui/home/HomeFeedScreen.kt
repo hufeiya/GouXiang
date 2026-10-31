@@ -4,6 +4,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,36 +14,51 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.VolumeOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.launch
 import com.neethu.gouxiang.data.HomeFeedCard
 import com.neethu.gouxiang.data.CatalogCharacter
+import com.neethu.gouxiang.ui.chat.InputBar
+import com.neethu.gouxiang.ui.chat.NameAndActionsRow
+import com.neethu.gouxiang.ui.chat.HomeChatPresentation
+import androidx.compose.foundation.shape.CircleShape
 
 /**
  * 首页·推荐流(基准 01-home-feed.png):
@@ -69,36 +86,120 @@ fun HomeFeedScreen(
     onOpenCharacterHome: (Long) -> Unit = {},
     /** F3:点互动列「历史」进聊天历史页(回调带对应会话 id;无会话=-1 不响应)。 */
     onOpenHistory: (Long) -> Unit = {},
+    onActiveItemChanged: (FeedItem?) -> Unit = {},
+    openingFinished: Boolean = false,
+    soundEnabled: Boolean = true,
+    onToggleSound: () -> Unit = {},
+    embeddedKey: String? = null,
+    canSwipe: Boolean = true,
+    chatContent: @Composable (FeedItem, HomeChatPresentation, (() -> Unit)?) -> Unit = { _, _, _ -> },
 ) {
+    val context = LocalContext.current
+    val activeChanged by rememberUpdatedState(onActiveItemChanged)
+    DisposableEffect(Unit) {
+        onDispose {
+            activeChanged(null)
+        }
+    }
     Box(modifier = Modifier.fillMaxSize()) {
         // 同一轮浏览保持顺序，已有会话的人物保留历史入口并去除目录重复项。
         val shuffleSeed = remember { kotlin.random.Random.nextLong() }
+        // 固定同一轮浏览中首次看到的立绘；目录人物转存时 cover 不替换 portrait。
+        val imageModels = remember { mutableMapOf<String, Any>() }
         val items = remember(cards, catalog, shuffleSeed) {
             val localSources = cards.map { it.character.source }.toSet()
-            (cards.map { FeedItem.Local(it) } +
+            (cards.map { FeedItem.Local(it.copy(openingLine = it.character.openingLine)) } +
                 catalog.filterNot { "maoxiang:${it.sourceId}" in localSources }.map { FeedItem.Catalog(it) })
                 .sortedBy { item ->
-                    val key = when (item) {
-                        is FeedItem.Local -> "local:${item.card.character.id}"
-                        is FeedItem.Catalog -> "catalog:${item.character.sourceId}"
-                    }
+                    val key = item.stableKey()
                     kotlin.random.Random(shuffleSeed xor key.hashCode().toLong()).nextLong()
                 }
         }
         if (items.isEmpty()) {
+            LaunchedEffect(Unit) { activeChanged(null) }
             Box(Modifier.fillMaxSize().background(Color(0xFF151515)))
+            TopTabsRow(
+                onOpenHall = onOpenHall, soundEnabled = soundEnabled, onToggleSound = onToggleSound,
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+            )
         } else {
             val pagerState = rememberPagerState(pageCount = { items.size })
-            VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
-                when (val item = items[page]) {
+            val pagerScope = rememberCoroutineScope()
+            val swipeAllowed by rememberUpdatedState(canSwipe)
+            val currentItems by rememberUpdatedState(items)
+            val nextCharacter: (() -> Unit)? = if (items.size > 1) {
+                {
+                    if (swipeAllowed) pagerScope.launch {
+                        val count = currentItems.size
+                        if (swipeAllowed && count > 1) {
+                            pagerState.animateScrollToPage((pagerState.settledPage + 1) % count)
+                        }
+                    }
+                }
+            } else null
+            LaunchedEffect(pagerState) {
+                var lastKey: String? = null
+                snapshotFlow { currentItems.getOrNull(pagerState.settledPage) }.collect { item ->
+                    val key = item?.stableKey()
+                    if (key != lastKey) {
+                        activeChanged(item)
+                        lastKey = key
+                    }
+                }
+            }
+            VerticalPager(
+                state = pagerState,
+                key = { items[it].stableKey() },
+                userScrollEnabled = canSwipe,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                val item = items[page]
+                val candidateModel: Any? = when (item) {
+                    is FeedItem.Catalog -> "file:///android_asset/${item.character.portraitAsset}"
+                    is FeedItem.Local -> catalog.firstOrNull { "maoxiang:${it.sourceId}" == item.card.character.source }
+                        ?.let { "file:///android_asset/${it.portraitAsset}" }
+                        ?: avatarFiles[item.card.character.id]?.let { java.io.File(it) }
+                        ?: item.card.character.avatarFile.takeIf { it.isNotBlank() }?.let {
+                            java.io.File(java.io.File(context.filesDir, "avatars"), it).takeIf { file -> file.isFile }
+                        }
+                }
+                val imageModel = imageModels[item.stableKey()] ?: candidateModel?.also {
+                    imageModels[item.stableKey()] = it
+                }
+                if (page == pagerState.settledPage) {
+                    Box(Modifier.fillMaxSize()) {
+                        val presentation = when (item) {
+                            is FeedItem.Local -> HomeChatPresentation(
+                                name = item.card.character.name,
+                                source = catalog.firstOrNull { "maoxiang:${it.sourceId}" == item.card.character.source }
+                                    ?.creatorName ?: item.card.character.source,
+                                intro = item.card.character.intro.ifBlank { introBarText },
+                                openingLine = item.card.openingLine,
+                                imageModel = imageModel,
+                                openingFinished = openingFinished,
+                            )
+                            is FeedItem.Catalog -> HomeChatPresentation(
+                                name = item.character.name,
+                                source = item.character.creatorName,
+                                intro = item.character.intro.ifBlank { introBarText },
+                                openingLine = item.character.openingLine,
+                                imageModel = imageModel,
+                                openingFinished = openingFinished,
+                            )
+                        }
+                        chatContent(item, presentation, nextCharacter)
+
+                    }
+                } else when (item) {
                     is FeedItem.Local -> FeedCard(
                         name = item.card.character.name,
                         intro = item.card.character.intro,
                         source = catalog.firstOrNull { "maoxiang:${it.sourceId}" == item.card.character.source }
                             ?.creatorName ?: item.card.character.source,
                         openingLine = item.card.openingLine,
-                        imageModel = avatarFiles[item.card.character.id]?.let { java.io.File(it) },
+                        imageModel = imageModel,
                         introBarText = item.card.character.intro.ifBlank { introBarText },
+                        openingFinished = openingFinished && pagerState.settledPage == page,
                         onOpen = { if (item.card.conversationId > 0) onOpenCharacterHome(item.card.conversationId) },
                         onChat = if (item.card.conversationId > 0) ({ onOpenChat(item.card.conversationId) }) else null,
                         onHistory = if (item.card.conversationId > 0) ({ onOpenHistory(item.card.conversationId) }) else null,
@@ -108,27 +209,37 @@ fun HomeFeedScreen(
                         intro = item.character.intro,
                         source = item.character.creatorName,
                         openingLine = item.character.openingLine,
-                        imageModel = "file:///android_asset/${item.character.portraitAsset}",
+                        imageModel = imageModel,
                         introBarText = item.character.intro.ifBlank { introBarText },
+                        openingFinished = openingFinished && pagerState.settledPage == page,
                         onOpen = { onOpenCatalogCharacter(item.character) },
                         onChat = { onStartCatalogChat(item.character) },
                     )
                 }
             }
+            TopTabsRow(
+                onOpenHall = onOpenHall,
+                soundEnabled = soundEnabled,
+                onToggleSound = onToggleSound,
+                onNextCharacter = nextCharacter,
+                nextCharacterEnabled = canSwipe,
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+            )
         }
-        // 顶部 tab 行(沉浸式,叠在图上)
-        TopTabsRow(
-            onOpenHall = onOpenHall,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding(),
-        )
+
     }
 }
 
 /** 顶部:黄 V 盾 + 「AI 剧 | 推荐」双 tab + 搜索 + 喇叭。 */
 @Composable
-private fun TopTabsRow(onOpenHall: () -> Unit, modifier: Modifier = Modifier) {
+private fun TopTabsRow(
+    onOpenHall: () -> Unit,
+    soundEnabled: Boolean,
+    onToggleSound: () -> Unit,
+    onNextCharacter: (() -> Unit)? = null,
+    nextCharacterEnabled: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -174,22 +285,42 @@ private fun TopTabsRow(onOpenHall: () -> Unit, modifier: Modifier = Modifier) {
                 )
             }
         }
+        if (onNextCharacter != null) {
+            Box(
+                modifier = Modifier
+                    .height(40.dp)
+                    .semantics { contentDescription = "换人物" }
+                    .clickable(enabled = nextCharacterEnabled, onClick = onNextCharacter)
+                    .padding(horizontal = 5.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("换人", color = Color.White.copy(alpha = if (nextCharacterEnabled) 1f else 0.45f), fontSize = 13.sp)
+            }
+        }
         IconButton(onClick = onOpenHall, modifier = Modifier.size(40.dp)) {
             Icon(Icons.Outlined.Search, contentDescription = "人物大厅", tint = Color.White)
         }
-        Spacer(Modifier.width(14.dp))
-        Icon(
-            Icons.Outlined.VolumeUp,
-            contentDescription = "音量",
-            tint = Color.White,
-            modifier = Modifier.size(24.dp),
-        )
+        Spacer(Modifier.width(4.dp))
+        IconButton(onClick = onToggleSound, modifier = Modifier.size(40.dp)) {
+            Icon(
+                if (soundEnabled) Icons.Outlined.VolumeUp else Icons.Outlined.VolumeOff,
+                contentDescription = if (soundEnabled) "关闭声音" else "开启声音",
+                tint = Color.White,
+            )
+        }
     }
 }
 
-private sealed interface FeedItem {
+sealed interface FeedItem {
     data class Local(val card: HomeFeedCard) : FeedItem
     data class Catalog(val character: CatalogCharacter) : FeedItem
+}
+
+/** 目录人物转为本地人物后仍使用同一个键，避免卡片重排。 */
+fun FeedItem.stableKey(): String = when (this) {
+    is FeedItem.Local -> card.character.source.takeIf { it.startsWith("maoxiang:") }
+        ?: "local:${card.character.id}"
+    is FeedItem.Catalog -> "maoxiang:${character.sourceId}"
 }
 
 /** 单张剧卡:全屏头像 + 底部信息叠层。 */
@@ -201,6 +332,7 @@ private fun FeedCard(
     openingLine: String,
     imageModel: Any?,
     introBarText: String,
+    openingFinished: Boolean,
     onOpen: () -> Unit,
     onChat: (() -> Unit)? = null,
     onHistory: (() -> Unit)? = null,
@@ -243,105 +375,59 @@ private fun FeedCard(
                 )
             }
         }
-        // 底部叠层
+        // 与嵌入聊天页共用相同的底部区域和输入控件。开场白朗读期间只展示控件，
+        // 会话就绪后才接收输入；这样切换时人物和操作区不会整体跳动。
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(0.55f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.45f)),
+            ),
+        )
         Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .background(
-                    Brush.verticalGradient(
-                        0f to Color.Transparent,
-                        1f to Color.Black.copy(alpha = 0.55f),
-                    ),
-                )
-                .padding(horizontal = 16.dp),
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
         ) {
-            Spacer(Modifier.height(220.dp))
-            // 介绍条(黑胶囊)
+            if (openingFinished) {
+                Text(
+                    "介绍: $introBarText",
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                        .fillMaxWidth()
+                        .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(10.dp))
+            }
             Box(
-                Modifier
-                    .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(22.dp))
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                Modifier.padding(horizontal = 12.dp)
+                    .then(if (openingFinished) Modifier.background(Color.White, RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp)) else Modifier)
+                    .then(if (onChat != null && openingFinished) Modifier.clickable { onChat() } else Modifier)
+                    .heightIn(max = 156.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("📄 ", fontSize = 13.sp)
-                    Text(
-                        "介绍: $introBarText",
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                Text(
+                    openingLine,
+                    color = if (openingFinished) Color(0xFF1A1A1A) else Color.White,
+                    fontSize = 17.sp,
+                    lineHeight = 26.sp,
+                )
             }
-            Spacer(Modifier.height(12.dp))
-            // 开场白气泡(白) + ⚡ 圆钮
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.height(10.dp))
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+                horizontalArrangement = Arrangement.End,
+            ) {
                 Box(
-                    Modifier
-                        .background(Color.White, RoundedCornerShape(10.dp))
-                        .then(if (onChat != null) Modifier.clickable { onChat() } else Modifier)
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                        .weight(1f, fill = false),
-                ) {
-                    Text(
-                        openingLine,
-                        color = Color(0xFF1A1A1A),
-                        fontSize = 16.sp,
-                        lineHeight = 22.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.width(10.dp))
-                Box(
-                    Modifier
-                        .size(34.dp)
-                        .background(Color(0xFF3A3A3A).copy(alpha = 0.85f), CircleShape),
+                    Modifier.size(34.dp).background(Color(0xFF3A3A3A).copy(alpha = 0.85f), CircleShape),
                     contentAlignment = Alignment.Center,
-                ) {
-                    Text("⚡", fontSize = 15.sp)
-                }
+                ) { Text("⚡", fontSize = 15.sp) }
             }
-            Spacer(Modifier.height(14.dp))
-            // 名字行 + 互动列。F3:「名字 >」接 openCharacterHome(与 im 聊天页
-            // 同款入口);点赞/分享/评论为有意裁剪的静态装饰(报告 §5.3),
-            // 硬编码数字列移除 —— 「历史」保留为活入口(聊天页同款接线)。
-            Row(verticalAlignment = Alignment.Bottom) {
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) {
-                            onOpen()
-                        },
-                ) {
-                    Text(
-                        name + " >",
-                        color = Color.White,
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "@$source、" + intro.take(18) + "…",
-                        color = Color.White.copy(alpha = 0.8f),
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (onHistory != null) {
-                    ActionItem(
-                        Icons.Filled.History,
-                        "历史",
-                        modifier = Modifier.clickable { onHistory() },
-                    )
-                }
-            }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(18.dp))
+            NameAndActionsRow(name = name, source = source, onNameClick = onOpen, onOpenHistory = onHistory, showDecorativeActions = false)
+            Spacer(Modifier.height(12.dp))
+            InputBar(sending = false, onSend = {}, embeddedInHome = true, enabled = false)
         }
     }
 }

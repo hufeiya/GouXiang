@@ -11,6 +11,13 @@
          跟随设置页「完成通知」开关,拒绝则降级为仅 App 内可见,任务照跑) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Android 11+ 上发现用户选择的系统语音合成引擎。 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".GouXiangApp"
         android:allowBackup="true"

@@ -43,9 +43,22 @@ object CallSpeech {
         return spoken.toString().trim() to seen
     }
 
-    /** 剥离 ()/( ) 内嵌动作描述(全角/半角括号均收),保留正文。 */
-    fun stripActions(text: String): String =
-        Regex("[（(][^（）()]{1,60}[)）]").replace(text, " ").trim()
+    /** 剥离括号内的动作描述，支持全角、半角和嵌套；未闭合的动作隐藏至末尾。 */
+    fun stripActions(text: String): String {
+        val spoken = StringBuilder(text.length)
+        var depth = 0
+        for (character in text) {
+            when (character) {
+                '(', '（' -> {
+                    if (depth == 0) spoken.append(' ')
+                    depth++
+                }
+                ')', '）' -> if (depth > 0) depth-- else spoken.append(character)
+                else -> if (depth == 0) spoken.append(character)
+            }
+        }
+        return spoken.toString().trim()
+    }
 
     /** 字幕行的展示文本(空回复给兜底,保证 TTS/字幕总有内容)。 */
     fun speechOrFallback(speech: String): String = speech.ifBlank { FALLBACK_SPEECH }

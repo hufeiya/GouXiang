@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
@@ -94,6 +95,16 @@ import com.neethu.gouxiang.ui.MainViewModel
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
+/** 首页从朗读到会话加载完成期间保持不变的卡片信息。 */
+data class HomeChatPresentation(
+    val name: String,
+    val source: String,
+    val intro: String,
+    val openingLine: String,
+    val imageModel: Any?,
+    val openingFinished: Boolean,
+)
+
 /**
  * 陪伴聊天主页 03(基准 03-chat-main.png / 03-chat-main.xml):
  *
@@ -148,9 +159,14 @@ fun ChatMainScreen(
     /** 普通聊天回复的自动朗读开关。 */
     soundEnabled: Boolean = true,
     onToggleSound: () -> Unit = {},
+    /** 首页外层底栏已处理系统导航栏的安全间距。 */
+    embeddedInHome: Boolean = false,
+    homePresentation: HomeChatPresentation? = null,
+    onNextCharacter: (() -> Unit)? = null,
+    nextCharacterEnabled: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
-    BackHandler { onBack() }
+    BackHandler(enabled = !embeddedInHome) { onBack() }
     // 长按操作菜单(F1):目标消息 id → 弹窗;回溯二次确认目标点名防误触。
     var longPressTarget by remember { mutableStateOf<Long?>(null) }
     var rewindTarget by remember { mutableStateOf<Long?>(null) }
@@ -161,11 +177,12 @@ fun ChatMainScreen(
         // ── 全屏角色照片底(生成缓存命中显示真图,未生成显示渐变占位)──
         // G3/G4:合照页「设为聊天背景」的会话优先展示合照(backgroundFile 非
         // 空且文件仍存在;记录删除后文件失效,由 ChatBackgroundPrefs 校验回落)。
-        val effectiveBackground = backgroundFile?.takeIf { java.io.File(it).isFile } ?: avatarFile
+        val effectiveBackground: Any? = if (homePresentation != null) homePresentation.imageModel
+        else (backgroundFile?.takeIf { java.io.File(it).isFile } ?: avatarFile)?.let { java.io.File(it) }
         if (effectiveBackground != null) {
             AsyncImage(
-                model = java.io.File(effectiveBackground),
-                contentDescription = state.character?.name,
+                model = effectiveBackground,
+                contentDescription = homePresentation?.name ?: state.character?.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -203,44 +220,87 @@ fun ChatMainScreen(
         }
 
         Column(Modifier.fillMaxSize()) {
-            TopBar(
+            if (embeddedInHome) {
+                // 首页顶栏由外层持续绘制，避免开场白结束时切换成另一套顶栏。
+                Spacer(Modifier.statusBarsPadding().height(56.dp))
+            } else TopBar(
                 onBack = onBack,
                 onOpenMemory = onOpenMemory,
                 soundEnabled = soundEnabled,
                 onToggleSound = onToggleSound,
+                onNextCharacter = onNextCharacter,
+                nextCharacterEnabled = nextCharacterEnabled,
             )
-            // 消息区占满中部:reverseLayout 使最新一轮贴在信息区之上
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                reverseLayout = true,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                if (state.sending) {
-                    item(key = "typing") { TypingHint(streamDraft) }
-                }
-                // 回合失败显式化(02 文档 §3.5):IM 用户回合失败同样出重试条,
-                // 贴在消息区最底部(reverseLayout 下先发射=视觉最底),点击重试。
-                state.failedTurn?.let {
-                    item(key = "failed-turn") { FailedTurnBar(onRetry = onRetryFailedTurn) }
-                }
-                items(state.bubbleItems.asReversed()) { group ->
-                    BubbleGroup(
-                        group = group,
-                        onLongPress = { longPressTarget = it },
-                    )
-                }
-                if (state.loadFailed) {
-                    item(key = "failed") {
-                        Text(
-                            "会话不存在",
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 14.sp,
-                        )
+            val opening = homePresentation
+            val showOpening = opening != null &&
+                (!opening.openingFinished || state.loading || state.character == null)
+            // 首次进入时将消息限制在画面下部；较长的开场白仍可滚动查看。
+            val compactHomeMessages = opening != null &&
+                (showOpening || (!state.loading && state.bubbleItems.none { it.fromUser }))
+            val intro = opening?.intro ?: state.character?.intro.orEmpty()
+            val showIntro = opening?.openingFinished != false &&
+                (showOpening || (!state.loading && !state.loadFailed && state.bubbleItems.none { it.fromUser })) &&
+                intro.isNotBlank()
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.BottomStart) {
+                Column(
+                    Modifier.fillMaxWidth().then(
+                        if (compactHomeMessages) Modifier.heightIn(max = 220.dp) else Modifier.fillMaxSize(),
+                    ),
+                ) {
+                    if (compactHomeMessages && showIntro) {
+                        CharacterIntro(intro, Modifier.padding(horizontal = 12.dp))
+                    }
+                    LazyColumn(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        // 开场白从首字开始阅读；普通会话仍按最新消息贴底。
+                        reverseLayout = !compactHomeMessages,
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                            start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp,
+                        ),
+                        // 不足一屏的消息贴近人物信息行。
+                        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Bottom),
+                    ) {
+                        if (showOpening) {
+                            item(key = "home-opening") {
+                                Box(
+                                    Modifier.widthIn(max = 280.dp)
+                                        .then(if (opening.openingFinished) Modifier.background(
+                                            Color.White,
+                                            RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp),
+                                        ) else Modifier)
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                ) {
+                                    Text(
+                                        opening.openingLine,
+                                        color = if (opening.openingFinished) Color(0xFF1A1A1A) else Color.White,
+                                        fontSize = 17.sp,
+                                        lineHeight = 26.sp,
+                                    )
+                                }
+                            }
+                        } else {
+                            if (!compactHomeMessages && state.sending) item(key = "typing") { TypingHint(streamDraft) }
+                            if (!compactHomeMessages && state.failedTurn != null) {
+                                item(key = "failed-turn") { FailedTurnBar(onRetry = onRetryFailedTurn) }
+                            }
+                            items(if (compactHomeMessages) state.bubbleItems else state.bubbleItems.asReversed()) { group ->
+                                BubbleGroup(group = group, onLongPress = { longPressTarget = it })
+                            }
+                            if (compactHomeMessages && state.failedTurn != null) {
+                                item(key = "failed-turn") { FailedTurnBar(onRetry = onRetryFailedTurn) }
+                            }
+                            if (compactHomeMessages && state.sending) item(key = "typing") { TypingHint(streamDraft) }
+                        }
+                        if (!compactHomeMessages && showIntro) {
+                            item(key = "character-intro") {
+                                CharacterIntro(intro)
+                            }
+                        }
+                        if (!showOpening && state.loadFailed) {
+                            item(key = "failed") {
+                                Text("会话不存在", color = Color.White.copy(alpha = 0.8f), fontSize = 14.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -261,13 +321,17 @@ fun ChatMainScreen(
                 }
             }
             Spacer(Modifier.height(8.dp))
-            StatusPill(state.status, onClick = onOpenStatusPanel)
+            // 首页需要保持人物行固定；状态条只在独立聊天页展示。
+            if (!embeddedInHome) {
+                StatusPill(state.status, onClick = onOpenStatusPanel)
+            }
             Spacer(Modifier.height(10.dp))
             NameAndActionsRow(
-                name = state.character?.name.orEmpty(),
-                source = state.character?.source.orEmpty(),
+                name = homePresentation?.name ?: state.character?.name.orEmpty(),
+                source = homePresentation?.source ?: state.character?.source.orEmpty(),
                 onNameClick = onOpenCharacterHome,
                 onOpenHistory = onOpenHistory,
+                showDecorativeActions = !embeddedInHome,
             )
             Spacer(Modifier.height(12.dp))
             InputBar(
@@ -281,6 +345,8 @@ fun ChatMainScreen(
                 recognizing = recognizing,
                 voiceTranscribed = voiceTranscribed,
                 onVoiceTranscribedConsumed = onVoiceTranscribedConsumed,
+                embeddedInHome = embeddedInHome,
+                enabled = homePresentation == null || (homePresentation.openingFinished && !state.loading && state.character != null),
             )
         }
 
@@ -343,6 +409,8 @@ private fun TopBar(
     onOpenMemory: () -> Unit = {},
     soundEnabled: Boolean,
     onToggleSound: () -> Unit,
+    onNextCharacter: (() -> Unit)? = null,
+    nextCharacterEnabled: Boolean = true,
 ) {
     Row(
         modifier = Modifier
@@ -371,6 +439,19 @@ private fun TopBar(
             modifier = Modifier.size(24.dp),
         )
         Spacer(Modifier.weight(1f))
+        if (onNextCharacter != null) {
+            Text(
+                "换人物",
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+                    .clickable(enabled = nextCharacterEnabled, onClick = onNextCharacter)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                color = Color.White.copy(alpha = if (nextCharacterEnabled) 1f else 0.45f),
+                fontSize = 14.sp,
+                maxLines = 1,
+            )
+            Spacer(Modifier.width(12.dp))
+        }
         // 记忆入口(F3,临时入口:角色主页宫格后续功能再接)
         Icon(
             Icons.Outlined.Psychology,
@@ -445,11 +526,12 @@ private fun StatusPill(status: com.neethu.gouxiang.chat.StatusLine, onClick: () 
  * 点击进聊天历史页(参考页里该项文案为「返回」,本地版按 03 的「历史」进页)。
  */
 @Composable
-private fun NameAndActionsRow(
+internal fun NameAndActionsRow(
     name: String,
     source: String,
     onNameClick: () -> Unit,
-    onOpenHistory: () -> Unit = {},
+    onOpenHistory: (() -> Unit)? = null,
+    showDecorativeActions: Boolean = true,
 ) {
     Row(
         modifier = Modifier
@@ -482,10 +564,12 @@ private fun NameAndActionsRow(
                 fontSize = 13.sp,
             )
         }
-        ActionItem(Icons.Filled.Favorite, "4.7w")
-        ActionItem(Icons.Filled.Share, "727")
-        ActionItem(Icons.Filled.ChatBubble, "2791")
-        ActionItem(Icons.Filled.History, "历史", onClick = onOpenHistory)
+        if (showDecorativeActions) {
+            ActionItem(Icons.Filled.Favorite, "4.7w")
+            ActionItem(Icons.Filled.Share, "727")
+            ActionItem(Icons.Filled.ChatBubble, "2791")
+        }
+        if (onOpenHistory != null) ActionItem(Icons.Filled.History, "历史", onClick = onOpenHistory)
     }
 }
 
@@ -511,6 +595,20 @@ private fun ActionItem(
 }
 
 // ── 消息气泡 ────────────────────────────────────────────────────────
+
+@Composable
+private fun CharacterIntro(intro: String, modifier: Modifier = Modifier) {
+    Text(
+        "介绍: $intro",
+        modifier = modifier.fillMaxWidth()
+            .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        color = Color.White,
+        fontSize = 14.sp,
+        maxLines = 3,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
 
 /** 一组连发气泡:assistant 白泡靠左,用户粉泡靠右。 */
 @Composable
@@ -689,7 +787,7 @@ private fun HoldWaveform(level: Float, barColor: Color, modifier: Modifier = Mod
  * 与手机聊天页输入条同语义,避免 ViewModel sending 拦截静默吞掉草稿)。
  */
 @Composable
-private fun InputBar(
+internal fun InputBar(
     sending: Boolean,
     onSend: (String) -> Unit,
     onOpenVoiceCall: () -> Unit = {},
@@ -700,6 +798,8 @@ private fun InputBar(
     recognizing: Boolean = false,
     voiceTranscribed: String = "",
     onVoiceTranscribedConsumed: () -> Unit = {},
+    embeddedInHome: Boolean = false,
+    enabled: Boolean = true,
 ) {
     var textMode by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
@@ -747,7 +847,7 @@ private fun InputBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
+                .then(if (embeddedInHome) Modifier else Modifier.navigationBarsPadding())
                 .imePadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
                 .background(Color(0xFFF3F4F6).copy(alpha = 0.94f), RoundedCornerShape(26.dp))
@@ -764,6 +864,7 @@ private fun InputBar(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
+                    enabled = enabled,
                     ) { onOpenVoiceCall() },
             )
             if (textMode) {
@@ -801,9 +902,10 @@ private fun InputBar(
                         }
                         .clip(RoundedCornerShape(20.dp))
                         .background(pillColor)
-                        .pointerInput(Unit) {
+                        .pointerInput(enabled) {
                             awaitEachGesture {
                                 val down = awaitFirstDown()
+                                if (!enabled) return@awaitEachGesture
                                 down.consume()
                                 onHoldStart()
                                 holdMode = HoldMode.Recording
@@ -886,7 +988,7 @@ private fun InputBar(
                 tint = Color(0xFF3A3A3A),
                 modifier = Modifier
                     .size(26.dp)
-                    .clickable { textMode = !textMode },
+                    .clickable(enabled = enabled) { textMode = !textMode },
             )
             Spacer(Modifier.width(12.dp))
             Box {

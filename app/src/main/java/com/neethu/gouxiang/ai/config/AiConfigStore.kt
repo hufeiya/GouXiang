@@ -56,7 +56,7 @@ data class AiConfig(
     /** 自定义端点的 API Key(中转站需要;本地模型随意占位)。 */
     val apiKeyCustom: String = "",
     val ttsModel: String = "",
-    /** 语音音色(火山链路消费;留空 = 适配器内置默认)。 */
+    /** 未匹配人物的全局火山音色；留空表示不指定回退音色。 */
     val ttsVoice: String = "",
     /** 云端识别模型名;留空 = 按端点自动推断(见 [resolveAsrModel])。 */
     val asrModel: String = "",
