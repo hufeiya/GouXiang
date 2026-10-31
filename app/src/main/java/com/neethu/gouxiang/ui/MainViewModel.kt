@@ -1528,15 +1528,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         draft: CharacterDraft,
         openChatAfter: Boolean = false,
     ): CharacterSaveOutcome {
-        val errors = CharacterFormValidator.validate(
-            draft,
-            nameOwnerId = repo.characterByName(draft.name)?.takeIf { it.id != draft.id }?.id,
-        )
-        if (errors.hasErrors) return CharacterSaveOutcome.Invalid(errors)
         val existing = if (draft.id > 0) repo.characterById(draft.id) else null
         if (draft.id > 0 && existing == null) {
             return CharacterSaveOutcome.Failure("角色不存在或已被删除")
         }
+        // 目录来源可能存在同名人物；保留当前名称的编辑不应被其他同名行阻止。
+        val nameOwnerId = if (existing?.name == draft.name) null else repo.characterByName(draft.name)?.id
+        val errors = CharacterFormValidator.validate(draft, nameOwnerId = nameOwnerId)
+        if (errors.hasErrors) return CharacterSaveOutcome.Invalid(errors)
         val appearanceChanged = existing != null &&
             (existing.appearance != draft.appearance || existing.appearanceStyle != draft.appearanceStyle)
         val (openingContent, openingActions) = splitOpeningLine(draft.openingLine)

@@ -433,8 +433,39 @@ abstract class SeedDao {
     @Query("SELECT * FROM characters WHERE id = :id LIMIT 1")
     abstract suspend fun characterByIdRow(id: Long): CharacterEntity?
 
+    @Query("SELECT * FROM characters WHERE source = :source LIMIT 1")
+    abstract suspend fun characterBySource(source: String): CharacterEntity?
+
     @Update
     abstract suspend fun updateCharacter(entity: CharacterEntity)
+
+    /** Catalog IDs, unlike names, identify a source character without conflating namesakes. */
+    @Transaction
+    open suspend fun startCatalogChat(character: CharacterEntity, openingAt: Long): SavedCharacter {
+        val existing = characterBySource(character.source)
+        val characterId = existing?.id ?: insertCharacter(character)
+        var im = conversationByCharacter(characterId, "im")?.id
+        if (im == null) {
+            im = insertConversation(ConversationEntity(
+                characterId = characterId, mode = "im", lastSummary = character.openingLine,
+                lastAt = openingAt, createdAt = openingAt,
+            ))
+            if (character.openingLine.isNotBlank()) {
+                insertMessages(listOf(MessageEntity(
+                    conversationId = im, turnId = "turn-open-$openingAt", role = "assistant",
+                    content = character.openingLine, at = openingAt,
+                )))
+            }
+        }
+        var phone = conversationByCharacter(characterId, "phone")?.id
+        if (phone == null) {
+            phone = insertConversation(ConversationEntity(
+                characterId = characterId, mode = "phone", lastSummary = character.openingLine,
+                lastAt = openingAt, createdAt = openingAt,
+            ))
+        }
+        return SavedCharacter(characterId, im, existing == null, phone, existing?.avatarVersion ?: 0)
+    }
 
     /** 若同名角色不存在则播种(角色 + 会话 + 开场白消息 + 用户画像记忆)。 */
     @Transaction
@@ -489,11 +520,12 @@ abstract class SeedDao {
         openingAt: Long,
         appearanceChanged: Boolean,
     ): SavedCharacter {
-        val byName = characterByName(character.name)
-        if (byName != null && byName.id != character.id) {
+        val existing = if (character.id > 0) characterByIdRow(character.id) else null
+        // Existing catalog characters can share a name. Keeping one's own name is
+        // always allowed; creating or renaming still rejects a conflicting name.
+        if (existing?.name != character.name && characterByName(character.name) != null) {
             throw CharacterNameConflictException(character.name)
         }
-        val existing = if (character.id > 0) characterByIdRow(character.id) else null
         val charId: Long
         val created: Boolean
         var avatarVersion = character.avatarVersion
@@ -502,11 +534,19 @@ abstract class SeedDao {
             created = true
         } else {
             // 编辑:形象/风格改写 → 版本 +1 并清当前头像文件,让生成链走新缓存键
-            val bumped = if (appearanceChanged) {
-                character.copy(avatarVersion = existing.avatarVersion + 1, avatarFile = "")
-            } else {
-                character
-            }
+            // The editor only owns its form fields. Preserve the latest stored metadata,
+            // permissions and avatar instead of replacing them with form defaults.
+            val bumped = existing.copy(
+                name = character.name,
+                profile = character.profile,
+                intro = character.intro,
+                exampleLines = character.exampleLines,
+                openingLine = character.openingLine,
+                appearance = character.appearance,
+                appearanceStyle = character.appearanceStyle,
+                avatarVersion = if (appearanceChanged) existing.avatarVersion + 1 else existing.avatarVersion,
+                avatarFile = if (appearanceChanged) "" else existing.avatarFile,
+            )
             updateCharacter(bumped.copy(id = character.id))
             charId = character.id
             created = false

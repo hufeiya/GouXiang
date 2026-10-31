@@ -15,3 +15,7 @@
 local.properties
 /secrets.properties
 /out
+# 猫箱人物样本抓取数据(本地素材,禁止入库)
+/charactorSample/
+# 抓取/采集辅助脚本(本地工具,禁止入库)
+/scripts/

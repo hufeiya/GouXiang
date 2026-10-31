@@ -140,6 +140,33 @@ class CharacterSaveAtomicTest {
     }
 
     @Test
+    fun editorDefaultsDoNotOverwriteStoredMetadataOrPermissions() = runBlocking {
+        val saved = seed.saveCharacterAtomic(
+            draft("导入人物").copy(
+                avatarFile = "imported.webp", avatarVersion = 4, source = "catalog:123",
+                innerVoiceAuto = false, momentsJoined = false, momentsSeeUserPosts = false,
+                momentsInteract = false, momentsDailyAuto = false,
+            ), "你好", emptyList(), 1L, false,
+        )
+        // A form-generated entity contains defaults for fields the editor does not own.
+        seed.saveCharacterAtomic(
+            draft("导入人物").copy(id = saved.characterId, profile = "修改后的设定", createdAt = 999L),
+            "你好", emptyList(), 2L, false,
+        )
+        val stored = seed.characterByIdRow(saved.characterId)!!
+        assertEquals("修改后的设定", stored.profile)
+        assertEquals("imported.webp", stored.avatarFile)
+        assertEquals(4L, stored.avatarVersion)
+        assertEquals("catalog:123", stored.source)
+        assertEquals(100L, stored.createdAt)
+        assertEquals(false, stored.innerVoiceAuto)
+        assertEquals(false, stored.momentsJoined)
+        assertEquals(false, stored.momentsSeeUserPosts)
+        assertEquals(false, stored.momentsInteract)
+        assertEquals(false, stored.momentsDailyAuto)
+    }
+
+    @Test
     fun newCharacterDoesNotResetSeedsOrTheirHistory() = runBlocking {
         // 两颗「种子」:各自带会话、消息、记忆
         val seedA = seed.saveCharacterAtomic(draft("种子一"), "种子一开场", emptyList(), 10L, false)

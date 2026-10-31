@@ -1,7 +1,6 @@
 package com.neethu.gouxiang.ui.home
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -23,10 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.ChatBubble
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.Icon
@@ -45,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.neethu.gouxiang.data.HomeFeedCard
+import com.neethu.gouxiang.data.CatalogCharacter
 
 /**
  * 首页·推荐流(基准 01-home-feed.png):
@@ -63,31 +60,65 @@ fun HomeFeedScreen(
     cards: List<HomeFeedCard>,
     avatarFiles: Map<Long, String?>,
     introBarText: String,
+    catalog: List<CatalogCharacter> = emptyList(),
+    onOpenHall: () -> Unit = {},
+    onOpenCatalogCharacter: (CatalogCharacter) -> Unit = {},
+    onStartCatalogChat: (CatalogCharacter) -> Unit = {},
+    onOpenChat: (Long) -> Unit = {},
     /** F3:点「名字 >」进角色主页(回调带对应会话 id;无会话=-1 不响应)。 */
     onOpenCharacterHome: (Long) -> Unit = {},
     /** F3:点互动列「历史」进聊天历史页(回调带对应会话 id;无会话=-1 不响应)。 */
     onOpenHistory: (Long) -> Unit = {},
 ) {
     Box(modifier = Modifier.fillMaxSize()) {
-        if (cards.isEmpty()) {
+        // 同一轮浏览保持顺序，已有会话的人物保留历史入口并去除目录重复项。
+        val shuffleSeed = remember { kotlin.random.Random.nextLong() }
+        val items = remember(cards, catalog, shuffleSeed) {
+            val localSources = cards.map { it.character.source }.toSet()
+            (cards.map { FeedItem.Local(it) } +
+                catalog.filterNot { "maoxiang:${it.sourceId}" in localSources }.map { FeedItem.Catalog(it) })
+                .sortedBy { item ->
+                    val key = when (item) {
+                        is FeedItem.Local -> "local:${item.card.character.id}"
+                        is FeedItem.Catalog -> "catalog:${item.character.sourceId}"
+                    }
+                    kotlin.random.Random(shuffleSeed xor key.hashCode().toLong()).nextLong()
+                }
+        }
+        if (items.isEmpty()) {
             Box(Modifier.fillMaxSize().background(Color(0xFF151515)))
         } else {
-            val pagerState = rememberPagerState(pageCount = { cards.size })
-            VerticalPager(
-                state = pagerState,
-                modifier = Modifier.fillMaxSize(),
-            ) { page ->
-                FeedCard(
-                    card = cards[page],
-                    avatarFile = avatarFiles[cards[page].character.id],
-                    introBarText = introBarText,
-                    onOpenCharacterHome = onOpenCharacterHome,
-                    onOpenHistory = onOpenHistory,
-                )
+            val pagerState = rememberPagerState(pageCount = { items.size })
+            VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
+                when (val item = items[page]) {
+                    is FeedItem.Local -> FeedCard(
+                        name = item.card.character.name,
+                        intro = item.card.character.intro,
+                        source = catalog.firstOrNull { "maoxiang:${it.sourceId}" == item.card.character.source }
+                            ?.creatorName ?: item.card.character.source,
+                        openingLine = item.card.openingLine,
+                        imageModel = avatarFiles[item.card.character.id]?.let { java.io.File(it) },
+                        introBarText = item.card.character.intro.ifBlank { introBarText },
+                        onOpen = { if (item.card.conversationId > 0) onOpenCharacterHome(item.card.conversationId) },
+                        onChat = if (item.card.conversationId > 0) ({ onOpenChat(item.card.conversationId) }) else null,
+                        onHistory = if (item.card.conversationId > 0) ({ onOpenHistory(item.card.conversationId) }) else null,
+                    )
+                    is FeedItem.Catalog -> FeedCard(
+                        name = item.character.name,
+                        intro = item.character.intro,
+                        source = item.character.creatorName,
+                        openingLine = item.character.openingLine,
+                        imageModel = "file:///android_asset/${item.character.portraitAsset}",
+                        introBarText = item.character.intro.ifBlank { introBarText },
+                        onOpen = { onOpenCatalogCharacter(item.character) },
+                        onChat = { onStartCatalogChat(item.character) },
+                    )
+                }
             }
         }
         // 顶部 tab 行(沉浸式,叠在图上)
         TopTabsRow(
+            onOpenHall = onOpenHall,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding(),
@@ -97,7 +128,7 @@ fun HomeFeedScreen(
 
 /** 顶部:黄 V 盾 + 「AI 剧 | 推荐」双 tab + 搜索 + 喇叭。 */
 @Composable
-private fun TopTabsRow(modifier: Modifier = Modifier) {
+private fun TopTabsRow(onOpenHall: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -143,12 +174,9 @@ private fun TopTabsRow(modifier: Modifier = Modifier) {
                 )
             }
         }
-        Icon(
-            Icons.Outlined.Search,
-            contentDescription = "搜索",
-            tint = Color.White,
-            modifier = Modifier.size(24.dp),
-        )
+        IconButton(onClick = onOpenHall, modifier = Modifier.size(40.dp)) {
+            Icon(Icons.Outlined.Search, contentDescription = "人物大厅", tint = Color.White)
+        }
         Spacer(Modifier.width(14.dp))
         Icon(
             Icons.Outlined.VolumeUp,
@@ -159,14 +187,23 @@ private fun TopTabsRow(modifier: Modifier = Modifier) {
     }
 }
 
+private sealed interface FeedItem {
+    data class Local(val card: HomeFeedCard) : FeedItem
+    data class Catalog(val character: CatalogCharacter) : FeedItem
+}
+
 /** 单张剧卡:全屏头像 + 底部信息叠层。 */
 @Composable
 private fun FeedCard(
-    card: HomeFeedCard,
-    avatarFile: String?,
+    name: String,
+    intro: String,
+    source: String,
+    openingLine: String,
+    imageModel: Any?,
     introBarText: String,
-    onOpenCharacterHome: (Long) -> Unit = {},
-    onOpenHistory: (Long) -> Unit = {},
+    onOpen: () -> Unit,
+    onChat: (() -> Unit)? = null,
+    onHistory: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -174,10 +211,10 @@ private fun FeedCard(
             .background(Color(0xFF2A2A2E)),
     ) {
         // 全屏角色形象(生成缓存命中显示真图,未生成显示渐变占位)
-        if (avatarFile != null) {
+        if (imageModel != null) {
             AsyncImage(
-                model = java.io.File(avatarFile),
-                contentDescription = card.character.name,
+                model = imageModel,
+                contentDescription = name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -243,11 +280,12 @@ private fun FeedCard(
                 Box(
                     Modifier
                         .background(Color.White, RoundedCornerShape(10.dp))
+                        .then(if (onChat != null) Modifier.clickable { onChat() } else Modifier)
                         .padding(horizontal = 14.dp, vertical = 10.dp)
                         .weight(1f, fill = false),
                 ) {
                     Text(
-                        card.openingLine,
+                        openingLine,
                         color = Color(0xFF1A1A1A),
                         fontSize = 16.sp,
                         lineHeight = 22.sp,
@@ -277,34 +315,31 @@ private fun FeedCard(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                         ) {
-                            if (card.conversationId > 0) onOpenCharacterHome(card.conversationId)
+                            onOpen()
                         },
                 ) {
                     Text(
-                        card.character.name + " >",
+                        name + " >",
                         color = Color.White,
                         fontSize = 22.sp,
                         fontWeight = FontWeight.Bold,
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "@${card.character.source}、" + card.character.intro.take(18) + "…",
+                        "@$source、" + intro.take(18) + "…",
                         color = Color.White.copy(alpha = 0.8f),
                         fontSize = 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                ActionItem(
-                    Icons.Filled.History,
-                    "历史",
-                    modifier = Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {
-                        if (card.conversationId > 0) onOpenHistory(card.conversationId)
-                    },
-                )
+                if (onHistory != null) {
+                    ActionItem(
+                        Icons.Filled.History,
+                        "历史",
+                        modifier = Modifier.clickable { onHistory() },
+                    )
+                }
             }
             Spacer(Modifier.height(14.dp))
         }

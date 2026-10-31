@@ -21,6 +21,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -34,6 +37,11 @@ import com.neethu.gouxiang.ui.GouXiangBottomBar
 import com.neethu.gouxiang.ui.MainViewModel
 import com.neethu.gouxiang.ui.character.CharacterHomeScreen
 import com.neethu.gouxiang.ui.home.HomeFeedScreen
+import com.neethu.gouxiang.ui.hall.CharacterHallScreen
+import com.neethu.gouxiang.data.CatalogCharacter
+import com.neethu.gouxiang.data.CatalogRepository
+import com.neethu.gouxiang.data.GouXiangRepo
+import com.neethu.gouxiang.data.startCatalogChat
 import com.neethu.gouxiang.ui.chat.ChatMainScreen
 import com.neethu.gouxiang.ui.messages.MessagesScreen
 import com.neethu.gouxiang.ui.memory.MemoryScreen
@@ -44,6 +52,9 @@ import com.neethu.gouxiang.ui.profile.ProfileScreen
 import com.neethu.gouxiang.ui.aiconfig.AiConfigActivity
 import com.neethu.gouxiang.ui.theme.GouXiangTheme
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * 主入口。除触摸 UI 外暴露 AI 原生调试接口(docs/ai-debug-intents.md):任何
@@ -138,6 +149,39 @@ class MainActivity : ComponentActivity() {
     private fun MainFrame(vm: MainViewModel = viewModel()) {
         val tab by vm.selectedTab.collectAsState()
         val feed by vm.homeFeed.collectAsState()
+        val catalogContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+        val catalogScope = rememberCoroutineScope()
+        var catalog by remember { mutableStateOf<List<CatalogCharacter>>(emptyList()) }
+        var hallOpen by remember { mutableStateOf(false) }
+        var hallInitialCharacter by remember { mutableStateOf<CatalogCharacter?>(null) }
+        var startingCatalogChat by remember { mutableStateOf(false) }
+        LaunchedEffect(catalogContext) {
+            catalog = withContext(Dispatchers.IO) {
+                runCatching { CatalogRepository.load(catalogContext) }.getOrElse {
+                    Log.e("CharacterCatalog", "Failed to load catalog", it)
+                    emptyList()
+                }
+            }
+        }
+        val startCatalogChat: (CatalogCharacter) -> Unit = { character ->
+            if (!startingCatalogChat) {
+                startingCatalogChat = true
+                catalogScope.launch {
+                    try {
+                        val saved = GouXiangRepo.get(catalogContext).startCatalogChat(catalogContext, character)
+                        hallOpen = false
+                        vm.openChat(saved.conversationId)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.e("CharacterCatalog", "Failed to start chat", e)
+                        android.widget.Toast.makeText(catalogContext, "无法开始聊天，请重试", android.widget.Toast.LENGTH_SHORT).show()
+                    } finally {
+                        startingCatalogChat = false
+                    }
+                }
+            }
+        }
         val conversations by vm.conversations.collectAsState()
         val avatarFiles by vm.avatarFiles.collectAsState()
         // 角色创作与管理(C 工作包):创作页列表/头像状态/编辑页
@@ -351,6 +395,11 @@ class MainActivity : ComponentActivity() {
                         cards = feed,
                         avatarFiles = avatarFiles,
                         introBarText = "本地版 · 角色形象由 AI 生成",
+                        catalog = catalog,
+                        onOpenHall = { hallInitialCharacter = null; hallOpen = true },
+                        onOpenCatalogCharacter = { hallInitialCharacter = it; hallOpen = true },
+                        onStartCatalogChat = startCatalogChat,
+                        onOpenChat = { vm.openChat(it) },
                         // F3(P1):「名字 >」/「历史」与 im 聊天页同款接线;
                         // feed 卡片对应 im 会话,历史页同理
                         onOpenCharacterHome = { vm.openCharacterHome(it) },
@@ -394,6 +443,15 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
+        }
+
+        if (hallOpen) {
+            CharacterHallScreen(
+                characters = catalog,
+                initialCharacter = hallInitialCharacter,
+                onBack = { hallOpen = false },
+                onStartChat = startCatalogChat,
+            )
         }
 
         // 聊天主页 03:全屏覆盖层(自管边缘到边缘,盖住底栏;返回回消息列表)
