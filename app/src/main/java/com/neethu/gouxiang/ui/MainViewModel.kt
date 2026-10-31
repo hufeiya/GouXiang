@@ -927,13 +927,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ── 按住说话·语音输入(F4-P1:聊天输入条复用 F6 录音+ASR 管线)──────
 
     /**
-     * 松手手势 → 转写结果去向(2026-10-31 用户口径:普通松手直接发送,
-     * 上划取消,侧移把语音转成「(动作)」括号文本填输入框继续编辑)。
+     * 松手手势 → 转写结果去向(2026-10-31 用户口径:原地/侧移松手都直接发送
+     * 上屏并保持语音输入模式,上划取消;侧移段由分段拼合包成「(动作)」括号文本)。
      */
     enum class VoiceInputAction {
         /** 原地松手:转写 → 直接发送进回合。 */
         SEND,
-        /** 侧移松手:转写 → 「(文本)」动作场景括号文本填入输入框,用户可改再发。 */
+        /** 侧移松手:与 SEND 同路直发(侧移段=括号动作);保留枚举供手势层视觉态区分。 */
         INPUT,
         /** 上划出按钮松手:停录丢弃,什么都不发。 */
         CANCEL,
@@ -1011,11 +1011,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 按住说话·松手。按手势去向分发(2026-10-31 口径,分段升级):
+     * 按住说话·松手。按手势去向分发(2026-10-31 口径,分段+直发):
      * - [VoiceInputAction.CANCEL] 上划取消:停录丢弃全部段,不发不转写;
-     * - [VoiceInputAction.SEND] 原地松手:各段转写按「话一(动作)话二」拼合 →
-     *   直接发送进回合(回合进行中回落填输入框,口语不丢,给 notice 说明);
-     * - [VoiceInputAction.INPUT] 侧移松手:拼合文本填输入框,用户可改再发。
+     * - [VoiceInputAction.SEND] / [VoiceInputAction.INPUT] 原地或侧移松手:
+     *   各段转写按「话一(动作)话二」拼合 → 直接发送进回合并保持语音输入
+     *   模式(2026-10-31 用户口径:侧移松手不再切文字态填输入框;仅回合
+     *   进行中发不进去时回落填输入框防丢,给 notice 说明);
      * 段=手势态区间(原位段原文/侧移段括号包裹),单段无切换时行为同旧版。
      */
     fun voiceInputRelease(action: VoiceInputAction = VoiceInputAction.SEND) {
@@ -1056,10 +1057,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val text = buildSegmentedText(texts)
                 if (text.isBlank()) {
                     _voiceInputNotice.value = "没听清,再试一次?"
-                } else if (action == VoiceInputAction.INPUT) {
-                    // 拼合文本的侧移段已各带括号(单段侧移=整段括号),再整段
-                    // wrapActionBracket 会叠出「(话一(动作))」双重括号——直接填。
-                    _voiceInputTranscribed.value = text
                 } else if (_chatUi.value.sending) {
                     // 回合进行中发不进去(sendChatMessage 有 sending 拦截),
                     // 语音转写不丢:填输入框让用户稍后发。

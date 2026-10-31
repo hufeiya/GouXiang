@@ -703,8 +703,9 @@ private fun InputBar(
 ) {
     var textMode by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
-    // 转写落草稿(侧移动作场景 VM 已包「(…)」;回合占用回落为纯文本):
-    // 切到文字态可见可改;填完即消费事件,再次按住说话不重复填。
+    // 转写落草稿仅剩回合占用回落路径(2026-10-31 口径:原地/侧移松手都直发
+    // 并保持语音模式,只有发不进去才回落填输入框):切到文字态可见可改;
+    // 填完即消费事件,再次按住说话不重复填。
     LaunchedEffect(voiceTranscribed) {
         if (voiceTranscribed.isNotBlank()) {
             textMode = true
