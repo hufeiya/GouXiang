@@ -1057,7 +1057,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (text.isBlank()) {
                     _voiceInputNotice.value = "没听清,再试一次?"
                 } else if (action == VoiceInputAction.INPUT) {
-                    _voiceInputTranscribed.value = wrapActionBracket(text)
+                    // 拼合文本的侧移段已各带括号(单段侧移=整段括号),再整段
+                    // wrapActionBracket 会叠出「(话一(动作))」双重括号——直接填。
+                    _voiceInputTranscribed.value = text
                 } else if (_chatUi.value.sending) {
                     // 回合进行中发不进去(sendChatMessage 有 sending 拦截),
                     // 语音转写不丢:填输入框让用户稍后发。
