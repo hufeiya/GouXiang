@@ -1,6 +1,14 @@
 package com.neethu.gouxiang.ui.chat
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -16,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -25,7 +34,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -50,12 +58,18 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -76,6 +90,9 @@ import coil3.compose.AsyncImage
 import com.neethu.gouxiang.ui.BubbleItem
 import com.neethu.gouxiang.ui.ChatBubble
 import com.neethu.gouxiang.ui.ChatUiState
+import com.neethu.gouxiang.ui.MainViewModel
+import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 /**
  * 陪伴聊天主页 03(基准 03-chat-main.png / 03-chat-main.xml):
@@ -116,13 +133,13 @@ fun ChatMainScreen(
     onRewind: (messageId: Long) -> Unit = {},
     /** 长按「重新生成」回调(仅角色侧泡;F1 与手机聊天页同款 VM 出口)。 */
     onRegenerate: (turnId: String) -> Unit = {},
-    /** F4 语音输入:按下开录 / 松手转写(转写结果填草稿,不直接发送)。 */
+    /** 按住说话:按下开录 / 松手按手势去向分发(原地=直接发送,上划=取消,侧移=动作场景输入)。 */
     onHoldStart: () -> Unit = {},
-    onHoldRelease: () -> Unit = {},
-    /** F4 语音输入状态:按住录音中(条高亮)/松手识别中(条文案)。 */
-    holdActive: Boolean = false,
+    onHoldRelease: (MainViewModel.VoiceInputAction) -> Unit = {},
+    /** 录音实时音量(0..1;按住中的波形条)。 */
+    voiceLevel: Float = 0f,
     recognizing: Boolean = false,
-    /** F4 转写结果(非空=待填入草稿框;消费后由调用方清空)。 */
+    /** 转写结果(非空=待填入草稿框;消费后由调用方清空)。 */
     voiceTranscribed: String = "",
     /** F4 转写填入草稿后回调(VM 清事件)。 */
     onVoiceTranscribedConsumed: () -> Unit = {},
@@ -257,7 +274,7 @@ fun ChatMainScreen(
                 onOpenVoiceCall = onOpenVoiceCall,
                 onHoldStart = onHoldStart,
                 onHoldRelease = onHoldRelease,
-                holdActive = holdActive,
+                voiceLevel = voiceLevel,
                 recognizing = recognizing,
                 voiceTranscribed = voiceTranscribed,
                 onVoiceTranscribedConsumed = onVoiceTranscribedConsumed,
@@ -614,12 +631,57 @@ private fun VoiceContent(text: String, fromUser: Boolean) {
 
 // ── 输入条 ──────────────────────────────────────────────────────────
 
+/** 按住说话手势态(2026-10-31 口径):原位录音 / 上划出按钮取消 / 侧移输入。 */
+private enum class HoldMode { None, Recording, Cancel, Input }
+
+/** 波形条数(按住中的 |||||;固定窗滚动,静音时呈齐排矮条)。 */
+private const val HoldWaveBars = 16
+
+/**
+ * 按住中的实时波形:60ms 一格滚动样本窗,新样本右进左出,经典语音输入观感。
+ * [level] 经 rememberUpdatedState 供循环读最新值(静音也持续滚动)。
+ */
+@Composable
+private fun HoldWaveform(level: Float, barColor: Color, modifier: Modifier = Modifier) {
+    val currentLevel by rememberUpdatedState(level)
+    val samples = remember { mutableStateListOf<Float>() }
+    LaunchedEffect(Unit) {
+        while (true) {
+            samples.add(currentLevel)
+            while (samples.size > HoldWaveBars) samples.removeAt(0)
+            delay(60)
+        }
+    }
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        repeat(HoldWaveBars) { i ->
+            // 旧样本在左,新样本在右(窗未满时左侧补静音格)
+            val s = samples.getOrNull(i + samples.size - HoldWaveBars) ?: 0f
+            Box(
+                Modifier
+                    .width(3.dp)
+                    .height((4 + 26 * s.coerceIn(0f, 1f)).dp)
+                    .background(barColor, RoundedCornerShape(2.dp)),
+            )
+        }
+    }
+}
+
 /**
  * 输入条:电话图标 / 按住说话(语音态,真录音) / 键盘 / + / 发送。
  * 键盘图标切换 语音 ↔ 文字 两种形态;文字态尾部出粉色发送圆钮。
- * 「按住说话」F4 落地:按下开录(F6 同款 WAV 管线)、松手 ASR 转写填草稿
- * (不直接发送,对齐猫箱「转写可改」);轻点(不足录音阈值)与识别失败
- * 都落「没听清」提示,不再降级切文字态 —— 切文字态只走键盘图标,单一职责。
+ *
+ * 「按住说话」手势(2026-10-31 用户口径,猫箱同款交互):
+ * - 原地松手 = ASR 转写直接发送(不再先落草稿再手动发);
+ * - 按住中按钮变黑色胶囊 + 实时波形,上方浮小字「上移取消,侧移输入(动作场景)」;
+ * - 上划出按钮 = 取消态:胶囊变红、小字「松手取消」,松手丢弃;
+ * - 侧移(左右皆可)= 输入态:胶囊随位移黑→白渐变(Material 进度动画),
+ *   越过阈值小字变「正在输入(动作场景)」,松手把语音转成「(动作)」括号
+ *   文本填输入框可改再发;
+ * - 轻点/识别失败落「没听清」提示;识别中防重入。
  * [sending] = 回合进行中:发送钮禁用(不丢弃草稿;发送被接受才清空 draft,
  * 与手机聊天页输入条同语义,避免 ViewModel sending 拦截静默吞掉草稿)。
  */
@@ -629,16 +691,16 @@ private fun InputBar(
     onSend: (String) -> Unit,
     onOpenVoiceCall: () -> Unit = {},
     onHoldStart: () -> Unit = {},
-    onHoldRelease: () -> Unit = {},
-    holdActive: Boolean = false,
+    onHoldRelease: (MainViewModel.VoiceInputAction) -> Unit = {},
+    voiceLevel: Float = 0f,
     recognizing: Boolean = false,
     voiceTranscribed: String = "",
     onVoiceTranscribedConsumed: () -> Unit = {},
 ) {
     var textMode by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
-    // F4 转写落草稿:松手识别完成 → 填入草稿框(切到文字态让用户可见可改),
-    // 对齐猫箱「转写可改」;填完即消费事件,再次按住说话不重复填。
+    // 转写落草稿(侧移动作场景 VM 已包「(…)」;回合占用回落为纯文本):
+    // 切到文字态可见可改;填完即消费事件,再次按住说话不重复填。
     LaunchedEffect(voiceTranscribed) {
         if (voiceTranscribed.isNotBlank()) {
             textMode = true
@@ -646,150 +708,233 @@ private fun InputBar(
             onVoiceTranscribedConsumed()
         }
     }
+    // 按住手势态(UI 局部实时;VM 只收松手时的最终去向)
+    var holdMode by remember { mutableStateOf(HoldMode.None) }
+    var sideProgress by remember { mutableFloatStateOf(0f) }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .imePadding()
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .background(Color(0xFFF3F4F6).copy(alpha = 0.94f), RoundedCornerShape(26.dp))
-            .padding(horizontal = 12.dp, vertical = 8.dp)
-            .height(40.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Outlined.Call,
-            contentDescription = "语音通话",
-            tint = Color(0xFF3A3A3A),
+    val holding = holdMode != HoldMode.None
+    // Material 动效:按住胶囊轻微放大(spring 弹性),侧移颜色按位移实时渐变
+    val pillScale by animateFloatAsState(
+        targetValue = if (holding) 1.03f else 1f,
+        animationSpec = spring(stiffness = 400f),
+        label = "holdPillScale",
+    )
+    val pillColor = when (holdMode) {
+        HoldMode.None -> Color.Transparent
+        HoldMode.Recording -> Color(0xFF1A1A1A)
+        HoldMode.Input -> lerp(Color(0xFF1A1A1A), Color.White, sideProgress)
+        HoldMode.Cancel -> Color(0xFFFF3B30)
+    }
+    val barColor = when (holdMode) {
+        HoldMode.None -> Color.Transparent
+        HoldMode.Recording, HoldMode.Cancel -> Color.White
+        HoldMode.Input -> lerp(Color.White, Color(0xFF1A1A1A), sideProgress)
+    }
+    val holdHint = when (holdMode) {
+        HoldMode.Recording -> "上移取消，侧移输入(动作场景)"
+        HoldMode.Input -> "正在输入(动作场景)"
+        HoldMode.Cancel -> "松手取消"
+        HoldMode.None -> ""
+    }
+    val hintColor = if (holdMode == HoldMode.Cancel) Color(0xFFFF6B61) else Color.White.copy(alpha = 0.92f)
+
+    Box {
+        Row(
             modifier = Modifier
-                .size(24.dp)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { onOpenVoiceCall() },
-        )
-        if (textMode) {
-            Spacer(Modifier.width(10.dp))
-            BasicTextField(
-                value = draft,
-                onValueChange = { draft = it },
-                singleLine = true,
-                textStyle = TextStyle(
-                    color = Color(0xFF1A1A1A),
-                    fontSize = 16.sp,
-                ),
-                cursorBrush = SolidColor(Color(0xFFE84D8A)),
-                decorationBox = { inner ->
-                    Box(contentAlignment = Alignment.CenterStart) {
-                        if (draft.isEmpty()) {
-                            Text("说点什么…", color = Color(0xFF9A9A9A), fontSize = 16.sp)
-                        }
-                        inner()
-                    }
-                },
-                modifier = Modifier.weight(1f),
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .background(Color(0xFFF3F4F6).copy(alpha = 0.94f), RoundedCornerShape(26.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .height(40.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Outlined.Call,
+                contentDescription = "语音通话",
+                tint = Color(0xFF3A3A3A),
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { onOpenVoiceCall() },
             )
-        } else {
-            Spacer(Modifier.width(10.dp))
-            // 「按住说话」F4:按下开录/松手转写(pointerInput 按压手势,
-            // waitForUpOrCancellation 取消=滑动移出即丢,与通话页语义一致);
-            // 识别中显示状态,防重入
-            Box(
-                Modifier
-                    .weight(1f)
-                    .height(40.dp)
-                    .background(
-                        if (holdActive) Color(0xFFE84D8A).copy(alpha = 0.15f) else Color.Transparent,
-                        RoundedCornerShape(20.dp),
-                    )
-                    .pointerInput(Unit) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown()
-                            down.consume()
-                            onHoldStart()
-                            val up = waitForUpOrCancellation()
-                            if (up != null) {
-                                up.consume()
-                                onHoldRelease()
-                            } else {
-                                // 滑出取消:停录丢弃(与通话页 holdRelease 短录音
-                                // 丢弃同路;VM 侧 active 未置位时是 no-op)
-                                onHoldRelease()
+            if (textMode) {
+                Spacer(Modifier.width(10.dp))
+                BasicTextField(
+                    value = draft,
+                    onValueChange = { draft = it },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = Color(0xFF1A1A1A),
+                        fontSize = 16.sp,
+                    ),
+                    cursorBrush = SolidColor(Color(0xFFE84D8A)),
+                    decorationBox = { inner ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (draft.isEmpty()) {
+                                Text("说点什么…", color = Color(0xFF9A9A9A), fontSize = 16.sp)
                             }
+                            inner()
                         }
                     },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
+                    modifier = Modifier.weight(1f),
+                )
+            } else {
+                Spacer(Modifier.width(10.dp))
+                // 「按住说话」手势区:按下开录,拖动按位置实时判定手势态,
+                // 松手按最终态分发(onHoldRelease);识别中显示状态,防重入。
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(40.dp)
+                        .graphicsLayer {
+                            scaleX = pillScale
+                            scaleY = pillScale
+                        }
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(pillColor)
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                down.consume()
+                                onHoldStart()
+                                holdMode = HoldMode.Recording
+                                sideProgress = 0f
+                                val downX = down.position.x
+                                val sideThreshold = 64.dp.toPx()
+                                val exitSlop = viewConfiguration.touchSlop
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull() ?: break
+                                    if (!change.pressed) {
+                                        change.consume()
+                                        // 松手:按手势终态分发(原位=发送/上划=取消/侧移=输入)
+                                        val action = when (holdMode) {
+                                            HoldMode.Cancel -> MainViewModel.VoiceInputAction.CANCEL
+                                            HoldMode.Input -> MainViewModel.VoiceInputAction.INPUT
+                                            else -> MainViewModel.VoiceInputAction.SEND
+                                        }
+                                        holdMode = HoldMode.None
+                                        sideProgress = 0f
+                                        onHoldRelease(action)
+                                        break
+                                    }
+                                    val pos = change.position
+                                    val dx = abs(pos.x - downX)
+                                    // 按指针位置实时重算:出按钮上方=取消,
+                                    // 横向越过阈值=输入,否则回原位录音
+                                    holdMode = when {
+                                        pos.y < -exitSlop -> HoldMode.Cancel
+                                        dx >= sideThreshold -> HoldMode.Input
+                                        else -> HoldMode.Recording
+                                    }
+                                    sideProgress =
+                                        if (holdMode == HoldMode.Cancel) 0f
+                                        else (dx / sideThreshold).coerceIn(0f, 1f)
+                                    change.consume()
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
                     when {
-                        holdActive -> "松开 转写"
-                        recognizing -> "识别中…"
-                        else -> "按住说话"
-                    },
-                    color = if (holdActive) Color(0xFFE84D8A) else Color(0xFF3A3A3A),
-                    fontSize = 17.sp,
-                    fontWeight = if (holdActive) FontWeight.Bold else FontWeight.Normal,
-                )
+                        recognizing -> Text(
+                            "识别中…",
+                            color = Color(0xFF3A3A3A),
+                            fontSize = 16.sp,
+                        )
+                        holdMode != HoldMode.None -> HoldWaveform(
+                            level = voiceLevel,
+                            barColor = barColor,
+                        )
+                        else -> Text(
+                            "按住说话",
+                            color = Color(0xFF3A3A3A),
+                            fontSize = 17.sp,
+                        )
+                    }
+                }
             }
-        }
-        Spacer(Modifier.width(8.dp))
-        Icon(
-            Icons.Outlined.Keyboard,
-            contentDescription = if (textMode) "语音输入" else "文字输入",
-            tint = Color(0xFF3A3A3A),
-            modifier = Modifier
-                .size(26.dp)
-                .clickable { textMode = !textMode },
-        )
-        Spacer(Modifier.width(12.dp))
-        Box {
-            Box(
-                Modifier
-                    .size(30.dp)
-                    .background(Color(0xFF2A2A2A), CircleShape),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Add,
-                    contentDescription = "更多",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            // 红点角标(参考图)
-            Box(
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .size(8.dp)
-                    .background(Color(0xFFFF3B30), CircleShape),
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                Icons.Outlined.Keyboard,
+                contentDescription = if (textMode) "语音输入" else "文字输入",
+                tint = Color(0xFF3A3A3A),
+                modifier = Modifier
+                    .size(26.dp)
+                    .clickable { textMode = !textMode },
             )
-        }
-        if (textMode) {
-            Spacer(Modifier.width(10.dp))
-            // 发送中不丢草稿:发送中禁用而非丢弃草稿;仅在点击被接受时清空。
-            Box(
-                Modifier
-                    .size(36.dp)
-                    .background(
-                        if (draft.isNotBlank() && !sending) Color(0xFFE84D8A) else Color(0xFFD9D9D9),
-                        CircleShape,
+            Spacer(Modifier.width(12.dp))
+            Box {
+                Box(
+                    Modifier
+                        .size(30.dp)
+                        .background(Color(0xFF2A2A2A), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = "更多",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
                     )
-                    .clickable(enabled = !sending) {
-                        if (draft.isNotBlank()) {
-                            onSend(draft)
-                            draft = ""
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "发送",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp),
+                }
+                // 红点角标(参考图)
+                Box(
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .size(8.dp)
+                        .background(Color(0xFFFF3B30), CircleShape),
                 )
             }
+            if (textMode) {
+                Spacer(Modifier.width(10.dp))
+                // 发送中不丢草稿:发送中禁用而非丢弃草稿;仅在点击被接受时清空。
+                Box(
+                    Modifier
+                        .size(36.dp)
+                        .background(
+                            if (draft.isNotBlank() && !sending) Color(0xFFE84D8A) else Color(0xFFD9D9D9),
+                            CircleShape,
+                        )
+                        .clickable(enabled = !sending) {
+                            if (draft.isNotBlank()) {
+                                onSend(draft)
+                                draft = ""
+                            }
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "发送",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        }
+        // 按住中:按钮上方浮一行小字提示(浮层不挤布局;Material 淡入+上滑动效)
+        AnimatedVisibility(
+            visible = holding,
+            enter = fadeIn(tween(150)) + slideInVertically(tween(180)) { it / 2 },
+            exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 2 },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .offset(y = (-32).dp),
+        ) {
+            Text(
+                holdHint,
+                color = hintColor,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            )
         }
     }
 }

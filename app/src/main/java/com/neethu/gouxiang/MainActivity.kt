@@ -186,10 +186,10 @@ class MainActivity : ComponentActivity() {
         // 状态面板(E 工作包 E3):聊天页状态条点击进入
         val statusPanelId by vm.statusPanelConversationId.collectAsState()
         val statusPanelUi by vm.statusPanelUi.collectAsState()
-        // 按住说话·语音输入(F4-P1:录音→ASR 转写→填草稿,不直接发送)
-        val voiceInputActive by vm.voiceInputActive.collectAsState()
+        // 按住说话·语音输入(2026-10-31 口径:原地松手直接发送/上划取消/侧移动作场景输入)
         val voiceInputRecognizing by vm.voiceInputRecognizing.collectAsState()
         val voiceInputTranscribed by vm.voiceInputTranscribed.collectAsState()
+        val voiceInputLevel by vm.voiceInputLevel.collectAsState()
         val voiceInputNotice by vm.voiceInputNotice.collectAsState()
         // F4 语音输入失败/没听清:Toast 兜底(事件流消费,报告 §5.2 方案口径)
         val toastContext = androidx.compose.ui.platform.LocalContext.current
@@ -429,8 +429,8 @@ class MainActivity : ComponentActivity() {
                     onRewind = { vm.rewindToMessage(it) },
                     onRegenerate = { vm.regenerateTurn(it) },
                     onHoldStart = holdStartWithPermission,
-                    onHoldRelease = { vm.voiceInputRelease() },
-                    holdActive = voiceInputActive,
+                    onHoldRelease = { vm.voiceInputRelease(it) },
+                    voiceLevel = voiceInputLevel,
                     recognizing = voiceInputRecognizing,
                     voiceTranscribed = voiceInputTranscribed,
                     onVoiceTranscribedConsumed = { vm.consumeVoiceInputTranscribed() },
@@ -465,8 +465,8 @@ class MainActivity : ComponentActivity() {
                     streamDraft = streamDraft,
                     onRetryFailedTurn = { vm.retryFailedTurn() },
                     onHoldStart = holdStartWithPermission,
-                    onHoldRelease = { vm.voiceInputRelease() },
-                    holdActive = voiceInputActive,
+                    onHoldRelease = { vm.voiceInputRelease(it) },
+                    voiceLevel = voiceInputLevel,
                     recognizing = voiceInputRecognizing,
                     voiceTranscribed = voiceInputTranscribed,
                     onVoiceTranscribedConsumed = { vm.consumeVoiceInputTranscribed() },

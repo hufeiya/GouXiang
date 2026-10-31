@@ -895,19 +895,39 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ── 按住说话·语音输入(F4-P1:聊天输入条复用 F6 录音+ASR 管线)──────
 
     /**
-     * 语音输入状态机(与 [VoiceCallEngine] 的 holdStart/holdRelease 同构,
-     * 但松手后不进 LLM 回合 —— ASR 转写结果填回输入条草稿,用户可改再发,
-     * 对齐猫箱「转写可改」;失败置 notice 给 Toast 兜底,录音器永留后台线程)。
+     * 松手手势 → 转写结果去向(2026-10-31 用户口径:普通松手直接发送,
+     * 上划取消,侧移把语音转成「(动作)」括号文本填输入框继续编辑)。
+     */
+    enum class VoiceInputAction {
+        /** 原地松手:转写 → 直接发送进回合。 */
+        SEND,
+        /** 侧移松手:转写 → 「(文本)」动作场景括号文本填入输入框,用户可改再发。 */
+        INPUT,
+        /** 上划出按钮松手:停录丢弃,什么都不发。 */
+        CANCEL,
+    }
+
+    /**
+     * 语音输入状态机(与 [VoiceCallEngine] 的 holdStart/holdRelease 同构;
+     * 松手去向见 [VoiceInputAction] 三态,失败置 notice 给 Toast 兜底,
+     * 录音器永留后台线程)。
      *
      * 录音格式与 F6 完全同源:[WavRecorder](16-bit PCM 单声道 16 kHz → WAV),
      * 误触丢弃阈值同 [VoiceCallEngine.MIN_WAV_BYTES];ASR = 硅基
      * Qwen3-ASR(适配器与 Key 解析同 F6 的 [VoiceCallEngine.transcribe] 口径)。
      */
-    private val recorder = com.neethu.gouxiang.ai.speech.WavRecorder()
+    private val recorder = com.neethu.gouxiang.ai.speech.WavRecorder().also { r ->
+        // 实时音量 → 状态流(输入条按住中的 ||||| 波形;音频线程触发,StateFlow 自带合流)
+        r.onLevel = { _voiceInputLevel.value = it }
+    }
 
     /** 语音输入进行中(输入条按住态高亮);holdRelease 开始转写后即 false。 */
     private val _voiceInputActive = MutableStateFlow(false)
     val voiceInputActive: StateFlow<Boolean> = _voiceInputActive.asStateFlow()
+
+    /** 录音实时音量(0..1;输入条按住中的波形条;未录音恒 0)。 */
+    private val _voiceInputLevel = MutableStateFlow(0f)
+    val voiceInputLevel: StateFlow<Float> = _voiceInputLevel.asStateFlow()
 
     /** 语音输入失败提示(空=无);Toast 消费后清空。 */
     private val _voiceInputNotice = MutableStateFlow("")
@@ -925,6 +945,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun voiceInputStart() {
         if (_voiceInputActive.value || _voiceInputRecognizing.value) return
         _voiceInputNotice.value = ""
+        _voiceInputLevel.value = 0f
         try {
             recorder.start()
             _voiceInputActive.value = true
@@ -934,10 +955,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** 按住说话·松手停录 → ASR 转写 → [voiceInputTranscribed] 出结果。 */
-    fun voiceInputRelease() {
+    /**
+     * 按住说话·松手。按手势去向分发(2026-10-31 口径):
+     * - [VoiceInputAction.CANCEL] 上划取消:停录丢弃,不发不转写;
+     * - [VoiceInputAction.SEND] 原地松手:转写 → 直接发送进回合(回合进行中
+     *   时回落填输入框,口语不丢,给 notice 说明);
+     * - [VoiceInputAction.INPUT] 侧移:转写 → 「(文本)」动作场景括号文本填
+     *   输入框(协议口径:动作=括号文本,直接夹在消息里),用户可改再发。
+     */
+    fun voiceInputRelease(action: VoiceInputAction = VoiceInputAction.SEND) {
         if (_voiceInputActive.value.not()) return
         _voiceInputActive.value = false
+        _voiceInputLevel.value = 0f
+        if (action == VoiceInputAction.CANCEL) {
+            viewModelScope.launch {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    recorder.stop()
+                    recorder.takeWav() // 丢弃
+                }
+            }
+            return
+        }
         viewModelScope.launch {
             _voiceInputRecognizing.value = true
             try {
@@ -952,8 +990,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 if (text.isBlank()) {
                     _voiceInputNotice.value = "没听清,再试一次?"
-                } else {
+                } else if (action == VoiceInputAction.INPUT) {
+                    _voiceInputTranscribed.value = "($text)"
+                } else if (_chatUi.value.sending) {
+                    // 回合进行中发不进去(sendChatMessage 有 sending 拦截),
+                    // 语音转写不丢:填输入框让用户稍后发。
                     _voiceInputTranscribed.value = text
+                    _voiceInputNotice.value = "对方正在回复,已转入输入框"
+                } else {
+                    sendChatMessage(text)
                 }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

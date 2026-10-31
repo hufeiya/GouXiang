@@ -22,6 +22,13 @@ class WavRecorder(private val sampleRate: Int = 16_000) {
     @Volatile private var running = false
     private val chunks = java.util.Collections.synchronizedList(ArrayDeque<ByteArray>())
 
+    /** 最近一块 PCM 的峰值音量(0..1,按 int16 满幅归一;音频线程更新)。 */
+    @Volatile var level: Float = 0f
+        private set
+
+    /** 音量回调(音频线程触发;UI 侧用于按住说话的实时波形)。 */
+    var onLevel: ((Float) -> Unit)? = null
+
     /** 开始录音(重复调用无副作用)。麦克风被占用/无权限时抛 IOException。 */
     @SuppressLint("MissingPermission") // 运行时权限由页面申请,这里只管开录
     fun start() {
@@ -49,6 +56,7 @@ class WavRecorder(private val sampleRate: Int = 16_000) {
         record = recorder
         recorder.startRecording()
         running = true
+        level = 0f
         thread = Thread {
             val buf = ByteArray(2048)
             while (running) {
@@ -57,7 +65,13 @@ class WavRecorder(private val sampleRate: Int = 16_000) {
                 } catch (_: Exception) {
                     break
                 }
-                if (n > 0) chunks.add(buf.copyOf(n))
+                if (n > 0) {
+                    chunks.add(buf.copyOf(n))
+                    peakLevel(buf, n)?.let { peak ->
+                        level = peak
+                        try { onLevel?.invoke(peak) } catch (_: Exception) { }
+                    }
+                }
             }
         }.also { it.start() }
     }
@@ -66,6 +80,7 @@ class WavRecorder(private val sampleRate: Int = 16_000) {
     fun stop() {
         val r = record ?: return
         running = false
+        level = 0f
         try { r.stop() } catch (_: Exception) { }
         thread?.let { t -> try { t.join(1000) } catch (_: InterruptedException) { } }
         thread = null
@@ -124,6 +139,22 @@ class WavRecorder(private val sampleRate: Int = 16_000) {
         private fun writeShortLe(out: java.io.ByteArrayOutputStream, v: Int) {
             out.write(v and 0xFF)
             out.write((v shr 8) and 0xFF)
+        }
+
+        /** 16-bit LE PCM 峰值 → 0..1(满幅归一,带轻度感知抬升让波形更活);n 不足一采样返回 null。 */
+        private fun peakLevel(pcm: ByteArray, n: Int): Float? {
+            if (n < 2) return null
+            var peak = 0
+            var i = 0
+            val end = n - 1
+            while (i < end) {
+                val sample = ((pcm[i + 1].toInt() shl 8) or (pcm[i].toInt() and 0xFF)).toShort().toInt()
+                val abs = if (sample < 0) -sample else sample
+                if (abs > peak) peak = abs
+                i += 2
+            }
+            val norm = peak / 32768f
+            return (norm * 1.6f).coerceIn(0f, 1f)
         }
     }
 }
