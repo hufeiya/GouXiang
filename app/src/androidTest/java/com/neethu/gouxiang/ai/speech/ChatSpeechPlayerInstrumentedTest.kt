@@ -43,7 +43,7 @@ class ChatSpeechPlayerInstrumentedTest {
             scope, { AiConfig(ttsVoice = "") },
             { error("A character voice must not be synthesized when none is configured") },
             object : ChatSpeechPlayback {
-                override fun play(result: TtsResult) = error("Unexpected character voice playback")
+                override fun play(result: TtsResult, onFinished: () -> Unit) = error("Unexpected character voice playback")
                 override fun stop() = Unit
             },
             fallback,

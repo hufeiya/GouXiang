@@ -109,9 +109,16 @@ internal class DerivativeExecutor(private val app: Context) {
             var imageFailed = false
             for (voice in voices) {
                 if (voice.imageFile.isNotBlank()) continue
-                val prompt = "${character.appearance}。情绪:${voice.title},${voice.echo}。${character.appearanceStyle},柔和电影感光影,情绪特写,竖版构图"
+                // 参照人物封面形象生成(图生图):封面存在则作参考图;缺失回落纯文生图
+                val coverFile = character.avatarFile.takeIf { it.isNotBlank() }
+                    ?.let { java.io.File(java.io.File(app.filesDir, "avatars"), it) }
+                val prompt = "${character.appearance}。保持参考图中人物的样貌、发型与穿搭," +
+                    "画面情绪:${voice.title},${(voice.content.ifBlank { voice.echo }).take(80)}。" +
+                    "${character.appearanceStyle},柔和电影感光影,情绪特写,竖版构图"
                 val file = try {
-                    imageProvider().getOrGenerateInnerVoiceImage(characterKey = "inner-voice-${voice.id}", prompt = prompt)
+                    imageProvider().getOrGenerateInnerVoiceImage(
+                        characterKey = "inner-voice-${voice.id}", prompt = prompt, referenceImage = coverFile,
+                    )
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) { null }

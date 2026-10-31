@@ -1812,6 +1812,72 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    // ── 心声详情(F8 升级:拍立得/信纸页的朗读与动作)────────────────
+
+    /** 详情页朗读中(TTS 播放可见态;与聊天朗读共用同一播放器,天然互斥)。 */
+    val innerVoiceSpeaking: StateFlow<Boolean> get() = chatSpeechPlayer.speaking
+
+    /** 朗读心声全文(翻到信纸自动触发/喇叭重播;剥括号旁白后按角色音色合成)。 */
+    fun speakInnerVoice(text: String) {
+        val conversationId = _innerVoiceConversationId.value ?: return
+        val clean = com.neethu.gouxiang.ai.speech.CallSpeech.stripActions(text)
+        if (clean.isBlank()) return
+        chatSpeechPlayer.speakText(clean, onUnavailable = {
+            android.widget.Toast.makeText(
+                getApplication(), "语音播放失败，请检查语音服务和系统文字转语音设置", android.widget.Toast.LENGTH_LONG,
+            ).show()
+        }) { speechVoiceForConversation(conversationId) }
+    }
+
+    /** 停止朗读(翻回图片/离开详情/关闭心声页)。 */
+    fun stopInnerVoiceSpeech() {
+        chatSpeechPlayer.stop()
+    }
+
+    /** 心声配图设为该会话聊天背景(与合照同通道;无图/会话缺失为空操作)。 */
+    fun setInnerVoiceAsChatBackground(voice: com.neethu.gouxiang.data.InnerVoiceEntity) {
+        val conversationId = _innerVoiceConversationId.value ?: return
+        if (voice.imageFile.isBlank()) return
+        ChatBackgroundPrefs.setBackground(getApplication(), conversationId, voice.imageFile)
+    }
+
+    /** 重新生成该条心声(删旧条→入队新一批;页内 generating 态复用)。 */
+    fun regenerateInnerVoice(voice: com.neethu.gouxiang.data.InnerVoiceEntity) {
+        if (_innerVoiceUi.value.generating) return
+        deleteInnerVoice(voice.id)
+        generateInnerVoices()
+    }
+
+    /** 配图下载到系统相册 Pictures/GouXiang(minSdk 29 免权限);结果经回调供 UI toast。 */
+    fun downloadInnerVoiceImage(voice: com.neethu.gouxiang.data.InnerVoiceEntity, onDone: (Boolean) -> Unit) {
+        if (voice.imageFile.isBlank()) {
+            onDone(false)
+            return
+        }
+        viewModelScope.launch {
+            val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                saveImageToGallery(java.io.File(voice.imageFile))
+            }
+            onDone(ok)
+        }
+    }
+
+    /** MediaStore 插入 Pictures/GouXiang 并拷贝字节;任何失败返回 false。 */
+    private fun saveImageToGallery(source: java.io.File): Boolean = try {
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, "gouxiang-inner-voice-${System.currentTimeMillis()}.jpg")
+            put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/GouXiang")
+        }
+        val resolver = getApplication<Application>().contentResolver
+        val uri = resolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return false
+        resolver.openOutputStream(uri)?.use { out ->
+            source.inputStream().use { it.copyTo(out) }
+        } != null
+    } catch (_: Exception) {
+        false
+    }
+
     // ── 朋友圈页 06(H1 多角色时间线;入口=角色主页「Ta 的朋友圈」/发现页)──
 
     /** 朋友圈页打开的会话 id(null=未进入;[MOMENTS_GLOBAL_ID]=全局朋友圈)。 */

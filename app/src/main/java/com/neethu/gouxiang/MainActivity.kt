@@ -786,6 +786,7 @@ class MainActivity : ComponentActivity() {
         // 渲染序在角色主页之后 —— 同层后声明者在上(与记忆页验收实锤同款,
         // 保证心声弹层盖在角色主页上面、上半段透出主页)。X/点外/返回 = 关闭。
         if (innerVoiceId != null) {
+            val innerVoiceSpeaking by vm.innerVoiceSpeaking.collectAsState()
             Box(Modifier.fillMaxSize()) {
                 com.neethu.gouxiang.ui.innervoice.InnerVoiceScreen(
                     state = innerVoiceUi,
@@ -797,6 +798,13 @@ class MainActivity : ComponentActivity() {
                         innerVoiceUi.characterId.takeIf { it > 0 }?.let { vm.toggleInnerVoiceAuto(it, enabled) }
                     },
                     onDelete = { vm.deleteInnerVoice(it) },
+                    // 详情页(拍立得/信纸):朗读 + 底部三动作。
+                    speaking = innerVoiceSpeaking,
+                    onSpeak = { text -> vm.speakInnerVoice(text) },
+                    onStopSpeak = { vm.stopInnerVoiceSpeech() },
+                    onRegenerate = { vm.regenerateInnerVoice(it) },
+                    onSetBackground = { vm.setInnerVoiceAsChatBackground(it) },
+                    onDownload = { voice, onResult -> vm.downloadInnerVoiceImage(voice, onResult) },
                 )
             }
         }

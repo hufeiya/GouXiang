@@ -8,6 +8,12 @@ data class ImageGenRequest(
     val prompt: String,
     /** 尺寸,火山 seedream / 硅基 Kolors 均支持 "WxH" 字符串。 */
     val size: String = "1024x1024",
+    /**
+     * 参考图(`data:<mime>;base64,<payload>`,通常为角色封面)。非空时走
+     * 图生图(i2i):火山 Ark seedream / 硅基 Kolors 的 `images/generations`
+     * 均支持 `image` 参考图参数(封装形态差异由适配器处理)。null = 纯文生图。
+     */
+    val referenceImage: String? = null,
 )
 
 /** 生图结果:[urls] 为服务商临时 URL,调用方负责下载落盘缓存。 */

@@ -5,6 +5,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
@@ -30,11 +31,16 @@ import java.util.concurrent.TimeUnit
  *
  * 非 2xx 返回 [ImageGenResult.Failure] 带响应预览(调用方走本地占位图兜底,
  * 不抛异常——头像生成失败是可预期的降级路径,不是崩溃路径)。
+ *
+ * 参考图([ImageGenRequest.referenceImage] 非空 = 图生图)两家封装形态不同:
+ * 火山 Ark seedream 要求 JSON 数组(`"image":["data:…"]`),硅基 Kolors 接受
+ * 字符串——由 [referenceAsArray] 按端点装配(两家对无参考图请求均不带该键)。
  */
 class OpenAiCompatibleImageGenAdapter(
     baseUrl: String,
     private val apiKey: String,
     private val model: String,
+    private val referenceAsArray: Boolean = false,
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -67,7 +73,7 @@ class OpenAiCompatibleImageGenAdapter(
         }
     }
 
-    /** 单函数构建请求体,便于单测断言两把尺寸键同时在场。 */
+    /** 单函数构建请求体,便于单测断言两把尺寸键同时在场(有参考图再断 image 键)。 */
     internal fun buildRequestBody(request: ImageGenRequest): String =
         json.encodeToString(
             JsonObject.serializer(),
@@ -78,6 +84,13 @@ class OpenAiCompatibleImageGenAdapter(
                 put("image_size", JsonPrimitive(request.size))
                 put("n", JsonPrimitive(1))
                 put("response_format", JsonPrimitive("url"))
+                request.referenceImage?.takeIf { it.isNotBlank() }?.let { ref ->
+                    if (referenceAsArray) {
+                        put("image", buildJsonArray { add(JsonPrimitive(ref)) })
+                    } else {
+                        put("image", JsonPrimitive(ref))
+                    }
+                }
             },
         )
 

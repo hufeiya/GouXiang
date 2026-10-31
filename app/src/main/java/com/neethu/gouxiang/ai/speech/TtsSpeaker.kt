@@ -8,6 +8,8 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -21,6 +23,7 @@ class TtsSpeaker {
 
     private var track: AudioTrack? = null
     private var writeJob: Job? = null
+    private val lock = Any()
 
     /** 当前是否在播放(字幕页「点击打断」的可见性)。 */
     @Volatile var playing: Boolean = false
@@ -71,31 +74,55 @@ class TtsSpeaker {
             Log.w(TAG, "AudioTrack create failed", e)
             return
         }
-        track = t
-        t.play()
-        playing = true
-        // 写 PCM 放后台:长句百 ms 级写入不卡主线程;完成后同步回调
-        writeJob = CoroutineScope(Dispatchers.IO).launch {
+        val finished = onPlaybackFinished
+        synchronized(lock) {
+            track = t
+            t.play()
+            playing = true
+        }
+        // 写入完成时 AudioTrack 仍有缓冲，等待播放头到达末尾再通知调用方。
+        val job = CoroutineScope(Dispatchers.IO).launch {
             try {
-                t.write(pcm, 0, pcm.size)
+                var written = 0
+                while (isActive && written < pcm.size) {
+                    val count = t.write(pcm, written, pcm.size - written)
+                    if (count <= 0) break
+                    written += count
+                }
+                val frames = written / 2L // 单声道 16-bit PCM
+                val deadline = android.os.SystemClock.elapsedRealtime() + frames * 1000L / sampleRate + 3000L
+                while (isActive && (t.playbackHeadPosition.toLong() and 0xffffffffL) < frames &&
+                    android.os.SystemClock.elapsedRealtime() < deadline
+                ) delay(50)
             } catch (_: Exception) {
             }
-            playing = false
-            val cb = onPlaybackFinished
-            cb?.invoke()
+            val completed = synchronized(lock) {
+                if (track !== t) false else {
+                    track = null
+                    playing = false
+                    try { t.release() } catch (_: Exception) { }
+                    true
+                }
+            }
+            if (completed) finished?.invoke()
         }
+        synchronized(lock) { if (track === t) writeJob = job else job.cancel() }
     }
 
     /** 立即打断(停止播放,回聆听态由调用方驱动状态机)。 */
     fun stop() {
-        writeJob?.cancel()
-        writeJob = null
-        val t = track ?: run { playing = false; return }
-        track = null
-        try { t.pause() } catch (_: Exception) { }
-        try { t.flush() } catch (_: Exception) { }
-        try { t.release() } catch (_: Exception) { }
-        playing = false
+        synchronized(lock) {
+            writeJob?.cancel()
+            writeJob = null
+            val t = track
+            track = null
+            if (t != null) {
+                try { t.pause() } catch (_: Exception) { }
+                try { t.flush() } catch (_: Exception) { }
+                try { t.release() } catch (_: Exception) { }
+            }
+            playing = false
+        }
     }
 
     /** WAV(RIFF)容器 → 纯 PCM 载荷(44 字节头;魔数不匹配原样返回)。 */

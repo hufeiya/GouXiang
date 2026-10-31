@@ -29,7 +29,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SidestoryRecordEntity::class,
         ChatDerivativeEntity::class,
     ],
-    version = 13,
+    version = 14,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -52,6 +52,17 @@ abstract class GouXiangDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        /**
+         * 心声升级迁移(v13→v14,单列纯增量):`inner_voices` 加 `content`
+         * 心声正文短文列(既有行回填 '' = 详情信纸正文回落 echo 展示,旧数据
+         * 可读不崩);其余列/表不动。
+         */
+        val MIGRATION_13_14: Migration = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE inner_voices ADD COLUMN content TEXT NOT NULL DEFAULT ''")
+            }
+        }
 
         /**
          * H 工作包迁移(v12→v13,纯增量:6 列 + 1 表):

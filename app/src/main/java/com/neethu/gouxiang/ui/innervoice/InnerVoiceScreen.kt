@@ -26,7 +26,11 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -66,11 +70,33 @@ fun InnerVoiceScreen(
     onToggleAuto: (Boolean) -> Unit = {},
     /** G4 内容管理:删除一张心声卡(配图文件一并清理)。 */
     onDelete: (Long) -> Unit = {},
+    /** 详情页朗读中(TTS 播放可见态,驱动喇叭图标)。 */
+    speaking: Boolean = false,
+    /** 详情页:朗读心声全文(翻到信纸自动触发/喇叭重播)。 */
+    onSpeak: (String) -> Unit = {},
+    /** 详情页:停止朗读(翻回图片/离开详情)。 */
+    onStopSpeak: () -> Unit = {},
+    /** 详情页动作:重新生成该条心声(删旧条→入队新一批)。 */
+    onRegenerate: (com.neethu.gouxiang.data.InnerVoiceEntity) -> Unit = {},
+    /** 详情页动作:配图设为聊天背景。 */
+    onSetBackground: (com.neethu.gouxiang.data.InnerVoiceEntity) -> Unit = {},
+    /** 详情页动作:配图下载到相册(结果回调供 toast)。 */
+    onDownload: (com.neethu.gouxiang.data.InnerVoiceEntity, (Boolean) -> Unit) -> Unit = { _, onResult -> onResult(false) },
     modifier: Modifier = Modifier,
 ) {
-    BackHandler { onDismiss() }
+    // 详情页 = 页内全屏覆盖层(点卡片进入;返回/X/系统返回先关详情再关弹层)
+    var detailVoice by remember { mutableStateOf<com.neethu.gouxiang.data.InnerVoiceEntity?>(null) }
+    // 详情对应条目被删(重新生成 = 删旧条入新批)→ 自动回列表
+    LaunchedEffect(state.items, detailVoice) {
+        val dv = detailVoice ?: return@LaunchedEffect
+        if (state.items.none { it.id == dv.id }) detailVoice = null
+    }
+    BackHandler {
+        if (detailVoice != null) detailVoice = null else onDismiss()
+    }
 
-    Column(modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
         // 上半段露出角色主页(dump:touch_outside 可点区域),点外收起
         Box(
             Modifier
@@ -197,9 +223,15 @@ fun InnerVoiceScreen(
                         }
                     }
                 }
-                // ── 心声卡列表(dump rv_events,倒序最新在上)──────────────
+                // ── 心声卡列表(dump rv_events,倒序最新在上;点卡进详情)──
                 items(state.items, key = { it.id }) { voice ->
-                    VoiceCard(voice, state.imageResults[voice.id], onRetryImage, onDelete)
+                    VoiceCard(
+                        voice,
+                        state.imageResults[voice.id],
+                        onRetryImage,
+                        onDelete,
+                        onOpen = { detailVoice = voice },
+                    )
                 }
                 if (state.items.isEmpty() && !state.generating && !state.loading) {
                     item(key = "empty") {
@@ -229,23 +261,43 @@ fun InnerVoiceScreen(
                 }
             }
             Spacer(Modifier.navigationBarsPadding())
+            }
+        }
+        // ── 详情覆盖层(拍立得/信纸;全屏盖住弹层与主页)────────────────
+        detailVoice?.let { voice ->
+            InnerVoiceDetailOverlay(
+                voice = voice,
+                characterName = state.characterName,
+                speaking = speaking,
+                onBack = { detailVoice = null },
+                onSpeak = onSpeak,
+                onStopSpeak = onStopSpeak,
+                onRegenerate = onRegenerate,
+                onSetBackground = onSetBackground,
+                onDownload = onDownload,
+            )
         }
     }
 }
 
-/** 单张心声卡(dump 每卡:img_cover + tv_title + tv_desc + tv_expire;G4 增加删除操作)。 */
+/** 单张心声卡(dump 每卡:img_cover + tv_title + tv_desc + tv_expire;G4 删除;升级后整卡可点进详情)。 */
 @Composable
 private fun VoiceCard(
     voice: InnerVoiceEntity,
     image: com.neethu.gouxiang.ui.ImageGenerationState?,
     onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit,
     onDelete: (Long) -> Unit,
+    onOpen: () -> Unit = {},
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
             .background(Color.White.copy(alpha = 0.14f), RoundedCornerShape(18.dp))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onOpen() }
             .padding(12.dp),
     ) {
         // 左侧竖版配图(dump img_cover [77,810][243,1076] ≈ 166×266,同比例缩小);
@@ -280,11 +332,12 @@ private fun VoiceCard(
             )
             Spacer(Modifier.height(5.dp))
             Text(
-                voice.echo,
+                // 升级后心声 = 短文 + 配图:列表预览正文短文,旧数据(无 content)回落 echo
+                voice.content.ifBlank { voice.echo },
                 color = Color.White.copy(alpha = 0.78f),
                 fontSize = 14.sp,
                 lineHeight = 21.sp,
-                maxLines = 2,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
             if (voice.isStale) {

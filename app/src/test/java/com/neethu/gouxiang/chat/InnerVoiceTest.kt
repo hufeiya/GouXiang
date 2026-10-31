@@ -23,24 +23,46 @@ class InnerVoiceTest {
     @Test
     fun `parser accepts json wrapped in chatter and markdown fences`() {
         val raw = "好的:\n```json\n{\"voices\":[" +
-            "{\"title\":\"呛水仍不服输\",\"echo\":\"你还记得我硬学会游泳的模样吗\"}," +
-            "{\"title\":\"小情绪\",\"echo\":\"今天有点想你\"}" +
+            "{\"title\":\"呛水仍不服输\",\"echo\":\"你还记得我硬学会游泳的模样吗\",\"content\":\"海水真冷啊\\n\\n可我记得你说过\"}," +
+            "{\"title\":\"小情绪\",\"echo\":\"今天有点想你\",\"content\":\"短文\"}" +
             "]}\n```\n以上。"
         val drafts = InnerVoiceGenerator.parse(raw)
         assertEquals(2, drafts.size)
         assertEquals("呛水仍不服输", drafts[0].title)
         assertEquals("你还记得我硬学会游泳的模样吗", drafts[0].echo)
+        assertEquals("海水真冷啊\n\n可我记得你说过", drafts[0].content)
     }
 
     @Test
-    fun `parser clamps overlong title and echo`() {
+    fun `parser tolerates legacy json without content`() {
+        val drafts = InnerVoiceGenerator.parse(
+            "{\"voices\":[{\"title\":\"旧形态\",\"echo\":\"只有短句\"}]}",
+        )
+        assertEquals(1, drafts.size)
+        assertEquals("", drafts[0].content)
+    }
+
+    @Test
+    fun `parser escapes raw newlines inside json strings`() {
+        // 模型偶发在字符串里直接换行(违反 JSON):预处理应转义且段落分隔保留
         val raw = "{\"voices\":[" +
-            "{\"title\":\"" + "标".repeat(50) + "\",\"echo\":\"" + "心".repeat(80) + "\"}" +
+            "{\"title\":\"海边\",\"echo\":\"你还记得吗\",\"content\":\"海水真冷啊。\n\n可我记得你说过。\"}" +
+            "]}"
+        val drafts = InnerVoiceGenerator.parse(raw)
+        assertEquals(1, drafts.size)
+        assertEquals("海水真冷啊。\n\n可我记得你说过。", drafts[0].content)
+    }
+
+    @Test
+    fun `parser clamps overlong title echo and content`() {
+        val raw = "{\"voices\":[" +
+            "{\"title\":\"" + "标".repeat(50) + "\",\"echo\":\"" + "心".repeat(80) + "\",\"content\":\"" + "文".repeat(400) + "\"}" +
             "]}"
         val drafts = InnerVoiceGenerator.parse(raw)
         assertEquals(1, drafts.size)
         assertEquals(InnerVoiceGenerator.TITLE_MAX_CHARS, drafts[0].title.length)
         assertEquals(InnerVoiceGenerator.ECHO_MAX_CHARS, drafts[0].echo.length)
+        assertEquals(InnerVoiceGenerator.CONTENT_MAX_CHARS, drafts[0].content.length)
     }
 
     @Test
@@ -64,12 +86,14 @@ class InnerVoiceTest {
     @Test
     fun `to entities stamps sequential at and returns empty below minimum`() {
         val two = "{\"voices\":[" +
-            "{\"title\":\"a\",\"echo\":\"第一条\"},{\"title\":\"b\",\"echo\":\"第二条\"}]}"
+            "{\"title\":\"a\",\"echo\":\"第一条\",\"content\":\"正文甲\"},{\"title\":\"b\",\"echo\":\"第二条\",\"content\":\"正文乙\"}]}"
         val ok = InnerVoiceGenerator.toEntities(two, characterId = 7L, baseAt = 1000L)
         assertEquals(2, ok.size)
         assertEquals(7L, ok[0].characterId)
         assertEquals(1000L, ok[0].at)
         assertEquals(1001L, ok[1].at) // 依次错开,倒序列表顺序稳定
+        assertEquals("正文甲", ok[0].content)
+        assertEquals("正文乙", ok[1].content)
         // 不足 2 条 = 生成失败(空列表)
         val one = "{\"voices\":[{\"title\":\"a\",\"echo\":\"只有一条\"}]}"
         assertTrue(InnerVoiceGenerator.toEntities(one, 7L, 1000L).isEmpty())
@@ -97,8 +121,10 @@ class InnerVoiceTest {
         assertTrue(p.contains("[记忆]"))
         assertTrue(p.contains("我的称呼:老公"))
         assertTrue(p.contains("2~4 条心声"))
-        // 输出契约:单行 JSON shape
+        // 输出契约:单行 JSON shape(升级:短文 content 字段)
         assertTrue(p.contains("\"voices\""))
+        assertTrue(p.contains("\"content\""))
+        assertTrue(p.contains("短文"))
     }
 
     @Test

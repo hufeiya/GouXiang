@@ -19,10 +19,11 @@ import kotlinx.serialization.json.jsonObject
  *
  * - 素材 = 角色人设 + 画像/关系记忆 + 事件记忆 TopN + 最近对话回合(共用
  *   [ChatOrchestrator.HISTORY_LIMIT] 编码回放,与聊天上下文同源);
- * - 输出契约 = 单行 JSON {"voices":[{title, echo}×2~4]},宽松解析
+ * - 输出契约 = 单行 JSON {"voices":[{title, echo, content}×2~4]},宽松解析
  *   (移植 MemoryOpsParser 的截首个平衡 JSON + lenient 链,单独收敛为
- *   心声 shape,不复用 ops 语义);
- * - 客户端盖章:title ≤12 字、echo ≤40 字(基准卡为 6 字/14 字量级)、
+ *   心声 shape,不复用 ops 语义);content = 详情信纸页的第一人称短文,
+ *   缺失(旧形态)回落空由展示层退回 echo;
+ * - 客户端盖章:title ≤12 字、echo ≤40 字、content ≤300 字、
  *   条数 2~4(超取前 4,不足 2 判失败重试),at 由调用方传入错开;
  * - 全链路失败安全:LLM 未配置/流失败/解析失败 → 返回空列表,UI 提示
  *   「生成失败」不崩溃(与 F2/F3 兜底约定一致)。
@@ -30,12 +31,13 @@ import kotlinx.serialization.json.jsonObject
 object InnerVoiceGenerator {
 
     /** 单条心声的 LLM 输出(解析中间态)。 */
-    data class Draft(val title: String, val echo: String)
+    data class Draft(val title: String, val echo: String, val content: String)
 
     const val MIN_VOICES = 2
     const val MAX_VOICES = 4
     const val TITLE_MAX_CHARS = 12
     const val ECHO_MAX_CHARS = 40
+    const val CONTENT_MAX_CHARS = 300
 
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
@@ -50,13 +52,16 @@ object InnerVoiceGenerator {
         s.appendLine("[人设] ${character.profile}")
         MemoryInjection.block(character.name, memories, "")?.let { s.appendLine(it) }
         s.appendLine("[输出协议] 只输出一行 JSON,不要输出任何其他内容:")
-        s.appendLine("{\"voices\":[{\"title\":\"6字以内的小标题\",\"echo\":\"20字以内的第一人称内心短句\"}]}")
+        s.appendLine("{\"voices\":[{\"title\":\"6字以内的小标题\",\"echo\":\"20字以内的第一人称内心短句\",\"content\":\"150~250字的第一人称短文,分2~4段,段与段之间用\\n\\n分隔\"}]}")
         s.appendLine("规则:")
-        s.appendLine("1. 输出 $MIN_VOICES~$MAX_VOICES 条心声;每条 title 不超过 ${TITLE_MAX_CHARS}个字,echo 不超过 ${ECHO_MAX_CHARS}个字。")
+        s.appendLine("1. 输出 $MIN_VOICES~$MAX_VOICES 条心声;每条 title 不超过 ${TITLE_MAX_CHARS}个字,echo 不超过 ${ECHO_MAX_CHARS}个字,content 不超过 ${CONTENT_MAX_CHARS}个字。")
         s.appendLine("2. 全部第一人称「我」,写给用户,语气贴合人设与两人的关系;" +
             "可以引用你们之间具体的事(借用上面记忆里的细节),也可以是此刻的小情绪。")
-        s.appendLine("3. 只写心声本身:不写分析、计划、旁白,不出现「JSON」「字段」「输出」这类字眼。")
-        s.appendLine("4. 几条之间话题错开(一条贴最近发生的事,一条写日常小情绪),不要重复同一个意思。")
+        s.appendLine("3. content 是完整的心里话短文:像在纸上悄悄写给对方的一小段独白," +
+            "有场景细节、有情绪起伏,可以展开讲一件事的经过和感受;echo 是这句话的一句话签名版," +
+            "要与 content 呼应但不逐字重复。")
+        s.appendLine("4. 只写心声本身:不写分析、计划、旁白,不出现「JSON」「字段」「输出」这类字眼。")
+        s.appendLine("5. 几条之间话题错开(一条贴最近发生的事,一条写日常小情绪),不要重复同一个意思。")
         return s.toString().trim()
     }
 
@@ -76,7 +81,7 @@ object InnerVoiceGenerator {
      * 截断)。@return 合法草稿(0 < size;空列表 = 无法解析或无可用心声)。
      */
     fun parse(raw: String): List<Draft> {
-        val fragment = firstJsonObject(raw) ?: return emptyList()
+        val fragment = firstJsonObject(escapeRawNewlines(raw)) ?: return emptyList()
         val root = try {
             json.parseToJsonElement(fragment).jsonObject
         } catch (_: Exception) {
@@ -88,19 +93,49 @@ object InnerVoiceGenerator {
             .mapNotNull { obj ->
                 val title = clamp(obj.strMember("title"), TITLE_MAX_CHARS)
                 val echo = clamp(obj.strMember("echo"), ECHO_MAX_CHARS)
+                val content = clamp(obj.strMember("content"), CONTENT_MAX_CHARS)
                 if (title.isEmpty() && echo.isEmpty()) return@mapNotNull null
                 Draft(
                     title = title.ifEmpty { echo.take(TITLE_MAX_CHARS) },
                     echo = echo,
+                    // content 缺失(旧形态输出)回落空,展示层退回 echo,不判失败
+                    content = content,
                 )
             }
             .take(MAX_VOICES)
             .toList()
     }
 
+    /**
+     * 宽容预处理:模型偶尔在 JSON 字符串里直接裸换行(违反 JSON,kotlinx lenient
+     * 也不认)——把字符串字面量内的裸 \n/\r 就地转义,多段短文的段落分隔仍以
+     * \n 表达;已正确转义的 \n 序列不受影响(escape 跟踪)。
+     */
+    internal fun escapeRawNewlines(raw: String): String {
+        if (!raw.contains('\n') && !raw.contains('\r')) return raw
+        val sb = StringBuilder(raw.length + 16)
+        var inString = false
+        var escaped = false
+        for (c in raw) {
+            if (inString) {
+                when {
+                    escaped -> { escaped = false; sb.append(c) }
+                    c == '\\' -> { escaped = true; sb.append(c) }
+                    c == '"' -> { inString = false; sb.append(c) }
+                    c == '\n' -> sb.append("\\n")
+                    c == '\r' -> Unit
+                    else -> sb.append(c)
+                }
+                continue
+            }
+            if (c == '"') inString = true
+            sb.append(c)
+        }
+        return sb.toString()
+    }
+
     /** 首个平衡 `{...}` 片段(模型偶尔在 JSON 前后带客套话或 markdown 围栏)。 */
-    internal fun firstJsonObject(raw: String): String? {
-        val start = raw.indexOf('{')
+    internal fun firstJsonObject(raw: String): String? {        val start = raw.indexOf('{')
         if (start < 0) return null
         var depth = 0
         var inString = false
@@ -152,6 +187,7 @@ object InnerVoiceGenerator {
                 characterId = characterId,
                 title = d.title,
                 echo = d.echo,
+                content = d.content,
                 at = baseAt + index,
             )
         }
@@ -170,6 +206,12 @@ class InnerVoiceChannel(
     /** 心声要稳:temperature 覆盖主配置(MemoryExtractor.extractTemp 同款修正)。 */
     private val extractTemp = 0.8f
 
+    /**
+     * 心声升级为「短文 + 签名句」后单批输出可达 2~4×300 字,记忆链默认
+     * maxTokens=512 会截断 JSON(解析失败的直接来源),通道内单独放宽。
+     */
+    private val maxTokensOverride = 2048
+
     /** @return 模型原始输出;请求失败/流错误/空输出返回 null(调用方提示失败)。 */
     suspend fun request(system: String, user: String, strict: Boolean = false): String? {
         val sb = StringBuilder()
@@ -180,7 +222,7 @@ class InnerVoiceChannel(
                     ChatMessage(ChatRole.SYSTEM, system),
                     ChatMessage(ChatRole.USER, user),
                 ),
-                llmConfig().copy(temperature = extractTemp),
+                llmConfig().copy(temperature = extractTemp, maxTokens = maxTokensOverride),
             ).collect { event ->
                 when (event) {
                     is LlmStreamEvent.TextDelta -> sb.append(event.text)

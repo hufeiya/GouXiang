@@ -10,6 +10,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -22,7 +23,7 @@ class ChatSpeechPlayerTest {
 
     private class FakePlayback : ChatSpeechPlayback {
         val played = mutableListOf<TtsResult>()
-        override fun play(result: TtsResult) { played += result }
+        override fun play(result: TtsResult, onFinished: () -> Unit) { played += result; onFinished() }
         override fun stop() = Unit
     }
 
@@ -157,5 +158,41 @@ class ChatSpeechPlayerTest {
         gate.complete(Unit)
         advanceUntilIdle()
         assertEquals(0, notices)
+    }
+
+    @Test
+    fun `system speech is active until playback finishes`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val system = object : ChatSystemSpeech {
+            override suspend fun play(text: String, isCurrent: () -> Boolean): Boolean {
+                gate.await()
+                return true
+            }
+            override fun stop() = Unit
+        }
+        val player = ChatSpeechPlayer(this, { config }, { adapter { _, _ -> audio } }, FakePlayback(), system)
+        player.speakText("你好") { SpeechVoice(null) }
+        assertTrue(player.speaking.value)
+        runCurrent()
+        assertTrue(player.speaking.value)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(player.speaking.value)
+    }
+
+    @Test
+    fun `speech can be stopped while synthesis is pending`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val player = ChatSpeechPlayer(this, { config }, {
+            adapter { _, _ -> gate.await(); audio }
+        }, FakePlayback(), FakeSystemSpeech())
+        player.speakText("你好") { SpeechVoice("voice") }
+        runCurrent()
+        assertTrue(player.speaking.value)
+        player.stop()
+        assertFalse(player.speaking.value)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(player.speaking.value)
     }
 }

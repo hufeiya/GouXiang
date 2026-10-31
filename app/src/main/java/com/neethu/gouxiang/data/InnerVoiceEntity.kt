@@ -25,8 +25,11 @@ data class InnerVoiceEntity(
     val characterId: Long,
     /** 心声小标题(卡片第一行,dump:tv_title)。 */
     val title: String,
-    /** 心声正文(第一人称内心短句,dump:tv_desc / card_echo)。 */
+    /** 心声签名句(第一人称内心短句,dump:tv_desc / card_echo;详情拍立得下方一行)。 */
     val echo: String,
+    /** 心声正文短文(第一人称内心独白,2~4 段 \n\n 分隔;详情信纸页;空回落 [echo])。 */
+    @ColumnInfo(defaultValue = "")
+    val content: String = "",
     /** 配图本地文件路径(空 = 纯文字卡)。 */
     val imageFile: String = "",
     /** 生成时间(epoch millis;列表按此倒序,日期行展示用)。 */

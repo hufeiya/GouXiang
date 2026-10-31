@@ -32,6 +32,7 @@ class AvatarImageProvider(
         baseUrl = BuildConfig.VOLCANO_ARK_BASE_URL,
         apiKey = arkApiKey,
         model = ARK_IMAGE_MODEL,
+        referenceAsArray = true,
     )
     private val siliconGen = OpenAiCompatibleImageGenAdapter(
         baseUrl = BuildConfig.SILICONFLOW_BASE_URL,
@@ -49,10 +50,18 @@ class AvatarImageProvider(
     /**
      * 心声卡配图(F8):同一生成链,缓存目录/尺寸不同 —— 卡片是竖版情绪图
      * (768×1024,对齐 07-chat-derivatives.md §3.3 ImageGenConfig 默认),
-     * 头像是 1024×1024 方图。纯文字卡兜底路径 = 返回 null,调用方照常落库。
+     * 头像是 1024×1024 方图。[referenceImage] 非空(角色封面文件)时以图生图
+     * 保持人物长相一致;文件缺失/读取失败回落纯文生图。纯文字卡兜底路径 =
+     * 返回 null,调用方照常落库。
      */
-    suspend fun getOrGenerateInnerVoiceImage(characterKey: String, prompt: String): File? =
-        getOrGenerateImage(characterKey, prompt, subDir = "inner_voices", size = "768x1024")
+    suspend fun getOrGenerateInnerVoiceImage(
+        characterKey: String,
+        prompt: String,
+        referenceImage: File? = null,
+    ): File? = getOrGenerateImage(
+        characterKey, prompt, subDir = "inner_voices", size = "768x1024",
+        referenceImage = referenceImage?.takeIf { it.isFile }?.let { encodeDataUrl(it) },
+    )
 
     /**
      * 朋友圈动态配图(F9):同一生成链,缓存目录/尺寸同心声竖版
@@ -84,10 +93,11 @@ class AvatarImageProvider(
         prompt: String,
         subDir: String = "avatars",
         size: String = "1024x1024",
+        referenceImage: String? = null,
     ): File? {
         val cache = fileFor(characterKey, subDir)
         if (cache.isFile && cache.length() > 0) return cache
-        val url = firstAvailableUrl(prompt, size) ?: return null
+        val url = firstAvailableUrl(prompt, size, referenceImage) ?: return null
         return downloadTo(url, cache).takeIf { it }?.let { cache }
     }
 
@@ -97,20 +107,32 @@ class AvatarImageProvider(
     }
 
     /** 生成链:火山优先(密钥存在才试),失败换硅基,再失败返回错误摘要。 */
-    internal suspend fun firstAvailableUrl(prompt: String, size: String = "1024x1024"): String? {
+    internal suspend fun firstAvailableUrl(
+        prompt: String,
+        size: String = "1024x1024",
+        referenceImage: String? = null,
+    ): String? {
         if (arkApiKey.isNotBlank()) {
-            when (val r = arkGen.generate(ImageGenRequest(prompt, size))) {
+            when (val r = arkGen.generate(ImageGenRequest(prompt, size, referenceImage))) {
                 is ImageGenResult.Success -> r.urls.firstOrNull()?.let { return it }
                 is ImageGenResult.Failure -> Unit // 记录继续降级
             }
         }
         if (siliconflowApiKey.isNotBlank()) {
-            when (val r = siliconGen.generate(ImageGenRequest(prompt, size))) {
+            when (val r = siliconGen.generate(ImageGenRequest(prompt, size, referenceImage))) {
                 is ImageGenResult.Success -> r.urls.firstOrNull()?.let { return it }
                 is ImageGenResult.Failure -> Unit
             }
         }
         return null
+    }
+
+    /** 本地图片 → `data:image/jpeg;base64,<payload>`(参考图统一 jpg 落盘,mime 恒 jpeg)。 */
+    private fun encodeDataUrl(file: File): String? = try {
+        val payload = java.util.Base64.getEncoder().encodeToString(file.readBytes())
+        "data:image/jpeg;base64,$payload"
+    } catch (_: Exception) {
+        null
     }
 
     private suspend fun downloadTo(url: String, target: File): Boolean = withContext(kotlinx.coroutines.Dispatchers.IO) {
