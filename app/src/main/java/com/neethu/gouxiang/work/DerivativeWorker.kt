@@ -74,7 +74,9 @@ class DerivativeWorker(
                 }
             }
         }
+        // 升级前入队的周期自动任务没有固定候选来源，不能在新流程中发布。
         if (source == DerivativeSource.AUTOMATIC && (
+                kind in setOf(DerivativeKind.INNER_VOICE, DerivativeKind.MOMENT) ||
                 !automaticEnabled(app, kind) ||
                     (kind == DerivativeKind.INNER_VOICE && task.characterId > 0L && !innerVoiceAutoAllowed(app, task.characterId)) ||
                     (kind == DerivativeKind.MOMENT && task.characterId > 0L && !momentsAutoAllowed(app, task.characterId)) ||

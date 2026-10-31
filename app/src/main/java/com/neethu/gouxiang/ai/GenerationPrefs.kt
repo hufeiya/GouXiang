@@ -3,23 +3,16 @@ package com.neethu.gouxiang.ai
 import android.content.Context
 import android.content.SharedPreferences
 
-/**
- * 生成开关持久化(docs/background-generation-plan-20261030.md §3,惯例同
- * ChatPrefs/PhoneChatPrefs:object + FILE + KEY_ 前缀 + runCatching 回落默认)。
- *
- * **语义红线(§3.1)**:开关只门控「自动」路径,不影响「点击」路径——用户点
- * 「生成心声」永远直接入队;开关控制 Scheduler 是否在用户没点的情况下自动烧
- * token。自动项默认全关(后台生成费 token,用户逐项拍板);「离线主动消息」
- * 与「完成通知」默认开(文档 §3.2 拍板:前者是核心场景,后者不耗 token)。
- */
+/** 内容生成偏好。标题发现始终启用；四项正文开关只控制新候选的后台正文生成。
+ * 用户点击候选不受正文自动开关限制，配图由各自的开关单独控制。 */
 object GenerationPrefs {
 
     private const val FILE = "generation_prefs"
 
-    /** 心声自动生成(M1 周期闲时批量;点击生成不受限)。 */
+    /** 心声正文自动生成，沿用旧键以保留偏好。 */
     const val KEY_INNER_VOICE_AUTO = "gen_inner_voice_auto"
 
-    /** 朋友圈每日自动发帖(M1 每日一条图文)。 */
+    /** 朋友圈正文自动生成，沿用旧键以保留偏好。 */
     const val KEY_MOMENTS_DAILY = "gen_moments_daily"
 
     const val KEY_INNER_VOICE_IMAGES = "gen_inner_voice_images"
@@ -44,8 +37,13 @@ object GenerationPrefs {
     /** 离线主动消息(M1 周期扫 pickTrigger 生成 outbox + 通知)。 */
     const val KEY_PROACTIVE_OUTBOX = "gen_proactive_outbox"
 
-    /** 手帐/小说/合照自动(M2 接入;键与设置页行先行,分支 M2 施工)。 */
+    /** 旧总开关，仅用于迁移手账和小说偏好。 */
     const val KEY_DERIVATIVE_AUTO = "gen_derivative_auto"
+
+    /** 手账和小说正文自动生成；标题发现始终独立。 */
+    const val KEY_HANDBOOK_AUTO = "gen_handbook_auto"
+    const val KEY_NOVEL_AUTO = "gen_novel_auto"
+    private const val KEY_CONTENT_PREFS_VERSION = "content_prefs_version"
 
     /** 完成通知(后台生成完成的系统通知,含点击触发的;不耗 token)。 */
     const val KEY_NOTIFY_ENABLED = "gen_notify_enabled"
@@ -81,16 +79,48 @@ object GenerationPrefs {
         runCatching { prefs(context).edit().putBoolean(key, value).apply() }
     }
 
-    // ── 六枚开关(getter 默认值 = §3.2 拍板项)────────────────────────
+    /** 一次性继承旧总开关，已有的新设置绝不被覆盖。 */
+    @Synchronized
+    fun migrateContentPrefs(context: Context) {
+        runCatching {
+            val store = prefs(context)
+            if (store.getInt(KEY_CONTENT_PREFS_VERSION, 0) < 1) {
+                val legacy = store.getBoolean(KEY_DERIVATIVE_AUTO, false)
+                val editor = store.edit()
+                if (!store.contains(KEY_HANDBOOK_AUTO)) editor.putBoolean(KEY_HANDBOOK_AUTO, legacy)
+                if (!store.contains(KEY_NOVEL_AUTO)) editor.putBoolean(KEY_NOVEL_AUTO, legacy)
+                editor.putInt(KEY_CONTENT_PREFS_VERSION, 1).apply()
+            }
+        }
+    }
 
-    /** 心声自动生成(默认关:1 次 LLM + N 次生图,量级高)。 */
+    fun handbookAuto(context: Context): Boolean {
+        migrateContentPrefs(context)
+        return read(context, KEY_HANDBOOK_AUTO, false)
+    }
+    fun setHandbookAuto(context: Context, enabled: Boolean) {
+        migrateContentPrefs(context)
+        write(context, KEY_HANDBOOK_AUTO, enabled)
+    }
+    fun novelAuto(context: Context): Boolean {
+        migrateContentPrefs(context)
+        return read(context, KEY_NOVEL_AUTO, false)
+    }
+    fun setNovelAuto(context: Context, enabled: Boolean) {
+        migrateContentPrefs(context)
+        write(context, KEY_NOVEL_AUTO, enabled)
+    }
+
+    // ── 开关读写 ───────────────────────────────────────────────────
+
+    /** 心声正文自动生成，默认关。 */
     fun innerVoiceAuto(context: Context): Boolean =
         read(context, KEY_INNER_VOICE_AUTO, false)
 
     fun setInnerVoiceAuto(context: Context, enabled: Boolean) =
         write(context, KEY_INNER_VOICE_AUTO, enabled)
 
-    /** 朋友圈每日自动发帖(默认关:1 次 LLM + 1 次生图,量级中)。 */
+    /** 朋友圈正文自动生成，默认关。 */
     fun momentsDaily(context: Context): Boolean =
         read(context, KEY_MOMENTS_DAILY, false)
 

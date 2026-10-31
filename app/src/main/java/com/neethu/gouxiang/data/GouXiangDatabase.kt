@@ -28,8 +28,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CharacterStatusEntity::class,
         SidestoryRecordEntity::class,
         ChatDerivativeEntity::class,
+        ContentTurnEntity::class,
+        ContentDiscoveryState::class,
+        ContentCandidateEntity::class,
     ],
-    version = 14,
+    version = 15,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -49,9 +52,24 @@ abstract class GouXiangDatabase : RoomDatabase() {
     abstract fun sidestoryRecordDao(): SidestoryRecordDao
     abstract fun chatDerivativeDao(): ChatDerivativeDao
     abstract fun seedDao(): SeedDao
+    abstract fun contentDiscoveryDao(): ContentDiscoveryDao
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        val MIGRATION_14_15: Migration = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `content_turns` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `conversationId` INTEGER NOT NULL, `characterId` INTEGER NOT NULL, `replyTurnId` TEXT NOT NULL, `userMessageId` INTEGER NOT NULL, `endMessageId` INTEGER NOT NULL, `sourceVersion` INTEGER NOT NULL, `user` TEXT NOT NULL, `assistant` TEXT NOT NULL, `completedAt` INTEGER NOT NULL)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_content_turns_conversationId_replyTurnId` ON `content_turns` (`conversationId`, `replyTurnId`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_content_turns_conversationId_userMessageId` ON `content_turns` (`conversationId`, `userMessageId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_content_turns_conversationId` ON `content_turns` (`conversationId`)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `content_discovery_state` (`conversationId` INTEGER NOT NULL PRIMARY KEY, `consumedTurnId` INTEGER NOT NULL, `lastEvaluatedTurnId` INTEGER NOT NULL, `lastEvaluatedCount` INTEGER NOT NULL, `failures` INTEGER NOT NULL, `retryAfter` INTEGER NOT NULL)")
+                db.execSQL("CREATE TABLE IF NOT EXISTS `content_candidates` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `conversationId` INTEGER NOT NULL, `characterId` INTEGER NOT NULL, `kind` TEXT NOT NULL, `title` TEXT NOT NULL, `startTurnId` INTEGER NOT NULL, `endTurnId` INTEGER NOT NULL, `startMessageId` INTEGER NOT NULL, `endMessageId` INTEGER NOT NULL, `sourceVersion` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `candidateKey` TEXT NOT NULL, `truncated` INTEGER NOT NULL, `bodyStatus` TEXT NOT NULL, `imageStatus` TEXT NOT NULL, `resultId` INTEGER, `requestId` TEXT, `reminderStatus` TEXT NOT NULL, `userRequested` INTEGER NOT NULL, `autoEligible` INTEGER NOT NULL, `sourceStale` INTEGER NOT NULL)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_content_candidates_candidateKey` ON `content_candidates` (`candidateKey`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_content_candidates_conversationId` ON `content_candidates` (`conversationId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_content_candidates_characterId` ON `content_candidates` (`characterId`)")
+            }
+        }
 
         /**
          * 心声升级迁移(v13→v14,单列纯增量):`inner_voices` 加 `content`

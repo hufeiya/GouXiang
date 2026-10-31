@@ -52,6 +52,10 @@ interface DerivativeResultDao {
     @Query("UPDATE inner_voices SET isStale = 1 WHERE id IN (SELECT v.id FROM inner_voices v JOIN derivative_results d ON instr(',' || d.resultIds || ',', ',' || v.id || ',') > 0 WHERE d.kind = 'INNER_VOICE' AND d.sourceConversationId = :conversationId AND d.sourceEndMessageId >= :messageId)")
     suspend fun markInnerVoicesStale(conversationId: Long, messageId: Long)
 
+    /** Preserve image retry for discovered results whose entire source survived a rewind. */
+    @Query("UPDATE derivative_results SET sourceVersion = :version WHERE requestId IN (SELECT COALESCE(requestId, 'candidate-' || id) FROM content_candidates WHERE conversationId = :conversationId AND endMessageId < :messageId AND sourceStale = 0)")
+    suspend fun rebaseUnaffectedCandidates(conversationId: Long, messageId: Long, version: Long)
+
     @Query("UPDATE derivative_results SET notificationDone = 1 WHERE requestId = :requestId")
     suspend fun markNotificationDone(requestId: String)
 }

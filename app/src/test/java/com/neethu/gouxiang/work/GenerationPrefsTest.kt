@@ -53,6 +53,28 @@ class GenerationPrefsTest {
     }
 
     @Test
+    fun `legacy derivative preference migrates once to independent body settings`() {
+        val c = context()
+        GenerationPrefs.setDerivativeAuto(c, true)
+        assertTrue(GenerationPrefs.handbookAuto(c))
+        assertTrue(GenerationPrefs.novelAuto(c))
+        GenerationPrefs.setHandbookAuto(c, false)
+        GenerationPrefs.setDerivativeAuto(c, false)
+        assertFalse(GenerationPrefs.handbookAuto(c))
+        assertTrue(GenerationPrefs.novelAuto(c))
+    }
+
+    @Test
+    fun `new body settings default off and stay independent`() {
+        val c = context()
+        assertFalse(GenerationPrefs.handbookAuto(c))
+        assertFalse(GenerationPrefs.novelAuto(c))
+        GenerationPrefs.setNovelAuto(c, true)
+        assertFalse(GenerationPrefs.handbookAuto(c))
+        assertTrue(GenerationPrefs.novelAuto(c))
+    }
+
+    @Test
     fun `handbook images default off and roundtrip`() {
         // G1 手帐配图:默认关(与番外配图同口径),写后读往返
         val c = context()

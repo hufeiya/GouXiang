@@ -16,7 +16,7 @@ data class MessageEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     /** 关联 [ConversationEntity.id]。 */
     val conversationId: Long,
-    /** 一轮回复的分组 id(用户一条 → 回复 1~4 条同 turnId)。 */
+    /** 一组消息的分组 id；用户消息与角色回复使用不同 turnId。 */
     val turnId: String,
     /** "user" / "assistant"。 */
     val role: String,

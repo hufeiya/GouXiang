@@ -9,8 +9,8 @@ import com.neethu.gouxiang.chat.MemoryWindowStore
  * [ChatOrchestrator.DaoAccess] 的 Room 实现:编排器只面向该抽象,
  * 测试可注入 fake(单测里已验证),UI 层经 Repo 单例接线。
  */
-class ChatDaoAccess(private val db: GouXiangDatabase) : ChatOrchestrator.DaoAccess {
-    constructor(repo: GouXiangRepo) : this(repo.db)
+class ChatDaoAccess(private val db: GouXiangDatabase, private val context: android.content.Context? = null) : ChatOrchestrator.DaoAccess {
+    constructor(repo: GouXiangRepo) : this(repo.db, repo.appContext)
 
     override suspend fun history(conversationId: Long, limit: Int): List<MessageEntity> =
         db.messageDao().recentForConversation(conversationId, limit)
@@ -39,7 +39,8 @@ class ChatDaoAccess(private val db: GouXiangDatabase) : ChatOrchestrator.DaoAcce
         version: Long,
         turn: ChatOrchestrator.CompletedMemoryTurn,
         completed: Boolean,
-    ): Boolean = db.withTransaction {
+    ): Boolean {
+        val saved = db.withTransaction {
         if ((db.memoryWindowDao().version(message.conversationId) ?: 0L) != version) return@withTransaction false
         val userMessage = turn.userMessageId?.let { db.messageDao().byId(it) }
         if (turn.userMessageId != null && (userMessage == null || userMessage.conversationId != message.conversationId || userMessage.role != "user")) {
@@ -65,7 +66,20 @@ class ChatDaoAccess(private val db: GouXiangDatabase) : ChatOrchestrator.DaoAcce
         if (current == null) {
             check(db.memoryWindowDao().insertTurn(pending) != -1L) { "Duplicate turn" }
         } else db.memoryWindowDao().updateTurns(listOf(pending))
+        if (completed && turn.discoveryEligible && userMessage != null && turn.assistant.isNotBlank()) {
+            db.contentDiscoveryDao().insertTurn(ContentTurnEntity(
+                conversationId = message.conversationId, characterId = turn.characterId,
+                replyTurnId = message.turnId, userMessageId = userMessage.id, endMessageId = messageId,
+                sourceVersion = version, user = turn.user, assistant = turn.assistant, completedAt = message.at,
+            ))
+        }
         true
+        }
+        val appContext = context
+        if (saved && completed && turn.discoveryEligible && turn.userMessageId != null && appContext != null) {
+            runCatching { com.neethu.gouxiang.work.ConversationContentCoordinator.onTurnCompleted(appContext, message.conversationId) }
+        }
+        return saved
     }
 
     override suspend fun completePartialTurn(conversationId: Long, turnId: String, version: Long) {

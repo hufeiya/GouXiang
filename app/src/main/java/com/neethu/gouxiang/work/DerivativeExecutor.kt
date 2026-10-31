@@ -58,7 +58,7 @@ internal class DerivativeExecutor(private val app: Context) {
 
     // ── 心声(F8 主体搬运;判空/失败语义与 UI 版一致)────────────────
 
-    private suspend fun executeInnerVoice(conversationId: Long, task: DerivativeTask, requestId: String): Boolean {
+    internal suspend fun executeInnerVoice(conversationId: Long, task: DerivativeTask, requestId: String, candidate: com.neethu.gouxiang.data.ContentCandidateEntity? = null): Boolean {
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(app)
         val conv = repo.db.conversationDao().byId(conversationId) ?: return false
         val character = repo.characterById(conv.characterId) ?: return false
@@ -66,19 +66,28 @@ internal class DerivativeExecutor(private val app: Context) {
         var result = repo.db.derivativeResultDao().byRequestId(requestId)
         if (task.imageRetryRequestId != null && result == null) return false
         if (result == null) {
-            val source = captureDerivativeSource(repo.db, conversationId, character.id)
+            val source = if (candidate == null) captureDerivativeSource(repo.db, conversationId, character.id)
+                else captureCandidateSource(repo.db, candidate)
             val memories = source.memories
             val recent = source.messages
             val raw = innerVoiceChannel.request(
-                InnerVoiceGenerator.systemPrompt(character, memories),
+                InnerVoiceGenerator.systemPrompt(character, memories) + if (candidate != null) "\n只写一条心声，标题固定为：${candidate.title}。" else "",
                 InnerVoiceGenerator.userPrompt(character, toMemoryTurns(recent)),
                 strict = true,
             )
-            val entities = raw?.let { InnerVoiceGenerator.toEntities(it, character.id, System.currentTimeMillis()) }
+            val entities = if (candidate == null) {
+                raw?.let { InnerVoiceGenerator.toEntities(it, character.id, System.currentTimeMillis()) }
+            } else {
+                raw?.let { InnerVoiceGenerator.parse(it).firstOrNull() }?.let { draft ->
+                    listOf(com.neethu.gouxiang.data.InnerVoiceEntity(characterId = character.id, title = candidate.title,
+                        echo = draft.echo, content = draft.content, at = System.currentTimeMillis()))
+                }
+            }
             if (entities.isNullOrEmpty()) throw com.neethu.gouxiang.chat.DerivativeFailure.format()
             result = repo.db.withTransaction {
                 repo.db.derivativeResultDao().byRequestId(requestId) ?: run {
                     requireCurrentDerivativeSource(repo.db, conversationId, source.version)
+                    if (candidate != null) requireCurrentCandidate(repo.db, candidate)
                     val ids = repo.insertInnerVoices(entities)
                     DerivativeResultEntity(requestId, DerivativeKind.INNER_VOICE.name, character.id, ids.joinToString(","),
                         imageStatus = if (GenerationPrefs.innerVoiceImages(app)) "pending" else "skipped",
@@ -136,7 +145,7 @@ internal class DerivativeExecutor(private val app: Context) {
         return true
     }
 
-    private suspend fun executeMoment(conversationId: Long, task: DerivativeTask, requestId: String): Boolean {
+    internal suspend fun executeMoment(conversationId: Long, task: DerivativeTask, requestId: String, candidate: com.neethu.gouxiang.data.ContentCandidateEntity? = null): Boolean {
         val repo = com.neethu.gouxiang.data.GouXiangRepo.get(app)
         val conv = repo.db.conversationDao().byId(conversationId) ?: return false
         val character = repo.characterById(conv.characterId) ?: return false
@@ -144,18 +153,21 @@ internal class DerivativeExecutor(private val app: Context) {
         var result = repo.db.derivativeResultDao().byRequestId(requestId)
         if (task.imageRetryRequestId != null && result == null) return false
         if (result == null) {
-            val source = captureDerivativeSource(repo.db, conversationId, character.id)
+            val source = if (candidate == null) captureDerivativeSource(repo.db, conversationId, character.id)
+                else captureCandidateSource(repo.db, candidate)
             val memories = source.memories
             val recent = source.messages
             val raw = momentsChannel.requestPost(
                 MomentsGenerator.postSystemPrompt(character, memories),
-                MomentsGenerator.postUserPrompt(character, toMemoryTurns(recent)),
+                MomentsGenerator.postUserPrompt(character, toMemoryTurns(recent)) +
+                    if (candidate != null) "\n请围绕这一段对话中的主题：${candidate.title}" else "",
                 strict = true,
             )
             val draft = raw?.let { MomentsGenerator.parsePost(it) } ?: throw com.neethu.gouxiang.chat.DerivativeFailure.format()
             result = repo.db.withTransaction {
                 repo.db.derivativeResultDao().byRequestId(requestId) ?: run {
                     requireCurrentDerivativeSource(repo.db, conversationId, source.version)
+                    if (candidate != null) requireCurrentCandidate(repo.db, candidate)
                     val id = repo.insertMoment(MomentsGenerator.toEntity(draft, character.id, System.currentTimeMillis()))
                     DerivativeResultEntity(requestId, DerivativeKind.MOMENT.name, character.id, id.toString(),
                         imageStatus = if (GenerationPrefs.momentsImages(app)) "pending" else "skipped",

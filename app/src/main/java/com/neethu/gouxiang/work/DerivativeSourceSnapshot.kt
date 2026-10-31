@@ -35,3 +35,27 @@ internal suspend fun requireCurrentDerivativeSource(db: GouXiangDatabase, conver
         db.conversationDao().byId(conversationId) == null
     ) throw StaleDerivativeSourceException()
 }
+
+/** A discovered title always uses its original dialogue, even if the conversation continues. */
+internal suspend fun captureCandidateSource(
+    db: GouXiangDatabase,
+    candidate: com.neethu.gouxiang.data.ContentCandidateEntity,
+): DerivativeSourceSnapshot = db.withTransaction {
+    requireCurrentCandidate(db, candidate)
+    val messages = db.messageDao().rangeForConversation(candidate.conversationId, candidate.startMessageId, candidate.endMessageId)
+    if (messages.none { it.id == candidate.startMessageId } || messages.none { it.id == candidate.endMessageId }) {
+        throw StaleDerivativeSourceException()
+    }
+    DerivativeSourceSnapshot(candidate.conversationId, candidate.sourceVersion, messages,
+        db.memoryDao().forCharacter(candidate.characterId))
+}
+
+/** Recheck the candidate, its source and role-level participation before publishing. */
+internal suspend fun requireCurrentCandidate(db: GouXiangDatabase, candidate: com.neethu.gouxiang.data.ContentCandidateEntity) {
+    requireCurrentDerivativeSource(db, candidate.conversationId, candidate.sourceVersion)
+    val current = db.contentDiscoveryDao().byId(candidate.id) ?: throw StaleDerivativeSourceException()
+    if (current.bodyStatus == "STALE" || current.sourceStale || current.sourceVersion != candidate.sourceVersion) throw StaleDerivativeSourceException()
+    val character = db.characterDao().byId(candidate.characterId) ?: throw StaleDerivativeSourceException()
+    if (candidate.kind == "INNER_VOICE" && !character.innerVoiceAuto ||
+        candidate.kind == "MOMENT" && (!character.momentsJoined || !character.momentsDailyAuto)) throw StaleDerivativeSourceException()
+}

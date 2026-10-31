@@ -118,38 +118,22 @@ class DerivativeWorkerWorkTest {
     }
 
     @Test
-    fun automaticFailureRetriesInPlaceThenFailsTerminally() = runBlocking {
+    fun legacyAutomaticMomentIsSkippedEvenWhenBodyPreferenceIsOn() = runBlocking {
         val conv = 424_102L
         GenerationPrefs.setMomentsDaily(context, true)
         try {
-            val input = { epoch: Long ->
-                workDataOf(
-                    DerivativeTask.KEY_KIND to DerivativeKind.MOMENT.name,
-                    DerivativeTask.KEY_CONVERSATION_ID to conv,
-                    DerivativeTask.KEY_SOURCE to DerivativeSource.AUTOMATIC.name,
-                    DerivativeTask.KEY_CHARACTER_ID to 1L,
-                    DerivativeTask.KEY_LOCAL_DAY to DerivativeTask.localDay(),
-                    DerivativeTask.KEY_REQUEST_ID to "auto-retry-req",
-                    KEY_AUTOMATIC_EPOCH to epoch,
-                )
-            }
-            val first = TestListenableWorkerBuilder<DerivativeWorker>(context, input(automaticEpoch(context, DerivativeKind.MOMENT)))
-                .setRunAttemptCount(0).build()
-            assertTrue(first.doWork() is ListenableWorker.Result.Retry)
-            val running = dao.byId(first.id.toString())
-            assertNotNull(running)
-            // 重试期间状态回到 queued(未终态),不落失败分类
-            assertEquals("queued", running?.state)
-            assertNull(running?.failureKind)
-            assertNull(running?.finishedAt)
-
-            val last = TestListenableWorkerBuilder<DerivativeWorker>(context, input(automaticEpoch(context, DerivativeKind.MOMENT)))
-                .setRunAttemptCount(2).build()
-            assertTrue(last.doWork() is ListenableWorker.Result.Failure)
-            val terminal = dao.byId(last.id.toString())
-            assertEquals("failed", terminal?.state)
-            assertEquals("UNKNOWN", terminal?.failureKind)
-            assertNotNull(terminal?.finishedAt)
+            val worker = TestListenableWorkerBuilder<DerivativeWorker>(context, workDataOf(
+                DerivativeTask.KEY_KIND to DerivativeKind.MOMENT.name,
+                DerivativeTask.KEY_CONVERSATION_ID to conv,
+                DerivativeTask.KEY_SOURCE to DerivativeSource.AUTOMATIC.name,
+                DerivativeTask.KEY_CHARACTER_ID to 1L,
+                DerivativeTask.KEY_LOCAL_DAY to DerivativeTask.localDay(),
+                DerivativeTask.KEY_REQUEST_ID to "legacy-auto-request",
+                KEY_AUTOMATIC_EPOCH to automaticEpoch(context, DerivativeKind.MOMENT),
+            )).build()
+            val result = worker.doWork() as ListenableWorker.Result.Success
+            assertEquals("skipped", result.outputData.getString("disposition"))
+            assertEquals("skipped", dao.byId(worker.id.toString())?.state)
         } finally {
             GenerationPrefs.setMomentsDaily(context, false)
         }

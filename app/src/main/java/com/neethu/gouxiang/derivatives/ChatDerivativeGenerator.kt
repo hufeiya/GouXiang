@@ -47,7 +47,7 @@ class ChatDerivativeGenerator(
     private val handbookMaxTokens = 1400
 
     /** @return true = 记录已收口(成功或幂等完成);false = 失败应记任务失败。 */
-    suspend fun generate(recordId: Long, requestId: String): Boolean {
+    suspend fun generate(recordId: Long, requestId: String, candidate: com.neethu.gouxiang.data.ContentCandidateEntity? = null): Boolean {
         val record = db.chatDerivativeDao().byId(recordId)
             ?: return true // 记录已被用户删除:不再生成,不判失败(幂等完成)
         if (record.requestId != requestId) return true // 旧任务迟到:新请求已接管
@@ -66,8 +66,8 @@ class ChatDerivativeGenerator(
         val character = db.characterDao().byId(record.characterId)
             ?: return fail(recordId, "角色不存在，无法生成")
         return when (record.kind) {
-            ChatDerivativeEntity.KIND_HANDBOOK -> generateHandbook(record, conv, character, requestId)
-            ChatDerivativeEntity.KIND_NOVEL -> generateNovel(record, conv, character, requestId)
+            ChatDerivativeEntity.KIND_HANDBOOK -> generateHandbook(record, conv, character, requestId, candidate)
+            ChatDerivativeEntity.KIND_NOVEL -> generateNovel(record, conv, character, requestId, candidate)
             ChatDerivativeEntity.KIND_PHOTO -> generatePhoto(record, conv, character, requestId)
             else -> fail(recordId, "未知的内容类型，无法生成")
         }
@@ -80,6 +80,7 @@ class ChatDerivativeGenerator(
         conv: ConversationEntity,
         character: CharacterEntity,
         requestId: String,
+        candidate: com.neethu.gouxiang.data.ContentCandidateEntity?,
     ): Boolean {
         val option = DerivativeOptions.fromJson(record.kind, record.optionJson) as DerivativeOptions.HandbookOption
         // 版本拦截(请求前;创建时快照的版本与当前版本严格相等才放行,无例外)。
@@ -108,6 +109,7 @@ class ChatDerivativeGenerator(
             if (current.state != ChatDerivativeEntity.STATE_GENERATING) return@withTransaction true
             if (current.requestId != requestId) return@withTransaction true
             requireCurrentDerivativeSource(db, conv.id, record.sourceVersion)
+            if (candidate != null) com.neethu.gouxiang.work.requireCurrentCandidate(db, candidate)
             val stamp = System.currentTimeMillis()
             val textCommitted = db.chatDerivativeDao().markSucceededIfGenerating(
                 id = record.id,
@@ -168,6 +170,7 @@ class ChatDerivativeGenerator(
         conv: ConversationEntity,
         character: CharacterEntity,
         requestId: String,
+        candidate: com.neethu.gouxiang.data.ContentCandidateEntity?,
     ): Boolean {
         val option = DerivativeOptions.fromJson(record.kind, record.optionJson) as DerivativeOptions.NovelOption
         if (!versionCurrent(conv.id, record.sourceVersion)) {
@@ -196,6 +199,7 @@ class ChatDerivativeGenerator(
             if (current.state != ChatDerivativeEntity.STATE_GENERATING) return@withTransaction true
             if (current.requestId != requestId) return@withTransaction true
             requireCurrentDerivativeSource(db, conv.id, record.sourceVersion)
+            if (candidate != null) com.neethu.gouxiang.work.requireCurrentCandidate(db, candidate)
             val stamp = System.currentTimeMillis()
             val textCommitted = db.chatDerivativeDao().markSucceededIfGenerating(
                 id = record.id,

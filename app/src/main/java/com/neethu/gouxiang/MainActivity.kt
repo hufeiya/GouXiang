@@ -207,6 +207,10 @@ class MainActivity : ComponentActivity() {
         val avatarStates by vm.avatarStates.collectAsState()
         val chatId by vm.chatConversationId.collectAsState()
         val chatUi by vm.chatUi.collectAsState()
+        val contentCandidates by vm.contentCandidates.collectAsState()
+        val selectedContentCandidate by vm.selectedContentCandidate.collectAsState()
+        val candidateBodyText by vm.candidateBodyText.collectAsState()
+        val candidateImageFile by vm.candidateImageFile.collectAsState()
         val streamDraft by vm.streamDraft.collectAsState()
         val chatSoundEnabled by vm.chatSoundEnabled.collectAsState()
         // 手机聊天 F4:形态开关 + 说明页 + 语音播放状态
@@ -541,6 +545,10 @@ class MainActivity : ComponentActivity() {
                 onVoiceTranscribedConsumed = { vm.consumeVoiceInputTranscribed() },
                 soundEnabled = chatSoundEnabled,
                 onToggleSound = { vm.toggleChatSound() },
+                contentCandidates = contentCandidates,
+                onCandidateSeen = { vm.markContentCandidateSeen(it) },
+                onCandidateDismiss = { vm.dismissContentCandidate(it) },
+                onCandidateOpen = { vm.openContentCandidate(it) },
             )
         }
 
@@ -790,7 +798,6 @@ class MainActivity : ComponentActivity() {
             Box(Modifier.fillMaxSize()) {
                 com.neethu.gouxiang.ui.innervoice.InnerVoiceScreen(
                     state = innerVoiceUi,
-                    onGenerate = { vm.generateInnerVoices() },
                     onDismiss = { vm.closeInnerVoices() },
                     onRetryImage = { vm.retryDerivativeImage(com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE, it) },
                     // G4:角色开关(只门控自动路径)+ 内容管理(删卡)。
@@ -798,11 +805,10 @@ class MainActivity : ComponentActivity() {
                         innerVoiceUi.characterId.takeIf { it > 0 }?.let { vm.toggleInnerVoiceAuto(it, enabled) }
                     },
                     onDelete = { vm.deleteInnerVoice(it) },
-                    // 详情页(拍立得/信纸):朗读 + 底部三动作。
+                    // 详情页(拍立得/信纸):朗读、背景和下载。
                     speaking = innerVoiceSpeaking,
                     onSpeak = { text -> vm.speakInnerVoice(text) },
                     onStopSpeak = { vm.stopInnerVoiceSpeech() },
-                    onRegenerate = { vm.regenerateInnerVoice(it) },
                     onSetBackground = { vm.setInnerVoiceAsChatBackground(it) },
                     onDownload = { voice, onResult -> vm.downloadInnerVoiceImage(voice, onResult) },
                 )
@@ -818,10 +824,6 @@ class MainActivity : ComponentActivity() {
                     state = momentsUi,
                     avatarFiles = avatarFiles,
                     onBack = { vm.closeMoments() },
-                    onGenerate = {
-                        // 全局入口(characterId=0)没有当前角色,按钮也不展示;双保险
-                        if (momentsId != null && momentsId!! > 0) vm.generateMoment(momentsId!!)
-                    },
                     onPublish = { vm.publishUserMoment(it) },
                     onDeletePost = { vm.deleteUserMoment(it.id) },
                     onDeleteComment = { _, comment -> vm.deleteUserComment(comment.id) },
@@ -860,7 +862,6 @@ class MainActivity : ComponentActivity() {
                 com.neethu.gouxiang.ui.derivatives.HandbookScreen(
                     state = handbookUi,
                     onBack = { vm.closeHandbook() },
-                    onGenerate = { vm.generateHandbook(it) },
                     onOpenDetail = { vm.openHandbookDetail(it) },
                     onRetry = { vm.retryChatDerivative(it) },
                     onDelete = { vm.deleteChatDerivative(it) },
@@ -875,7 +876,6 @@ class MainActivity : ComponentActivity() {
                 com.neethu.gouxiang.ui.derivatives.NovelScreen(
                     state = novelUi,
                     onBack = { vm.closeNovel() },
-                    onGenerate = { vm.generateNovel(it) },
                     onOpenDetail = { vm.openNovelDetail(it) },
                     onRetry = { vm.retryChatDerivative(it) },
                     onDelete = { vm.deleteChatDerivative(it) },
@@ -999,6 +999,17 @@ class MainActivity : ComponentActivity() {
                     onCancel = { vm.cancelTask(it) },
                 )
             }
+        }
+
+        selectedContentCandidate?.let { candidate ->
+            com.neethu.gouxiang.ui.chat.ContentCandidateDetail(
+                candidate = candidate,
+                body = candidateBodyText,
+                imageFile = candidateImageFile,
+                onBack = { vm.closeContentCandidate() },
+                onRetry = { vm.retryContentCandidate(candidate.id) },
+                onRetryImage = { vm.retryContentCandidateImage(candidate.id) },
+            )
         }
 
         // 角色编辑页(C 工作包 C1~C3):创作页「新建/编辑」进入的全屏覆盖层;

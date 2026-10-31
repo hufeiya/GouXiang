@@ -13,11 +13,10 @@ import com.neethu.gouxiang.data.MomentFeed
  * [comments] 按动态 id 分片的评论线程(动态卡下方展开显示,同一 observe 流);
  * [characterNames] 角色评论者展示名(avatar 评论按 authorId 归名,user=「我」);
  * [permissions] 权限管理面板行(H2:逐角色的四个开关快照);
- * [generating] 驱动「生成动态」按钮的进行中态;[publishing] 驱动「发动态」
+ * [generating] 驱动生成中的提示;[publishing] 驱动「发动态」
  * 进行中态;[replyingToId] = 评论/回复生成进行中的动态(输入区防重入);
  * [error] = 上一次生成失败的提示文案(生成链失败安全,只提示不崩溃;
- * 下一次成功清空);[characterId] = 0 时为全局朋友圈入口(无当前角色,
- * 「生成动态」不展示)。
+ * 下一次成功清空);[characterId] = 0 时为全局朋友圈入口(无当前角色)。
  */
 @Immutable
 data class MomentsUiState(
@@ -50,7 +49,7 @@ enum class MomentPermissionField {
     SEE_USER_POSTS,
     /** 评论互动。 */
     INTERACT,
-    /** 角色级自动日更。 */
+    /** 是否为角色发现动态。 */
     DAILY_AUTO,
 }
 
@@ -62,13 +61,13 @@ enum class MomentPermissionField {
 data class MomentPermissionRow(
     val characterId: Long,
     val name: String,
-    /** 参与朋友圈(合并时间线可见 + 互评候选 + 自动日更前提)。 */
+    /** 参与朋友圈(合并时间线可见、互评候选及动态发现前提)。 */
     val joined: Boolean,
     /** 看用户动态(用户帖的可见性/互评资格)。 */
     val seeUserPosts: Boolean,
     /** 评论互动(能否发任何评论/回复)。 */
     val interact: Boolean,
-    /** 角色级自动日更(与全局开关叠加)。 */
+    /** 是否为角色发现动态。 */
     val dailyAuto: Boolean,
 ) {
     companion object {

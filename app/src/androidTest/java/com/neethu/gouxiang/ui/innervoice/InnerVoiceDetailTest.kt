@@ -38,7 +38,7 @@ class InnerVoiceDetailTest {
             compose.setContent {
                 InnerVoiceDetailOverlay(
                     voice = voice.copy(imageFile = file.absolutePath), characterName = "角色", speaking = false,
-                    onBack = {}, onSpeak = {}, onStopSpeak = {}, onRegenerate = {},
+                    onBack = {}, onSpeak = {}, onStopSpeak = {},
                     onSetBackground = {}, onDownload = { _, _ -> },
                 )
             }
@@ -64,9 +64,10 @@ class InnerVoiceDetailTest {
             InnerVoiceDetailOverlay(
                 voice = voice, characterName = "角色", speaking = false,
                 onBack = {}, onSpeak = { spoken.add(it) }, onStopSpeak = {},
-                onRegenerate = {}, onSetBackground = {}, onDownload = { _, _ -> },
+                onSetBackground = {}, onDownload = { _, _ -> },
             )
         }
+        compose.onNodeWithText("重新生成").assertDoesNotExist()
         compose.onNodeWithContentDescription("朗读心声").performClick()
         compose.runOnIdle { assertEquals("测试标题。这是完整的心声正文。", spoken.last()) }
         compose.onNodeWithText("查看心声").performClick()
@@ -90,7 +91,7 @@ class InnerVoiceDetailTest {
             InnerVoiceDetailOverlay(
                 voice = voice.copy(echo = "你好"), characterName = "角色", speaking = false,
                 onBack = {}, onSpeak = { spoken.add(it) }, onStopSpeak = {},
-                onRegenerate = {}, onSetBackground = {}, onDownload = { _, _ -> },
+                onSetBackground = {}, onDownload = { _, _ -> },
             )
         }
         compose.waitUntil(5_000) {

@@ -70,6 +70,7 @@ class ChatOrchestrator(
         val assistant: String,
         val userMessageId: Long?,
         val assistantPrefix: String = "",
+        val discoveryEligible: Boolean = true,
     )
 
     /** 数据侧抽象(Repo 实现;测试用 fake)。 */
@@ -264,7 +265,7 @@ class ChatOrchestrator(
         val memoryUser = if (proactive) "" else userText
         val memoryAssistant = (if (proactive) "(TA 主动发来)" else "") + withShare.joinToString("\n") { it.text }
         persistBubbles(conversationId, turnId, withShare, onAssistantSaved, conversationVersion,
-            CompletedMemoryTurn(characterId, memoryUser, memoryAssistant, userMessageId, if (proactive) "(TA 主动发来)" else ""))
+            CompletedMemoryTurn(characterId, memoryUser, memoryAssistant, userMessageId, if (proactive) "(TA 主动发来)" else "", discoveryEligible = !proactive && !degradedByEmpty))
         // 记忆收尾(F3):全部泡落库后触发总结通道(fire-and-forget 语义在
         // 协调器内部;失败/取消不影响本回合)。无文本泡时 assistant 侧以
         // 动作/贴纸描述参与,同样进窗口(用户可感知事件)。主动消息回合

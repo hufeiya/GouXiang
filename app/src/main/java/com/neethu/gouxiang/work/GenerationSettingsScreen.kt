@@ -30,14 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/**
- * 内容生成设置页(docs/background-generation-plan-20261030.md §3.3):
- * 六枚开关一行一枚(Switch + 标题 + 副标题),进页即读 prefs、切换即写 +
- * 即时 enqueue/cancel,无中间保存按钮。「完成通知」打开时(≥33)由
- * MainActivity 现场请求 POST_NOTIFICATIONS 运行时权限。
- *
- * 红线:副标题文案纳入敏感商业字样单测扫描(§6)。
- */
+/** 内容生成设置：正文、配图及其他后台功能分别保存，即时生效。 */
 @Composable
 fun GenerationSettingsScreen(
     snapshot: GenerationSettingsSnapshot,
@@ -78,9 +71,9 @@ fun GenerationSettingsScreen(
             )
         }
 
-        // 页首说明(§3.1 语义:开关只门控自动路径,点击生成不受限)
+        // 标题发现与正文、配图是独立的设置。
         Text(
-            text = "开启后会在后台自动生成对应内容;关闭后仅当你点击对应按钮时才生成。自动生成消耗大模型调用,请按需开启。",
+            text = "关闭正文自动生成时，仍会根据对话生成标题；点开标题后生成正文。开启时正文也会自动生成。标题与正文均会消耗模型调用，配图受独立开关控制。",
             fontSize = 12.sp,
             lineHeight = 18.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -88,14 +81,14 @@ fun GenerationSettingsScreen(
         )
 
         SwitchRow(
-            title = "心声自动生成",
-            subtitle = "开启后定期自动写心声,消耗大模型调用;关闭后仅点「生成心声」时生成",
+            title = "心声正文自动生成",
+            subtitle = "开启后自动生成正文；关闭后点开标题生成正文",
             checked = snapshot.innerVoiceAuto,
             onCheckedChange = { onToggle(KEY_INNER_VOICE_AUTO, it) },
         )
         SwitchRow(
-            title = "朋友圈每日自动发帖",
-            subtitle = "开启后每天自动发一条动态,消耗大模型调用;关闭后仅点「生成动态」时生成",
+            title = "朋友圈正文自动生成",
+            subtitle = "开启后自动生成正文；关闭后点开标题生成正文",
             checked = snapshot.momentsDaily,
             onCheckedChange = { onToggle(KEY_MOMENTS_DAILY, it) },
         )
@@ -136,11 +129,16 @@ fun GenerationSettingsScreen(
             onCheckedChange = { onToggle(KEY_PROACTIVE_OUTBOX, it) },
         )
         SwitchRow(
-            title = "手帐/小说/合照自动",
-            subtitle = "自动生成暂未开放；三类内容可在各自页面手动生成",
-            checked = false,
-            enabled = false,
-            onCheckedChange = { },
+            title = "手账正文自动生成",
+            subtitle = "开启后自动生成正文；关闭后点开标题生成正文",
+            checked = snapshot.handbookAuto,
+            onCheckedChange = { onToggle(KEY_HANDBOOK_AUTO, it) },
+        )
+        SwitchRow(
+            title = "小说正文自动生成",
+            subtitle = "开启后自动生成正文；关闭后点开标题生成正文",
+            checked = snapshot.novelAuto,
+            onCheckedChange = { onToggle(KEY_NOVEL_AUTO, it) },
         )
         SwitchRow(
             title = "完成通知",
@@ -195,5 +193,6 @@ private val KEY_INNER_VOICE_AUTO = com.neethu.gouxiang.ai.GenerationPrefs.KEY_IN
 private val KEY_MOMENTS_DAILY = com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_DAILY
 private val KEY_MEMORY_OVERNIGHT = com.neethu.gouxiang.ai.GenerationPrefs.KEY_MEMORY_OVERNIGHT
 private val KEY_PROACTIVE_OUTBOX = com.neethu.gouxiang.ai.GenerationPrefs.KEY_PROACTIVE_OUTBOX
-private val KEY_DERIVATIVE_AUTO = com.neethu.gouxiang.ai.GenerationPrefs.KEY_DERIVATIVE_AUTO
+private val KEY_HANDBOOK_AUTO = com.neethu.gouxiang.ai.GenerationPrefs.KEY_HANDBOOK_AUTO
+private val KEY_NOVEL_AUTO = com.neethu.gouxiang.ai.GenerationPrefs.KEY_NOVEL_AUTO
 private val KEY_NOTIFY_ENABLED = com.neethu.gouxiang.ai.GenerationPrefs.KEY_NOTIFY_ENABLED

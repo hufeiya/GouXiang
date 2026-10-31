@@ -57,16 +57,14 @@ import java.util.Locale
  *   原版「剩余 N 天」时效类文案不实现、不得出现;
  * - 配图为可选增强:生成时生图失败 → 该卡保持纯文字卡(左图位画占位),
  *   生图成功后异步回填(imageFile 落库 → observe 流自动上屏);
- * - 本地化补充:「生成心声」按钮(基于记忆与最近对话让角色写 2~4 条新心声);
- *   空态复用官方文案 memory_card_page_empty_title/desc(07 §2.1 直接复用组)。
+ * - 心声随对话产生，聊天提醒可打开待生成的内容。
  */
 @Composable
 fun InnerVoiceScreen(
     state: InnerVoiceUiState,
-    onGenerate: () -> Unit,
     onDismiss: () -> Unit,
     onRetryImage: (com.neethu.gouxiang.ui.ImageGenerationState) -> Unit = {},
-    /** G4 角色开关切换(只门控自动路径,点击生成不受限)。 */
+    /** 控制是否为该角色发现心声。 */
     onToggleAuto: (Boolean) -> Unit = {},
     /** G4 内容管理:删除一张心声卡(配图文件一并清理)。 */
     onDelete: (Long) -> Unit = {},
@@ -76,8 +74,6 @@ fun InnerVoiceScreen(
     onSpeak: (String) -> Unit = {},
     /** 详情页:停止朗读(翻回图片/离开详情)。 */
     onStopSpeak: () -> Unit = {},
-    /** 详情页动作:重新生成该条心声(删旧条→入队新一批)。 */
-    onRegenerate: (com.neethu.gouxiang.data.InnerVoiceEntity) -> Unit = {},
     /** 详情页动作:配图设为聊天背景。 */
     onSetBackground: (com.neethu.gouxiang.data.InnerVoiceEntity) -> Unit = {},
     /** 详情页动作:配图下载到相册(结果回调供 toast)。 */
@@ -86,7 +82,7 @@ fun InnerVoiceScreen(
 ) {
     // 详情页 = 页内全屏覆盖层(点卡片进入;返回/X/系统返回先关详情再关弹层)
     var detailVoice by remember { mutableStateOf<com.neethu.gouxiang.data.InnerVoiceEntity?>(null) }
-    // 详情对应条目被删(重新生成 = 删旧条入新批)→ 自动回列表
+    // 详情对应条目被删除时自动回列表。
     LaunchedEffect(state.items, detailVoice) {
         val dv = detailVoice ?: return@LaunchedEffect
         if (state.items.none { it.id == dv.id }) detailVoice = null
@@ -163,22 +159,9 @@ fun InnerVoiceScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                // ── 生成心声按钮(本地化补充;生成中禁用)────────────────
-                item(key = "generate") {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFFE84D8A).copy(alpha = 0.16f), RoundedCornerShape(12.dp))
-                            .clickable(enabled = !state.generating) { onGenerate() }
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            if (state.generating) "心声生成中…" else "生成心声",
-                            color = Color(0xFFFF8FB8),
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
+                if (state.generating) {
+                    item(key = "generating") {
+                        Text("心声正在生成…", color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp)
                     }
                 }
                 if (state.error != null) {
@@ -196,7 +179,7 @@ fun InnerVoiceScreen(
                 state.automaticError?.let { error ->
                     item(key = "automatic-error") { Text(error, color = Color(0xFFFFB4CD), fontSize = 12.sp) }
                 }
-                // ── G4 角色开关:允许该角色自动生成心声(点击生成不受开关限制)──
+                // ── 控制该角色是否参与心声发现 ──
                 if (state.characterId > 0) {
                     item(key = "auto-switch") {
                         Row(
@@ -207,9 +190,9 @@ fun InnerVoiceScreen(
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text("自动生成心声", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                                Text("发现 Ta 的心声", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
                                 Text(
-                                    "开启后会在后台定期为 TA 自动写心声(仍受「内容生成」设置的总开关约束);手动生成不受影响",
+                                    "开启后会随对话发现心声，在聊天提醒中打开；正文生成方式由「内容生成」设置控制",
                                     color = Color.White.copy(alpha = 0.55f),
                                     fontSize = 11.sp,
                                     lineHeight = 15.sp,
@@ -252,7 +235,7 @@ fun InnerVoiceScreen(
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "将自动根据对话内容,生成你们的专属回忆,再多聊聊吧",
+                                "继续聊天，发现新的心声后会在聊天中提醒你",
                                 color = Color.White.copy(alpha = 0.55f),
                                 fontSize = 13.sp,
                             )
@@ -272,7 +255,6 @@ fun InnerVoiceScreen(
                 onBack = { detailVoice = null },
                 onSpeak = onSpeak,
                 onStopSpeak = onStopSpeak,
-                onRegenerate = onRegenerate,
                 onSetBackground = onSetBackground,
                 onDownload = onDownload,
             )

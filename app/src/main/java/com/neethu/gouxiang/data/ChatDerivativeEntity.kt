@@ -117,6 +117,13 @@ interface ChatDerivativeDao {
     @Query("DELETE FROM chat_derivative_records WHERE id = :id")
     suspend fun deleteById(id: Long): Int
 
+    /** Rebase an unfinished record whose source predates an unrelated rewind. */
+    @Query("UPDATE chat_derivative_records SET sourceVersion = :version WHERE id = :id AND state IN ('generating', 'failed')")
+    suspend fun rebaseUnfinished(id: Long, version: Long): Int
+
+    @Query("UPDATE chat_derivative_records SET sourceVersion = :version WHERE requestId IN (SELECT COALESCE(requestId, 'candidate-' || id) FROM content_candidates WHERE conversationId = :conversationId AND endMessageId < :messageId AND sourceStale = 0)")
+    suspend fun rebaseUnaffectedCandidates(conversationId: Long, messageId: Long, version: Long)
+
     /** 生成中 → 失败(Worker 失败收口;只在 generating 态改写,终态不被覆盖)。 */
     @Query("UPDATE chat_derivative_records SET state = 'failed', failureReason = :reason, updatedAt = :at WHERE id = :id AND state = 'generating'")
     suspend fun markFailedIfGenerating(id: Long, reason: String, at: Long): Int

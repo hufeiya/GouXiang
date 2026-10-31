@@ -51,6 +51,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -176,6 +180,78 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** 聊天主页 03 打开的会话 id(null=未进入)。 */
     private val _chatConversationId = MutableStateFlow<Long?>(null)
     val chatConversationId: StateFlow<Long?> = _chatConversationId.asStateFlow()
+
+    /** Durable conversation discoveries remain available after the transient chat reminder closes. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val contentCandidates: StateFlow<List<com.neethu.gouxiang.data.ContentCandidateEntity>> =
+        _chatConversationId.flatMapLatest { id ->
+            if (id == null) flowOf(emptyList()) else repo.db.contentDiscoveryDao().observeForConversation(id)
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val selectedCandidateId = MutableStateFlow<Long?>(null)
+    val selectedContentCandidate: StateFlow<com.neethu.gouxiang.data.ContentCandidateEntity?> =
+        combine(contentCandidates, selectedCandidateId) { list, id -> list.firstOrNull { it.id == id } }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    private val _candidateBodyText = MutableStateFlow<String?>(null)
+    val candidateBodyText: StateFlow<String?> = _candidateBodyText.asStateFlow()
+    private val _candidateImageFile = MutableStateFlow<String?>(null)
+    val candidateImageFile: StateFlow<String?> = _candidateImageFile.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            selectedContentCandidate.collectLatest { candidate ->
+                _candidateBodyText.value = null
+                _candidateImageFile.value = null
+                val resultId = candidate?.resultId ?: return@collectLatest
+                when (candidate.kind) {
+                    "INNER_VOICE" -> repo.db.innerVoiceDao().forCharacter(candidate.characterId)
+                        .firstOrNull { it.id == resultId }?.let {
+                            _candidateBodyText.value = it.content.ifBlank { it.echo }
+                            _candidateImageFile.value = it.imageFile.takeIf(String::isNotBlank)
+                        }
+                    "MOMENT" -> repo.db.momentDao().byId(resultId)?.let {
+                        _candidateBodyText.value = it.text
+                        _candidateImageFile.value = it.imageFile.takeIf(String::isNotBlank)
+                    }
+                    "HANDBOOK", "NOVEL" -> repo.db.chatDerivativeDao().byId(resultId)?.let { record ->
+                        _candidateBodyText.value = if (candidate.kind == "HANDBOOK") {
+                            com.neethu.gouxiang.derivatives.ChatDerivativeOutput.handbookFromJson(record.bodyJson)
+                                ?.paragraphs?.joinToString("\n\n") { it.body }
+                        } else {
+                            com.neethu.gouxiang.derivatives.ChatDerivativeOutput.novelFromJson(record.bodyJson)
+                                ?.let { novel -> (listOf(novel.introduction) + novel.chapters.map { "${it.title}\n${it.content}" })
+                                    .filter(String::isNotBlank).joinToString("\n\n") }
+                        }
+                        _candidateImageFile.value = record.imageFile.takeIf(String::isNotBlank)
+                    }
+                }
+            }
+        }
+    }
+
+    fun openContentCandidate(id: Long) {
+        selectedCandidateId.value = id
+        viewModelScope.launch {
+            repo.db.contentDiscoveryDao().setReminder(id, "SEEN")
+            com.neethu.gouxiang.work.ContentCandidateBodyWorker.enqueueManual(getApplication(), id)
+        }
+    }
+
+    fun retryContentCandidate(id: Long) {
+        viewModelScope.launch { com.neethu.gouxiang.work.ContentCandidateBodyWorker.enqueueManual(getApplication(), id) }
+    }
+
+    fun retryContentCandidateImage(id: Long) {
+        viewModelScope.launch { com.neethu.gouxiang.work.ContentCandidateImageWorker.enqueue(getApplication(), id) }
+    }
+
+    fun closeContentCandidate() { selectedCandidateId.value = null }
+    fun markContentCandidateSeen(id: Long) {
+        viewModelScope.launch { repo.db.contentDiscoveryDao().setReminder(id, "SEEN") }
+    }
+    fun dismissContentCandidate(id: Long) {
+        viewModelScope.launch { repo.db.contentDiscoveryDao().setReminder(id, "DISMISSED") }
+    }
 
     /** 当前打开的是否手机聊天形态(F4;消息列表按会话 mode=phone 入口)。 */
     private val _isPhoneChat = MutableStateFlow(false)
@@ -1742,7 +1818,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             launch {
                 repo.db.derivativeTaskDao().observeLatest(character.id, com.neethu.gouxiang.chat.DerivativeKind.INNER_VOICE.name).collect { task ->
                     _innerVoiceUi.value = _innerVoiceUi.value.copy(automaticError = if (task?.source == "AUTOMATIC" && task.state == "failed")
-                        "自动生成失败：${task.failureReason ?: "请检查网络与模型配置"}。可点击生成心声重试。" else null)
+                        "自动生成失败：${task.failureReason ?: "请检查网络与模型配置"}。可在任务历史中查看，或在聊天提醒中重试对应内容。" else null)
                 }
             }
             launch {
@@ -1949,7 +2025,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 launch {
                     repo.db.derivativeTaskDao().observeLatest(character.id, com.neethu.gouxiang.chat.DerivativeKind.MOMENT.name).collect { task ->
                         _momentsUi.value = _momentsUi.value.copy(automaticError = if (task?.source == "AUTOMATIC" && task.state == "failed")
-                            "自动生成失败：${task.failureReason ?: "请检查网络与模型配置"}。可点击生成动态重试。" else null)
+                            "自动生成失败：${task.failureReason ?: "请检查网络与模型配置"}。可在任务历史中查看，或在聊天提醒中重试对应内容。" else null)
                     }
                 }
                 launch {
@@ -1973,32 +2049,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
             }
-            var autoGenerated = false
-            // 多角色合并时间线(查询层权限过滤:H1)。
+            // 进入列表只展示已有内容；标题发现由对话协调器负责。
             repo.momentsFeed.collect { feed ->
-                // 角色页首帧为空时按开关入队自动日更(H2:全局+参与+角色级日更同开才发)。
-                if (!isGlobal && feed.none { !it.isUserPost && it.authorCharacterId == currentCharacter?.id } &&
-                    !autoGenerated && !_momentsUi.value.generating
-                ) {
-                    autoGenerated = true
-                    val character = currentCharacter
-                    if (character != null &&
-                        com.neethu.gouxiang.ai.GenerationPrefs.momentsDaily(getApplication()) &&
-                        character.momentsJoined && character.momentsDailyAuto
-                    ) {
-                        val epoch = com.neethu.gouxiang.work.automaticEpoch(getApplication(), com.neethu.gouxiang.chat.DerivativeKind.MOMENT)
-                        com.neethu.gouxiang.work.DerivativeWorker.enqueue(
-                            getApplication(),
-                            com.neethu.gouxiang.chat.DerivativeTask(
-                                com.neethu.gouxiang.chat.DerivativeKind.MOMENT,
-                                conversationId,
-                                source = com.neethu.gouxiang.chat.DerivativeSource.AUTOMATIC,
-                                characterId = character.id,
-                                automaticEpoch = epoch,
-                            ),
-                        )
-                    }
-                }
                 _momentsUi.value = _momentsUi.value.copy(items = feed, loading = false)
                 feed.forEach { item ->
                     if (item.post.id !in momentCommentJobs) {
@@ -3079,7 +3131,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 momentsDaily = com.neethu.gouxiang.ai.GenerationPrefs.momentsDaily(app),
                 memoryOvernight = com.neethu.gouxiang.ai.GenerationPrefs.memoryOvernight(app),
                 proactiveOutbox = com.neethu.gouxiang.ai.GenerationPrefs.proactiveOutbox(app),
-                derivativeAuto = com.neethu.gouxiang.ai.GenerationPrefs.derivativeAuto(app),
+                handbookAuto = com.neethu.gouxiang.ai.GenerationPrefs.handbookAuto(app),
+                novelAuto = com.neethu.gouxiang.ai.GenerationPrefs.novelAuto(app),
                 notifyEnabled = com.neethu.gouxiang.ai.GenerationPrefs.notifyEnabled(app),
                 innerVoiceImages = com.neethu.gouxiang.ai.GenerationPrefs.innerVoiceImages(app),
                 momentsImages = com.neethu.gouxiang.ai.GenerationPrefs.momentsImages(app),
@@ -3089,8 +3142,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 切一枚开关(即时生效):写盘 + Scheduler applyXxx(开=UPDATE 注册,关=
-     * cancel);返回现场请求运行时通知权限的信号(仅「完成通知」开且 ≥33)。
+     * 切换立即写入偏好；记忆和主动消息的周期任务同时更新。
      */
     fun toggleGenerationSetting(key: String, enabled: Boolean) {
         val app = getApplication<Application>()
@@ -3098,11 +3150,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         when (key) {
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_AUTO -> {
                 com.neethu.gouxiang.ai.GenerationPrefs.setInnerVoiceAuto(app, enabled)
-                sched.applyInnerVoiceAuto(app, enabled)
             }
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_DAILY -> {
                 com.neethu.gouxiang.ai.GenerationPrefs.setMomentsDaily(app, enabled)
-                sched.applyMomentsDaily(app, enabled)
             }
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_MEMORY_OVERNIGHT -> {
                 com.neethu.gouxiang.ai.GenerationPrefs.setMemoryOvernight(app, enabled)
@@ -3112,9 +3162,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 com.neethu.gouxiang.ai.GenerationPrefs.setProactiveOutbox(app, enabled)
                 sched.applyProactiveOutbox(app, enabled)
             }
-            com.neethu.gouxiang.ai.GenerationPrefs.KEY_DERIVATIVE_AUTO -> {
-                com.neethu.gouxiang.ai.GenerationPrefs.setDerivativeAuto(app, enabled)
-            }
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_HANDBOOK_AUTO ->
+                com.neethu.gouxiang.ai.GenerationPrefs.setHandbookAuto(app, enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_NOVEL_AUTO ->
+                com.neethu.gouxiang.ai.GenerationPrefs.setNovelAuto(app, enabled)
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_NOTIFY_ENABLED -> {
                 com.neethu.gouxiang.ai.GenerationPrefs.setNotifyEnabled(app, enabled)
             }
@@ -3136,8 +3187,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _generationSettings.value.copy(memoryOvernight = enabled)
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_PROACTIVE_OUTBOX ->
                 _generationSettings.value.copy(proactiveOutbox = enabled)
-            com.neethu.gouxiang.ai.GenerationPrefs.KEY_DERIVATIVE_AUTO ->
-                _generationSettings.value.copy(derivativeAuto = enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_HANDBOOK_AUTO ->
+                _generationSettings.value.copy(handbookAuto = enabled)
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_NOVEL_AUTO ->
+                _generationSettings.value.copy(novelAuto = enabled)
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_IMAGES ->
                 _generationSettings.value.copy(innerVoiceImages = enabled)
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_IMAGES ->

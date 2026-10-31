@@ -90,6 +90,20 @@ class DurableMemoryProcessor(private val db: GouXiangDatabase, private val extra
         dao.setVersion(MemoryConversationVersion(conversationId, (dao.version(conversationId) ?: 0L) + 1))
         // Clear leases after invalidation so an old request cannot delay the new history.
         dao.clearLeases(conversationId)
+        val newDiscoveryVersion = dao.version(conversationId) ?: 0L
+        db.contentDiscoveryDao().invalidateFrom(conversationId, messageId)
+        db.contentDiscoveryDao().markCompletedStaleFrom(conversationId, messageId)
+        db.contentDiscoveryDao().updateUnaffectedVersion(conversationId, messageId, newDiscoveryVersion)
+        db.derivativeResultDao().rebaseUnaffectedCandidates(conversationId, messageId, newDiscoveryVersion)
+        db.chatDerivativeDao().rebaseUnaffectedCandidates(conversationId, messageId, newDiscoveryVersion)
+        db.contentDiscoveryDao().deleteTurnsFrom(conversationId, messageId)
+        db.contentDiscoveryDao().updateSurvivingTurnVersion(conversationId, dao.version(conversationId) ?: 0L)
+        val discoveryState = db.contentDiscoveryDao().state(conversationId)
+        if (discoveryState != null) {
+            val surviving = db.contentDiscoveryDao().turnsAfter(conversationId, 0)
+            val watermark = surviving.lastOrNull { it.id <= discoveryState.consumedTurnId }?.id ?: 0L
+            db.contentDiscoveryDao().saveState(discoveryState.copy(consumedTurnId = watermark, lastEvaluatedTurnId = 0, lastEvaluatedCount = 0, failures = 0, retryAfter = 0))
+        }
         val affected = dao.allTurns(conversationId).filter { it.startMessageId < messageId && it.endMessageId >= messageId }
         if (affected.isNotEmpty()) {
             val messages = db.messageDao().allForConversation(conversationId)

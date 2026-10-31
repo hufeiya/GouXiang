@@ -38,17 +38,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.neethu.gouxiang.data.ChatDerivativeEntity
-import com.neethu.gouxiang.derivatives.DerivativeRange
-import com.neethu.gouxiang.derivatives.NovelLength
 
 /**
  * 手帐/小说/合照三页(G 工作包 G1-G3;与番外页 [com.neethu.gouxiang.ui.sidestory.SidestoryScreen]
  * 同构:顶栏 + 参数区 + 记录列表 + 详情覆盖层):
  *
- * - 手帐页(G1):聊天范围 chips(最近 5 轮/最近 10 轮/全部记录)→ 生成
- *   标题/正文/心情 + 可选配图;记录历史、失败重试、删除;
- * - 小说页(G2):长度档 chips(短/中/长 → 章数边界)→ 多章正文;详情
- *   按章可读;记录保留生成来源,历史变化标「可能过时」;
+ * - 手帐页(G1):查看对话中自动产生的手帐,保留历史、失败重试和删除;
+ * - 小说页(G2):按章阅读对话中自动产生的小说,历史变化标「可能过时」;
  * - 合照页(G3):描述输入 + 二维生图(如实标注:不支持参考图/身份保持,
  *   不承诺人物一致性);失败保留可重试记录;成功可「设为聊天背景」。
  */
@@ -56,7 +52,6 @@ import com.neethu.gouxiang.derivatives.NovelLength
 fun HandbookScreen(
     state: ChatDerivativeUiState,
     onBack: () -> Unit,
-    onGenerate: (presetKey: String) -> Unit,
     onOpenDetail: (Long) -> Unit,
     onRetry: (Long) -> Unit,
     onDelete: (Long) -> Unit,
@@ -69,25 +64,7 @@ fun HandbookScreen(
         title = "手帐",
         subtitle = "把和 ${state.characterName} 的聊天记成一页手帐 · 由 AI 生成",
         onBack = onBack,
-        parameterSection = {
-            SectionTitle("聊天范围", "选一段记录,TA 替你写成手帐")
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                DerivativeRange.Preset.entries.forEach { preset ->
-                    Chip(
-                        label = preset.label,
-                        generating = state.rows.any { it.kind == ChatDerivativeEntity.KIND_HANDBOOK && it.isGenerating },
-                        modifier = Modifier.weight(1f),
-                        onClick = { onGenerate(preset.key) },
-                    )
-                }
-            }
-        },
-        emptyHint = "还没有手帐,选上面的范围生成第一篇吧",
+        emptyHint = "还没有手帐。继续聊天，新的回忆会出现在聊天提醒中，点开即可查看。",
         onOpenDetail = onOpenDetail,
         onRetry = onRetry,
         onDelete = onDelete,
@@ -117,7 +94,6 @@ fun HandbookScreen(
 fun NovelScreen(
     state: ChatDerivativeUiState,
     onBack: () -> Unit,
-    onGenerate: (lengthKey: String) -> Unit,
     onOpenDetail: (Long) -> Unit,
     onRetry: (Long) -> Unit,
     onDelete: (Long) -> Unit,
@@ -130,25 +106,7 @@ fun NovelScreen(
         title = "小说",
         subtitle = "把和 ${state.characterName} 的最近对话写成长篇 · 由 AI 生成",
         onBack = onBack,
-        parameterSection = {
-            SectionTitle("篇幅", "选一个长度,按你们的聊天写成小说")
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                NovelLength.entries.forEach { length ->
-                    Chip(
-                        label = "${length.label}(${length.chapters.first}~${length.chapters.last}章)",
-                        generating = state.rows.any { it.kind == ChatDerivativeEntity.KIND_NOVEL && it.isGenerating },
-                        modifier = Modifier.weight(1f),
-                        onClick = { onGenerate(length.key) },
-                    )
-                }
-            }
-        },
-        emptyHint = "还没有小说,选上面的篇幅生成第一部吧",
+        emptyHint = "还没有小说。继续聊天，新的故事会出现在聊天提醒中，点开即可查看。",
         onOpenDetail = onOpenDetail,
         onRetry = onRetry,
         onDelete = onDelete,
@@ -306,7 +264,7 @@ private fun DerivativeScreenScaffold(
     title: String,
     subtitle: String,
     onBack: () -> Unit,
-    parameterSection: @Composable () -> Unit,
+    parameterSection: (@Composable () -> Unit)? = null,
     emptyHint: String,
     onOpenDetail: (Long) -> Unit,
     onRetry: (Long) -> Unit,
@@ -371,8 +329,10 @@ private fun DerivativeScreenScaffold(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                     )
                 }
-                parameterSection()
-                Spacer(Modifier.height(16.dp))
+                parameterSection?.let { section ->
+                    section()
+                    Spacer(Modifier.height(16.dp))
+                }
                 SectionTitle("记录", "重启后仍在;失败可以重试")
                 if (state.rows.isEmpty()) {
                     Text(
@@ -510,35 +470,6 @@ internal fun ActionChip(label: String, color: Color, onClick: () -> Unit) {
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Text(label, color = color, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-/** 参数区 chips(范围/长度档;生成中整体置灰防重复)。 */
-@Composable
-private fun Chip(
-    label: String,
-    generating: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier
-            .background(
-                if (generating) Color.White.copy(alpha = 0.06f) else Color(0xFFE84D8A).copy(alpha = 0.85f),
-                RoundedCornerShape(12.dp),
-            )
-            .clickable(enabled = !generating) { onClick() }
-            .padding(horizontal = 8.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            if (generating) "生成中…" else label,
-            color = if (generating) Color.White.copy(alpha = 0.45f) else Color.White,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 

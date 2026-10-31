@@ -18,6 +18,7 @@ import com.neethu.gouxiang.protocol.conversationSummary
  */
 class GouXiangRepo private constructor(context: Context) {
 
+    internal val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val db: GouXiangDatabase = Room.databaseBuilder(
         context.applicationContext,
@@ -42,6 +43,7 @@ class GouXiangRepo private constructor(context: Context) {
         GouXiangDatabase.MIGRATION_11_12,
         GouXiangDatabase.MIGRATION_12_13,
         GouXiangDatabase.MIGRATION_13_14,
+        GouXiangDatabase.MIGRATION_14_15,
     ).build()
 
     init {

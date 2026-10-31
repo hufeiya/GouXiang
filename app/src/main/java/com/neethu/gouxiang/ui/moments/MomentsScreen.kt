@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
-import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ManageAccounts
 import androidx.compose.material3.AlertDialog
@@ -68,9 +67,8 @@ import com.neethu.gouxiang.ui.messages.formatRelativeTime
  *
  * - 多角色合并时间线(H1):用户帖 + 参与角色的动态混排,每卡显示真实作者
  *  (头像/名;user 帖 = 「我」),查询层权限过滤在 [MomentFeed.assemble];
- * - 右上「发动态」(H3 用户发帖:弹层输入 → 落库 → 授权角色互评一轮)+
- *   「生成动态」(角色手动请求,仅带角色上下文进入时展示)+
- *   「角色管理」(H2 权限面板:逐角色 参与/看用户动态/评论互动/自动日更);
+ * - 右上「发动态」供用户发帖，「角色管理」控制角色参与和互动;
+ *   角色动态随对话发现，可从聊天提醒打开。
  * - 用户可删除自己的动态(H3:删帖连带清空其评论区)与自己的评论;
  * - 评论区:用户评论(「我」)与角色评论/回复(按 authorId 归名)分色;
  * - 底部评论输入条:发送 = 用户评论落库 → 作者角色回复(权限闸内)。
@@ -80,7 +78,6 @@ fun MomentsScreen(
     state: MomentsUiState,
     avatarFiles: Map<Long, String?>,
     onBack: () -> Unit,
-    onGenerate: () -> Unit,
     onPublish: (String) -> Unit,
     onDeletePost: (MomentEntity) -> Unit,
     onDeleteComment: (MomentEntity, MomentCommentEntity) -> Unit,
@@ -167,7 +164,7 @@ fun MomentsScreen(
                     )
                 }
             }
-            // 右上操作列:发动态 / 生成动态(带角色上下文时)/ 角色管理
+            // 右上操作列:发动态 / 角色管理
             Column(
                 horizontalAlignment = Alignment.End,
                 modifier = Modifier
@@ -182,14 +179,6 @@ fun MomentsScreen(
                         icon = { Icon(Icons.Outlined.Edit, contentDescription = null, tint = Color(0xFF1A1A1A), modifier = Modifier.size(15.dp)) },
                         onClick = { showPublish = true },
                     )
-                    if (state.characterId > 0) {
-                        HeaderPill(
-                            text = if (state.generating) "生成中…" else "生成动态",
-                            enabled = !state.generating,
-                            icon = { Icon(Icons.Outlined.AddCircleOutline, contentDescription = null, tint = Color(0xFF1A1A1A), modifier = Modifier.size(15.dp)) },
-                            onClick = onGenerate,
-                        )
-                    }
                 }
                 Spacer(Modifier.height(8.dp))
                 HeaderPill(
@@ -257,6 +246,11 @@ fun MomentsScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            if (state.generating) {
+                item(key = "generating") {
+                    Text("动态正在生成…", color = Color(0xFF9A9A9A), fontSize = 13.sp)
+                }
+            }
             if (state.error != null) {
                 item(key = "error") {
                     Text(
@@ -303,7 +297,7 @@ fun MomentsScreen(
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "点右上「发动态」分享此刻,或去角色主页看看 Ta 的朋友圈",
+                            "你可以分享此刻；角色动态随对话发现，并在聊天中提醒你",
                             color = Color(0xFF9A9A9A),
                             fontSize = 13.sp,
                         )
@@ -351,7 +345,7 @@ fun MomentsScreen(
     }
 }
 
-/** 头部黄胶囊(发动态/生成动态/角色管理共用)。 */
+/** 头部黄胶囊(发动态/角色管理共用)。 */
 @Composable
 private fun HeaderPill(
     text: String,
@@ -464,7 +458,7 @@ private fun PermissionSheet(
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                "开关对自动任务与角色互动即时生效;角色发帖的手动「生成动态」不受限",
+                "开关对角色动态发现与互动即时生效；发现新动态后可在聊天提醒中打开",
                 color = Color(0xFF9A9A9A),
                 fontSize = 12.sp,
             )
@@ -503,7 +497,7 @@ private fun PermissionRow(
             Spacer(Modifier.width(10.dp))
             PermissionToggle("评论互动", row.interact) { onToggle(row.characterId, MomentPermissionField.INTERACT, it) }
             Spacer(Modifier.width(10.dp))
-            PermissionToggle("自动日更", row.dailyAuto) { onToggle(row.characterId, MomentPermissionField.DAILY_AUTO, it) }
+            PermissionToggle("发现动态", row.dailyAuto) { onToggle(row.characterId, MomentPermissionField.DAILY_AUTO, it) }
         }
     }
 }

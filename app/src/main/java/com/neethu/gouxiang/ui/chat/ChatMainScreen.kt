@@ -92,6 +92,7 @@ import com.neethu.gouxiang.ui.BubbleItem
 import com.neethu.gouxiang.ui.ChatBubble
 import com.neethu.gouxiang.ui.ChatUiState
 import com.neethu.gouxiang.ui.MainViewModel
+import com.neethu.gouxiang.data.ContentCandidateEntity
 import kotlinx.coroutines.delay
 import kotlin.math.abs
 
@@ -159,6 +160,10 @@ fun ChatMainScreen(
     /** 普通聊天回复的自动朗读开关。 */
     soundEnabled: Boolean = true,
     onToggleSound: () -> Unit = {},
+    contentCandidates: List<ContentCandidateEntity> = emptyList(),
+    onCandidateSeen: (Long) -> Unit = {},
+    onCandidateDismiss: (Long) -> Unit = {},
+    onCandidateOpen: (Long) -> Unit = {},
     /** 首页外层底栏已处理系统导航栏的安全间距。 */
     embeddedInHome: Boolean = false,
     homePresentation: HomeChatPresentation? = null,
@@ -310,7 +315,18 @@ fun ChatMainScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp),
                 horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                ContentCandidateReminder(
+                    conversationId = state.conversationId,
+                    candidates = contentCandidates,
+                    canShow = !state.sending && !showOpening && !state.loading,
+                    onSeen = onCandidateSeen,
+                    onDismiss = onCandidateDismiss,
+                    onOpen = onCandidateOpen,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
                 Box(
                     Modifier
                         .size(34.dp)

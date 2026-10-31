@@ -31,18 +31,15 @@ object DerivativeScheduler {
 
     // ── 各开关的应用入口(§3.4 API 面)────────────────────────────────
 
-    /** 心声自动(M1 闲时批量;每 6h 扫一次,命中当日未生成的会话入队)。 */
+    /** 旧的心声/朋友圈周期扫描已停用；保留入口供升级后取消遗留任务。 */
+    @Suppress("UNUSED_PARAMETER")
     fun applyInnerVoiceAuto(context: Context, enabled: Boolean) {
-        applyPeriodic(context, enabled, UNIQUE_INNER_VOICE_AUTO) {
-            PeriodicWorkRequest.Builder(InnerVoiceAutoWorker::class.java, 6, TimeUnit.HOURS)
-        }
+        WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_INNER_VOICE_AUTO)
     }
 
-    /** 朋友圈每日(每 24h 一条;日戳防重复补发,Worker 内自查)。 */
+    @Suppress("UNUSED_PARAMETER")
     fun applyMomentsDaily(context: Context, enabled: Boolean) {
-        applyPeriodic(context, enabled, UNIQUE_MOMENTS_DAILY) {
-            PeriodicWorkRequest.Builder(MomentsDailyWorker::class.java, 24, TimeUnit.HOURS)
-        }
+        WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_MOMENTS_DAILY)
     }
 
     /** 隔夜记忆总结兜底(每 6h 检查闲置窗口)。 */
@@ -128,7 +125,7 @@ object DerivativeScheduler {
 class InnerVoiceAutoWorker(context: Context, params: WorkerParameters) :
     AutoGuardWorker(context, params) {
 
-    override fun gate(context: Context): Boolean = GenerationPrefs.innerVoiceAuto(context)
+    override fun gate(context: Context): Boolean = false
     override val taskKind = DerivativeKind.INNER_VOICE
 
     override suspend fun runAuto(epoch: Long): androidx.work.ListenableWorker.Result {
@@ -153,7 +150,7 @@ class InnerVoiceAutoWorker(context: Context, params: WorkerParameters) :
 class MomentsDailyWorker(context: Context, params: WorkerParameters) :
     AutoGuardWorker(context, params) {
 
-    override fun gate(context: Context): Boolean = GenerationPrefs.momentsDaily(context)
+    override fun gate(context: Context): Boolean = false
     override val taskKind = DerivativeKind.MOMENT
 
     override suspend fun runAuto(epoch: Long): androidx.work.ListenableWorker.Result {

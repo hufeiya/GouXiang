@@ -41,14 +41,15 @@ object DerivativeEvents {
 
 /**
  * 设置页快照(§3.3:进页即读一次的 mutableStateOf 语义;切换即写 + 即时
- * enqueue/cancel,不引入全局 StateFlow)。六枚开关与 [GenerationPrefs] 一一对应。
+ * enqueue/cancel,不引入全局 StateFlow)。各项与 GenerationPrefs 一一对应。
  */
 data class GenerationSettingsSnapshot(
     val innerVoiceAuto: Boolean = false,
     val momentsDaily: Boolean = false,
     val memoryOvernight: Boolean = false,
     val proactiveOutbox: Boolean = true,
-    val derivativeAuto: Boolean = false,
+    val handbookAuto: Boolean = false,
+    val novelAuto: Boolean = false,
     val notifyEnabled: Boolean = true,
     val innerVoiceImages: Boolean = true,
     val momentsImages: Boolean = true,

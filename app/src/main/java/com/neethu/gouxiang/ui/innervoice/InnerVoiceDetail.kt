@@ -68,8 +68,7 @@ import kotlinx.coroutines.launch
 /**
  * 心声详情页(F8 升级,对齐猫箱参考截图):
  *
- * - 全屏覆盖层:近黑背景 + 顶部返回 + 中间翻转卡 + 底部动作行(下载 /
- *   重新生成 / 设为聊天背景);
+ * - 全屏覆盖层:近黑背景 + 顶部返回 + 中间翻转卡 + 底部动作行(下载 / 设为聊天背景);
  * - 入场:配图拆成上中下三条切片,依次左/右/左飞入拼合(仅首次,翻回不重播;
  *   无图直接进入拼合态画占位);
  * - 图片面 = 拍立得白卡:图区 3:4 + 「AI 生成」角标 + 左下朗读喇叭 +
@@ -88,7 +87,6 @@ fun InnerVoiceDetailOverlay(
     onBack: () -> Unit,
     onSpeak: (String) -> Unit,
     onStopSpeak: () -> Unit,
-    onRegenerate: (InnerVoiceEntity) -> Unit,
     onSetBackground: (InnerVoiceEntity) -> Unit,
     onDownload: (InnerVoiceEntity, onResult: (Boolean) -> Unit) -> Unit,
     modifier: Modifier = Modifier,
@@ -219,7 +217,7 @@ fun InnerVoiceDetailOverlay(
                 }
             }
             Spacer(Modifier.height(14.dp))
-            // ── 底部动作行:下载 / 重新生成 / 设为聊天背景 ──────────
+            // ── 底部动作行:下载 / 设为聊天背景 ──────────
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -244,16 +242,6 @@ fun InnerVoiceDetailOverlay(
                         tint = if (hasImage) Color.White else Color.White.copy(alpha = 0.4f),
                         modifier = Modifier.size(22.dp),
                     )
-                }
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .background(Color.White.copy(alpha = 0.14f), RoundedCornerShape(100.dp))
-                        .noRippleClickable { onRegenerate(voice) }
-                        .padding(vertical = 14.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text("重新生成", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
                 }
                 Box(
                     Modifier

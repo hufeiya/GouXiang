@@ -129,7 +129,7 @@ fun ProfileScreen(
         ProfileEntry(
             icon = Icons.Filled.Tune,
             title = "内容生成",
-            subtitle = "自动后台生成与通知 · 关闭时点击才生成",
+            subtitle = "对话标题、自动正文与通知设置",
             onClick = onOpenGenerationSettings,
         )
 

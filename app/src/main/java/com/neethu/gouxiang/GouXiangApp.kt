@@ -17,6 +17,7 @@ class GouXiangApp : Application() {
         super.onCreate()
         NotificationChannels.ensureAll(this)
         DerivativeScheduler.bootstrap(this)
+        com.neethu.gouxiang.work.ConversationContentCoordinator.reconcile(this)
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
             com.neethu.gouxiang.work.reconcileDerivativeTasks(this@GouXiangApp)
             com.neethu.gouxiang.data.GouXiangRepo.get(this@GouXiangApp).db.derivativeResultDao().recoverInterruptedImages()
