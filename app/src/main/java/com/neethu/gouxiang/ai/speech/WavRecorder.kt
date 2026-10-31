@@ -91,6 +91,22 @@ class WavRecorder(private val sampleRate: Int = 16_000) {
     /** 采集到的原始 PCM 字节数(0 = 本次没录到东西,如秒松手)。 */
     fun pcmBytes(): Int = synchronized(chunks) { chunks.sumOf { it.size } }
 
+    /**
+     * 封存自上次封存以来的录音为一段 WAV 并清空该缓冲,录音不停(按住说话·
+     * 侧移动作场景的分段口径:手势态原位/侧移互切时调用,段=当前态说出的话;
+     * 2026-10-31 用户口径「话一(动作)话二」三段合一)。本次没录到东西返回 null。
+     */
+    fun sealSegment(): ByteArray? {
+        val pcm = synchronized(chunks) {
+            if (chunks.isEmpty()) return null
+            val out = java.io.ByteArrayOutputStream()
+            chunks.forEach { out.write(it) }
+            chunks.clear()
+            out.toByteArray()
+        }
+        return pcm.toWav(sampleRate)
+    }
+
     /** 取出全部录音并打包为 WAV(取走后内部缓冲清空)。 */
     fun takeWav(): ByteArray {
         val pcm = synchronized(chunks) {

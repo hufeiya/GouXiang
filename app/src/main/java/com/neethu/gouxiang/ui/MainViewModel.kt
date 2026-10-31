@@ -41,6 +41,8 @@ import com.neethu.gouxiang.ui.character.splitOpeningLine
 import com.neethu.gouxiang.ui.moments.MomentPermissionField
 import com.neethu.gouxiang.ui.nav.BottomTab
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -75,6 +77,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             return "($t)"
         }
+
+        /**
+         * 分段转写结果按「话一(动作)话二」拼合(2026-10-31 用户口径:按住中
+         * 原位段=普通话原文、侧移段=动作场景括号包裹,中间漏括号即本函数缺失)。
+         * 空白段(太短没听清)跳过;全空返回空串由调用方给「没听清」。
+         */
+        internal fun buildSegmentedText(segments: List<Pair<Boolean, String>>): String =
+            segments.mapNotNull { (isAction, text) ->
+                val t = text.trim()
+                when {
+                    t.isEmpty() -> null
+                    isAction -> wrapActionBracket(t)
+                    else -> t
+                }
+            }.joinToString("")
     }
 
     private val repo = GouXiangRepo.get(app)
@@ -956,11 +973,22 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _voiceInputRecognizing = MutableStateFlow(false)
     val voiceInputRecognizing: StateFlow<Boolean> = _voiceInputRecognizing.asStateFlow()
 
+    /**
+     * 按住中的分段缓冲(手势态区间封存的 WAV 段;first=该段是否侧移动作段)。
+     * 只在主线程(UI 回调/协程内)读写,无需并发容器。
+     */
+    private val voiceInputSegments = ArrayDeque<Pair<Boolean, ByteArray>>()
+
+    /** 当前录音区间所属手势态(开录=原位;侧移互切经 [voiceInputModeSwitch] 翻转)。 */
+    private var voiceInputCurrentIsAction = false
+
     /** 按住说话·按下开录(麦克风被占用/无权限给 notice,不崩)。 */
     fun voiceInputStart() {
         if (_voiceInputActive.value || _voiceInputRecognizing.value) return
         _voiceInputNotice.value = ""
         _voiceInputLevel.value = 0f
+        voiceInputSegments.clear()
+        voiceInputCurrentIsAction = false
         try {
             recorder.start()
             _voiceInputActive.value = true
@@ -971,12 +999,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 按住说话·松手。按手势去向分发(2026-10-31 口径):
-     * - [VoiceInputAction.CANCEL] 上划取消:停录丢弃,不发不转写;
-     * - [VoiceInputAction.SEND] 原地松手:转写 → 直接发送进回合(回合进行中
-     *   时回落填输入框,口语不丢,给 notice 说明);
-     * - [VoiceInputAction.INPUT] 侧移:转写 → 「(文本)」动作场景括号文本填
-     *   输入框(协议口径:动作=括号文本,直接夹在消息里),用户可改再发。
+     * 按住中手势态切换的段边界(2026-10-31 用户口径「话一(动作)话二」):
+     * 原位/侧移互切时 UI 回调,封存当前态已说的话为一段,新段按新态归属;
+     * 与当前态相同(含 Cancel 不参与段切分)则无事发生。
+     */
+    fun voiceInputModeSwitch(isAction: Boolean) {
+        if (_voiceInputActive.value.not() || isAction == voiceInputCurrentIsAction) return
+        val wav = recorder.sealSegment()
+        if (wav != null) voiceInputSegments += (voiceInputCurrentIsAction to wav)
+        voiceInputCurrentIsAction = isAction
+    }
+
+    /**
+     * 按住说话·松手。按手势去向分发(2026-10-31 口径,分段升级):
+     * - [VoiceInputAction.CANCEL] 上划取消:停录丢弃全部段,不发不转写;
+     * - [VoiceInputAction.SEND] 原地松手:各段转写按「话一(动作)话二」拼合 →
+     *   直接发送进回合(回合进行中回落填输入框,口语不丢,给 notice 说明);
+     * - [VoiceInputAction.INPUT] 侧移松手:拼合文本填输入框,用户可改再发。
+     * 段=手势态区间(原位段原文/侧移段括号包裹),单段无切换时行为同旧版。
      */
     fun voiceInputRelease(action: VoiceInputAction = VoiceInputAction.SEND) {
         if (_voiceInputActive.value.not()) return
@@ -989,20 +1029,31 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     recorder.takeWav() // 丢弃
                 }
             }
+            voiceInputSegments.clear()
             return
         }
         viewModelScope.launch {
             _voiceInputRecognizing.value = true
             try {
-                val wav = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val lastWav = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     recorder.stop()
-                    recorder.takeWav()
+                    recorder.sealSegment() // 最后一段(终态说出的话)
                 }
-                val text = if (wav.size <= com.neethu.gouxiang.ai.speech.VoiceCallEngine.MIN_WAV_BYTES) {
-                    ""
-                } else {
-                    transcribeVoiceInput(wav)
-                }
+                if (lastWav != null) voiceInputSegments += (voiceInputCurrentIsAction to lastWav)
+                val pending = voiceInputSegments.toList()
+                voiceInputSegments.clear()
+                // 各段并行转写(ASR 是瓶颈,3 段串行 ≈3 倍延迟),按原序拼合
+                val texts = pending.map { (isActionSeg, wav) ->
+                    async {
+                        val t = if (wav.size <= com.neethu.gouxiang.ai.speech.VoiceCallEngine.MIN_WAV_BYTES) {
+                            ""
+                        } else {
+                            transcribeVoiceInput(wav)
+                        }
+                        isActionSeg to t
+                    }
+                }.awaitAll()
+                val text = buildSegmentedText(texts)
                 if (text.isBlank()) {
                     _voiceInputNotice.value = "没听清,再试一次?"
                 } else if (action == VoiceInputAction.INPUT) {

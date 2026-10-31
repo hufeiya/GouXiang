@@ -136,6 +136,8 @@ fun ChatMainScreen(
     /** 按住说话:按下开录 / 松手按手势去向分发(原地=直接发送,上划=取消,侧移=动作场景输入)。 */
     onHoldStart: () -> Unit = {},
     onHoldRelease: (MainViewModel.VoiceInputAction) -> Unit = {},
+    /** 按住中原位/侧移互切的段边界(2026-10-31 口径「话一(动作)话二」分段录音)。 */
+    onHoldModeSwitch: (Boolean) -> Unit = {},
     /** 录音实时音量(0..1;按住中的波形条)。 */
     voiceLevel: Float = 0f,
     recognizing: Boolean = false,
@@ -274,6 +276,7 @@ fun ChatMainScreen(
                 onOpenVoiceCall = onOpenVoiceCall,
                 onHoldStart = onHoldStart,
                 onHoldRelease = onHoldRelease,
+                onHoldModeSwitch = onHoldModeSwitch,
                 voiceLevel = voiceLevel,
                 recognizing = recognizing,
                 voiceTranscribed = voiceTranscribed,
@@ -692,6 +695,7 @@ private fun InputBar(
     onOpenVoiceCall: () -> Unit = {},
     onHoldStart: () -> Unit = {},
     onHoldRelease: (MainViewModel.VoiceInputAction) -> Unit = {},
+    onHoldModeSwitch: (Boolean) -> Unit = {},
     voiceLevel: Float = 0f,
     recognizing: Boolean = false,
     voiceTranscribed: String = "",
@@ -805,6 +809,9 @@ private fun InputBar(
                                 sideProgress = 0f
                                 val downX = down.position.x
                                 val sideThreshold = 64.dp.toPx()
+                                // 滞回带:进入侧移 64dp,退回原位要 <44dp(阈值附近抖动
+                                // 反复互切会把录音切得粉碎,2026-10-31 分段口径防抖)
+                                val backThreshold = 44.dp.toPx()
                                 val exitSlop = viewConfiguration.touchSlop
                                 while (true) {
                                     val event = awaitPointerEvent()
@@ -824,12 +831,25 @@ private fun InputBar(
                                     }
                                     val pos = change.position
                                     val dx = abs(pos.x - downX)
-                                    // 按指针位置实时重算:出按钮上方=取消,
-                                    // 横向越过阈值=输入,否则回原位录音
-                                    holdMode = when {
+                                    // 按指针位置实时重算:出按钮上方=取消,侧移带滞回
+                                    // (进 64dp / 退 44dp),其余回原位录音
+                                    val newMode = when {
                                         pos.y < -exitSlop -> HoldMode.Cancel
+                                        holdMode == HoldMode.Input ->
+                                            if (dx < backThreshold) HoldMode.Recording else HoldMode.Input
                                         dx >= sideThreshold -> HoldMode.Input
                                         else -> HoldMode.Recording
+                                    }
+                                    if (newMode != holdMode) {
+                                        holdMode = newMode
+                                        // 段边界:原位/侧移互切封段,段归属新态起点
+                                        // (Cancel 不参与段切分,松手终态统一丢弃)
+                                        when (newMode) {
+                                            HoldMode.Input -> onHoldModeSwitch(true)
+                                            HoldMode.Recording -> onHoldModeSwitch(false)
+                                            HoldMode.Cancel -> {}
+                                            HoldMode.None -> {}
+                                        }
                                     }
                                     sideProgress =
                                         if (holdMode == HoldMode.Cancel) 0f

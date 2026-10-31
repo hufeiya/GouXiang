@@ -430,6 +430,7 @@ class MainActivity : ComponentActivity() {
                     onRegenerate = { vm.regenerateTurn(it) },
                     onHoldStart = holdStartWithPermission,
                     onHoldRelease = { vm.voiceInputRelease(it) },
+                    onHoldModeSwitch = { vm.voiceInputModeSwitch(it) },
                     voiceLevel = voiceInputLevel,
                     recognizing = voiceInputRecognizing,
                     voiceTranscribed = voiceInputTranscribed,
