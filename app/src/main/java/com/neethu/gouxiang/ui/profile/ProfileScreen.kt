@@ -32,6 +32,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,8 +53,12 @@ fun ProfileScreen(
     modifier: Modifier = Modifier,
 ) {
     Column(
+        // 白底(对齐 02 消息页):MainFrame 容器是黑底,本页不自带背景会透出
+        // 黑底配主题黑字,几乎看不清;background 须在 statusBarsPadding 之前,
+        // 状态栏区域一并刷白
         modifier = modifier
             .fillMaxSize()
+            .background(Color.White)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState()),
     ) {
@@ -80,7 +85,12 @@ fun ProfileScreen(
             }
             Spacer(Modifier.width(16.dp))
             Column {
-                Text(text = "我", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    text = "我",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
                 Text(
                     text = "本地版 · 数据仅存本机",
                     fontSize = 12.sp,
@@ -164,7 +174,12 @@ private fun ProfileEntry(
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(text = title, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    text = title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
                 Text(
                     text = subtitle,
                     fontSize = 12.sp,
