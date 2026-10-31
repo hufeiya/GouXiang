@@ -130,6 +130,23 @@ object MultiBubbleParser {
     /** 方括号被 lenient JSON 数组定界符消费后的裸串形态(「卡片:…」开头)。 */
     internal val cardBareRegex = Regex("^卡片[:：]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
 
+    /**
+     * 行尾缀占位(模型不换行把 [sticker:…]/[img:…]/[卡片:…] 直接缀在正文后,
+     * 真机实锤 2026-10-31):组1=占位前的正文(非空,至少一个非空白字符),
+     * 组2=行尾占位标记本身。整行占位不匹配(组1 要求前面有正文),仍走整行判定。
+     */
+    internal val trailingPlaceholderRegex =
+        Regex("^(.*\\S)\\s*(\\[(?:sticker|img|卡片)[:：]\\s*[^\\[\\]]+?\\])\\s*$")
+
+    /**
+     * 行展开预处理:行尾缀占位的行拆成「正文行 + 独立占位行」两段,交给主
+     * 循环按既有整行判定各自成泡;无行尾占位的行原样返回单段。
+     */
+    internal fun expandTrailingPlaceholder(line: String): List<String> {
+        val m = trailingPlaceholderRegex.find(line) ?: return listOf(line)
+        return listOf(m.groupValues[1].trim(), m.groupValues[2].trim())
+    }
+
     fun parse(raw: String): MultiBubbleReply {
         val trimmed = raw.trim().trimPrefix("```json").trimPrefix("```").trimSuffix("```").trim()
         if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
@@ -228,6 +245,7 @@ object MultiBubbleParser {
      */
     internal fun parseFallback(raw: String): MultiBubbleReply {
         val segments = raw.split("\n", "|||").map { it.trim() }.filter { it.isNotEmpty() }
+            .flatMap { expandTrailingPlaceholder(it) }
         val bubbles = mutableListOf<Bubble>()
         var pendingActions = mutableListOf<String>()
         var proactivity: Bubble? = null

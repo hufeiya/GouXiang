@@ -118,9 +118,6 @@ data class BurstParams(
     }
 }
 
-/** 单泡长文兜底切分的条数上限(F2 既定 3;独立常量,切分不再随回合参数变化)。 */
-const val DEFAULT_SPLIT_MAX = 3
-
 /** 一回合实际下发的对话风格组合(主 ViewModel 回合发起时从 [ChatPrefs] 现读)。 */
 data class ChatStyleParams(
     val mode: DialogMode = DialogMode.DEFAULT,

@@ -131,9 +131,11 @@ class PhoneChatTest {
             onAssistantSaved = { collected += it },
         )
         assertTrue("主动回合 turnId 应带 proactive- 前缀", store.inserted.first().turnId.startsWith("proactive-"))
-        assertEquals(3, store.inserted.size)
-        assertEquals("刚画完一张速写", store.inserted[0].content)
-        assertEquals("得意", store.inserted[2].content)
+        // 猫箱口径不拆分:两行文字合成一泡 + 贴纸独立一泡 = 2 条
+        // (第二行括号动作不在白名单,按既有口径保留为正文)
+        assertEquals(2, store.inserted.size)
+        assertEquals("刚画完一张速写\n(把手机举到你面前)你看你看", store.inserted[0].content)
+        assertEquals("得意", store.inserted[1].content)
         // 会话行摘要刷到最后一泡,且按泡型降级(附录 C-I3):贴纸泡摘要=「[表情]」
         assertEquals("[表情]", store.lastSummary)
         assertEquals(collected, store.inserted)
@@ -304,11 +306,12 @@ class PhoneChatTest {
     @Test
     fun `text ending round keeps raw summary`() = runTest {
         // 既有口径「TEXT 泡摘要仍=文本」在编排器通路的显式锁定:最后一泡为
-        // 文本时,会话行摘要原样(降级只作用于非文本泡)。
+        // 文本时,会话行摘要原样(降级只作用于非文本泡);合并口径下两行文字
+        // 合成一泡,摘要为含换行的完整文本。
         val store = FakeStore(char, memories)
         val orch = ChatOrchestrator(store, fakeLlm(listOf("刚煮了奶茶\n给你留了一杯")), bubbleGapMs = 0)
         orch.respondTo(1L, 1L, "在忙吗", {})
-        assertEquals("给你留了一杯", store.lastSummary)
+        assertEquals("刚煮了奶茶\n给你留了一杯", store.lastSummary)
     }
 
     @Test

@@ -271,73 +271,63 @@ class ChatOrchestratorTest {
         assertTrue(s.text.contains("趴在桌上画画".take(8)))
     }
 
-    // ── 单泡长文兜底切分(02 号文档:>2×maxBubbleChars 才按标点强制切分)──
+    // ── 回复泡合并(猫箱口径:一轮回复的文字合成一条消息,不拆分)──────
 
     @Test
-    fun `long single text bubble is split into multiple by punctuation`() {
+    fun `multi-line text reply merges into one bubble`() {
+        val orch = ChatOrchestrator(FakeStore(char, memories), fakeLlm(emptyList()), bubbleGapMs = 0)
+        val merged = orch.mergeConsecutiveTextBubbles(
+            listOf(
+                com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, "老公,在呢"),
+                com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, "嘿嘿"),
+            ),
+        )
+        assertEquals(1, merged.size)
+        assertEquals("老公,在呢\n嘿嘿", merged[0].text)
+    }
+
+    @Test
+    fun `merged bubble keeps first bubble actions`() {
+        // () 动作描述整个回合的场景:合并后只保留首泡动作,不重复挂到每段
+        val orch = ChatOrchestrator(FakeStore(char, memories), fakeLlm(emptyList()), bubbleGapMs = 0)
+        val merged = orch.mergeConsecutiveTextBubbles(
+            listOf(
+                com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, "老公,在呢", listOf("靠在你肩头")),
+                com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, "嘿嘿"),
+            ),
+        )
+        assertEquals(listOf("靠在你肩头"), merged[0].actions)
+        assertEquals("老公,在呢\n嘿嘿", merged[0].text)
+    }
+
+    @Test
+    fun `text and sticker bubbles stay separate across merge`() {
+        // 合并只作用相邻 TEXT 泡;表情/卡片等占位泡保持独立一泡
+        val orch = ChatOrchestrator(FakeStore(char, memories), fakeLlm(emptyList()), bubbleGapMs = 0)
+        val merged = orch.mergeConsecutiveTextBubbles(
+            listOf(
+                com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, "第一句"),
+                com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, "第二句"),
+                com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.STICKER, "歪头撒娇"),
+                com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, "又冒出一句"),
+            ),
+        )
+        assertEquals(3, merged.size)
+        assertEquals("第一句\n第二句", merged[0].text)
+        assertEquals(com.neethu.gouxiang.protocol.Bubble.Kind.STICKER, merged[1].kind)
+        assertEquals("又冒出一句", merged[2].text)
+    }
+
+    @Test
+    fun `long single text bubble stays one bubble without split`() {
+        // 猫箱口径:超长单泡不再按标点强切,原样一条上屏(旧兜底切分已移除)
         val orch = ChatOrchestrator(FakeStore(char, memories), fakeLlm(emptyList()), bubbleGapMs = 0)
         val long = longBurstText
-        // 新口径:>2×30=60 字才触发(旧 20 字阈值用例已按文档加长)
-        assertTrue("用例文本须>2×30=60 字,实际 ${long.length}", long.length > 60)
-        val parts = orch.splitSingleTextBubble(
-            com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, long),
-            maxBubbleChars = 30,
+        val merged = orch.mergeConsecutiveTextBubbles(
+            listOf(com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, long)),
         )
-        assertTrue("应切成多条,实际 ${parts.size}", parts.size >= 2)
-        assertTrue(parts.size <= 3)
-        // 内容无损:各段 text 拼回仍是原文
-        assertTrue(parts.joinToString("") { it.text }.length == long.length)
-        // 动作只挂第一条
-        val withActions = parts.map { it.actions }
-        assertTrue(withActions[0].isEmpty() || withActions.drop(1).all { it.isEmpty() })
-    }
-
-    @Test
-    fun `short single bubble stays unsplit`() {
-        val orch = ChatOrchestrator(FakeStore(char, memories), fakeLlm(emptyList()), bubbleGapMs = 0)
-        val short = "好呀,那就这么说定了"
-        val parts = orch.splitSingleTextBubble(
-            com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, short),
-            maxBubbleChars = 30,
-        )
-        assertEquals(1, parts.size)
-        assertEquals(short, parts[0].text)
-    }
-
-    @Test
-    fun `long single bubble without punctuation stays unsplit`() {
-        val orch = ChatOrchestrator(FakeStore(char, memories), fakeLlm(emptyList()), bubbleGapMs = 0)
-        // >60 字且无标点:超长但无可用切点,按「无标点边界保持原样」不切
-        val long = "这句话完全没有标点但是很长" + "很长".repeat(30)
-        assertTrue("用例文本须>2×30=60 字才覆盖无标点分支,实际 ${long.length}", long.length > 60)
-        val parts = orch.splitSingleTextBubble(
-            com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, long),
-            maxBubbleChars = 30,
-        )
-        assertEquals(1, parts.size)
-    }
-
-    @Test
-    fun `single bubble within twice char limit stays unsplit`() {
-        // 02 号文档口径:>2×maxBubbleChars 才强切 —— 20~60 字的单泡即使带标点
-        // 也不再切(旧 20 字阈值会把下面这条 45 字文切碎,此用例锁回归)。
-        val orch = ChatOrchestrator(FakeStore(char, memories), fakeLlm(emptyList()), bubbleGapMs = 0)
-        val mid = "老公做的番茄鸡蛋面就超棒的呀,我还想再加好多好多的葱花,然后煎个溏心蛋配着吃啦,想想就饿了"
-        assertTrue("用例应落在 20~60 字区间,实际 ${mid.length}", mid.length in 20..60)
-        val parts = orch.splitSingleTextBubble(
-            com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, mid),
-            maxBubbleChars = 30,
-        )
-        assertEquals(1, parts.size)
-        assertEquals(mid, parts[0].text)
-        // 边界:恰好 2×30=60 字(含标点),「>2×上限」为严格大于,等于不切
-        val atLimit = "我想跟你说一件事呀,".repeat(6)
-        assertEquals(60, atLimit.length)
-        val atLimitParts = orch.splitSingleTextBubble(
-            com.neethu.gouxiang.protocol.Bubble(com.neethu.gouxiang.protocol.Bubble.Kind.TEXT, atLimit),
-            maxBubbleChars = 30,
-        )
-        assertEquals(1, atLimitParts.size)
+        assertEquals(1, merged.size)
+        assertEquals(long, merged[0].text)
     }
 
     // ── 泡间连发节奏(04 号文档「条间隔 600~1200ms 随机」)────────────
@@ -368,8 +358,9 @@ class ChatOrchestratorTest {
         val savedAt = mutableListOf<Long>()
         orch.respondTo(1L, 1L, "在吗", onAssistantSaved = { savedAt += testScheduler.currentTime })
 
-        // 3 条泡 → 2 个泡间间隔;runTest 虚拟时间上,间隔即 delay 抽样值
-        assertEquals(3, savedAt.size)
+        // 两行文字合成一泡 + 贴纸泡 = 2 泡 → 1 个泡间间隔(猫箱口径不拆分);
+        // runTest 虚拟时间上,间隔即 delay 抽样值
+        assertEquals(2, savedAt.size)
         savedAt.zipWithNext { prev, cur -> cur - prev }.forEach { gap ->
             assertTrue("泡间间隔应在 600~1200ms,实际 $gap", gap in 600L..1200L)
         }
@@ -383,7 +374,7 @@ class ChatOrchestratorTest {
         val savedAt = mutableListOf<Long>()
         orch.respondTo(1L, 1L, "在吗", onAssistantSaved = { savedAt += testScheduler.currentTime })
 
-        assertEquals(3, savedAt.size)
+        assertEquals(2, savedAt.size)
         assertEquals("bubbleGapMs=0 应完全跳过延迟", 0L, testScheduler.currentTime)
     }
 
@@ -418,9 +409,9 @@ class ChatOrchestratorTest {
     }
 
     @Test
-    fun `proactivity bubble is not split and stays after split main bubbles`() = runTest {
+    fun `proactivity bubble stays separate after merged main bubble`() = runTest {
         val store = FakeStore(char, memories)
-        val long = longBurstText // >2×30=60 字,主泡才会触发兜底切分
+        val long = longBurstText // 单泡长文不再切分,原样一条
         val raw = """
             {"bubbles":[{"kind":"text","text":"$long"}],
              "proactivity":{"kind":"text","text":"刚煮了奶茶,给你留了一杯"}}
@@ -429,18 +420,17 @@ class ChatOrchestratorTest {
         orch.respondTo(1L, 1L, "在忙吗", {})
 
         val assistants = store.inserted.filter { it.role == "assistant" }
-        // 主泡单条长文按兜底切分(2~3 条),分享泡不参与切分、原样排末位
-        assertTrue("应为主泡切分段+分享泡,实际 ${assistants.size} 条", assistants.size >= 3)
-        assertEquals("刚煮了奶茶,给你留了一杯", assistants.last().content)
-        // 主泡各段拼回即原文(分享文本未被切碎混入主泡)
-        assertEquals(long, assistants.dropLast(1).joinToString("") { it.content })
+        // 主泡合并为一条(长文不切分),分享泡独立一泡排末位
+        assertEquals(2, assistants.size)
+        assertEquals(long, assistants[0].content)
+        assertEquals("刚煮了奶茶,给你留了一杯", assistants[1].content)
     }
 
     // ── 测试基建 ────────────────────────────────────────────────────
 
     /**
-     * 切分用例共用的单泡长文(61 字,>2×30=60):按新口径会沿标点切成
-     * 2~3 条,且各段拼回无损;旧 45 字文已低于新阈值,专用于「区间内不切」。
+     * 长文用例共用的单泡长文(61 字):合并口径下原样一条上屏不切分,
+     * 锁「超长也不拆」的猫箱行为。
      */
     private val longBurstText =
         "老公做的番茄鸡蛋面就超棒的呀,我还想再多加好多好多的葱花,然后还要煎一个溏心蛋配着一起吃,再配一杯冰可乐,想想就已经饿了呀"

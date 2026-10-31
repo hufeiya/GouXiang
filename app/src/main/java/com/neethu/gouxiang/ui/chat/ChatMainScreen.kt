@@ -793,19 +793,22 @@ private fun InputBar(
 /**
  * 回合进行中:流式打字泡。草稿非空时展示实时累积的回复内容(可见逐字流式),
  * 末尾带闪烁光标;首字到达前退化为「正在输入…」。渲染在列表底部=reverseLayout 首项。
+ *
+ * 样式与正式回复泡(SingleBubble 文本态)完全同源:同圆角/同底色/同内边距/
+ * 同字号行高 —— 流式结束后草稿泡被正式泡原位替换时无字号跳变(猫箱口径,
+ * 用户验收 2026-10-31)。尾部预览按码点截,防把代理对劈成未配对高位代理。
  */
 @Composable
 private fun TypingHint(streamDraft: String) {
-    // 尾部预览按码点截(防把代理对劈成未配对高位代理 → dump 必崩,F2 实锤)
-    val draft = streamDraft.takeLastCodePoints(120)
+    val draft = streamDraft.takeLastCodePoints(200)
     Row(
         modifier = Modifier.padding(start = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             Modifier
-                .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(18.dp))
-                .padding(horizontal = 14.dp, vertical = 8.dp),
+                .background(Color.White, RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
             if (draft.isEmpty()) {
                 Text("正在输入…", color = Color(0xFF9A9A9A), fontSize = 14.sp)
@@ -816,8 +819,8 @@ private fun TypingHint(streamDraft: String) {
                         withStyle(SpanStyle(color = Color(0xFFE84D8A))) { append("▌") }
                     },
                     color = Color(0xFF1A1A1A),
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp,
+                    fontSize = 17.sp,
+                    lineHeight = 26.sp,
                 )
             }
         }

@@ -246,19 +246,14 @@ class ChatOrchestrator(
         val parsed = reply.bubbles
         // 空输出 = 无真实生成内容(模板兜底,主动回合标记降级)
         var degradedByEmpty = false
-        val bubbles = when {
-            parsed.isEmpty() -> {
-                degradedByEmpty = true
-                listOf(Bubble(Bubble.Kind.TEXT, if (proactive) PROACTIVE_FALLBACK_TEXT else FALLBACK_TEXT))
-            }
-            // 单泡长文 = 模型没按连发协议分行(实机 F2 三轮全是单泡长文)。
-            // 文档口径(02 号文档):flush 时若全回复无分隔但超长,即 >2×
-            // maxBubbleChars(默认 30 字上限即 >60 字),才按标点强制切分;
-            // 阈值内(20~60 字)的单泡尊重模型真实的单泡意图,不再按旧 20 字
-            // 阈值强切。已有多行/占位结构的结果同样不动。
-            parsed.size == 1 && parsed[0].kind == Bubble.Kind.TEXT ->
-                splitSingleTextBubble(parsed[0], burst.maxBubbleChars)
-            else -> parsed
+        val bubbles = if (parsed.isEmpty()) {
+            degradedByEmpty = true
+            listOf(Bubble(Bubble.Kind.TEXT, if (proactive) PROACTIVE_FALLBACK_TEXT else FALLBACK_TEXT))
+        } else {
+            // 猫箱口径(用户验收 2026-10-31):一轮回复的文字合成一条消息上屏,
+            // 不再按行拆泡、也不再对单泡长文按标点强切(旧 splitSingleTextBubble
+            // 已移除)。模型侧连发协议与 prompt 不动,拆分只在落库口径上取消。
+            mergeConsecutiveTextBubbles(parsed)
         }
         // 日常分享泡(02 文档 §3.3:每次回复可附 0~1 条,独立一泡渲染):
         // 作为同 turnId 的独立一泡排在主泡之后落库。兜底切分只作用于上面的
@@ -368,49 +363,21 @@ class ChatOrchestrator(
         random.nextLong(BUBBLE_GAP_MIN_MS, BUBBLE_GAP_MAX_MS + 1)
 
     /**
-     * 单泡长文兜底切分(02 号文档口径:flush 时若全回复无分隔但超长,即
-     * >2×[maxBubbleChars] 字,按标点强制切分):沿句读标点切成
-     * 2~[DEFAULT_SPLIT_MAX] 条;阈值内(≤2×上限)或无标点边界保持原样。
-     * () 动作只挂在第一条(动作描述的是整个回合的场景,不该每泡重复)。
+     * 相邻 TEXT 泡合成一泡(猫箱口径:一轮回复一条文字消息):
+     * 按 "\n" 连接各段文本,() 动作保留首泡的(动作描述的是整个回合的场景,
+     * 不该每段重复);表情/图片/语音/卡片泡保持独立一泡不参与合并。
      */
-    internal fun splitSingleTextBubble(bubble: Bubble, maxBubbleChars: Int): List<Bubble> {
-        val body = bubble.text.trim()
-        if (body.length <= 2 * maxBubbleChars) return listOf(bubble)
-        val parts = splitByPunctuation(body, DEFAULT_SPLIT_MAX)
-        return parts.mapIndexed { i, text ->
-            Bubble(Bubble.Kind.TEXT, text, if (i == 0) bubble.actions else emptyList())
+    internal fun mergeConsecutiveTextBubbles(bubbles: List<Bubble>): List<Bubble> {
+        val merged = mutableListOf<Bubble>()
+        for (bubble in bubbles) {
+            val last = merged.lastOrNull()
+            if (last != null && last.kind == Bubble.Kind.TEXT && bubble.kind == Bubble.Kind.TEXT) {
+                merged[merged.lastIndex] = last.copy(text = last.text + "\n" + bubble.text)
+            } else {
+                merged += bubble
+            }
         }
-    }
-
-    /**
-     * 沿句读标点把长文切成 ≤[maxParts] 段:切点取"理想均匀位置"最近的标点,
-     * 且保证每段 ≥[MIN_SEGMENT_CHARS] 字(避免切出叠词碎段);无可用切点单段返回。
-     */
-    private fun splitByPunctuation(text: String, maxParts: Int): List<String> {
-        if (maxParts <= 1) return listOf(text)
-        val breakChars = "。!?~;;,,".toSet()
-        val candidates = text.indices.filter { i -> text[i] in breakChars && i < text.lastIndex }
-        if (candidates.isEmpty()) return listOf(text)
-        val target = text.length.toDouble() / maxParts
-        val cuts = mutableListOf<Int>()
-        for (k in 1 until maxParts) {
-            val ideal = (k * target).toInt()
-            val best = candidates.minByOrNull { kotlin.math.abs(it - ideal) } ?: continue
-            val segStart = (cuts.lastOrNull()?.plus(1)) ?: 0
-            if (best in cuts) continue
-            if (best + 1 - segStart < MIN_SEGMENT_CHARS) continue
-            if (text.length - (best + 1) < MIN_SEGMENT_CHARS) continue
-            cuts += best
-        }
-        if (cuts.isEmpty()) return listOf(text)
-        val segments = mutableListOf<String>()
-        var start = 0
-        for (cut in cuts.sorted()) {
-            segments += text.substring(start, cut + 1).trim()
-            start = cut + 1
-        }
-        if (start < text.length) segments += text.substring(start).trim()
-        return segments.filter { it.isNotEmpty() }
+        return merged
     }
 
     /**
@@ -529,9 +496,6 @@ class ChatOrchestrator(
 
         /** 泡间连发间隔随机区间上限(含)。 */
         const val BUBBLE_GAP_MAX_MS = 1200L
-
-        /** 兜底切分后每段的最短字数(防叠词碎段)。 */
-        const val MIN_SEGMENT_CHARS = 6
 
         /** 生产 LLM:Ark 流式适配器(移植自 AIAvatar-SDK,已实查连通)。 */
         fun defaultLlm(): Llm = Llm { messages, config ->

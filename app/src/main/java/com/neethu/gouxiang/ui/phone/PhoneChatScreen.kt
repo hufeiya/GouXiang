@@ -565,10 +565,14 @@ private fun ImageBody(desc: String) {
     }
 }
 
-/** 回合进行中:流式草稿白泡(首字前「对方正在输入中...」,04 §1.3 文案)。 */
+/**
+ * 回合进行中:流式草稿白泡(首字前「对方正在输入中...」,04 §1.3 文案)。
+ * 样式与正式文本泡(TextBody)同源:同字号行高同内边距,流式结束替换为
+ * 正式泡时无字号跳变(猫箱口径,用户验收 2026-10-31)。
+ */
 @Composable
 private fun TypingHint(streamDraft: String) {
-    val draft = streamDraft.takeLastCodePoints(120)
+    val draft = streamDraft.takeLastCodePoints(200)
     Row(
         modifier = Modifier.padding(start = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -587,8 +591,8 @@ private fun TypingHint(streamDraft: String) {
                         withStyle(SpanStyle(color = Color(0xFFE8A93D))) { append("▌") }
                     },
                     color = Color(0xFF1A1A1A),
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp,
+                    fontSize = 17.sp,
+                    lineHeight = 24.sp,
                 )
             }
         }

@@ -106,6 +106,45 @@ class MultiBubbleParserTest {
         assertEquals("老公快回来吃饭!", r.bubbles[3].text)
     }
 
+    @Test
+    fun `trailing sticker marker on text line splits into its own bubble`() {
+        // 真机实锤(2026-10-31 验收):模型把 [sticker:…] 直接缀在正文行尾不换行,
+        // 此前整行匹配不到,占位标记按字面进了正文;行尾缀占位拆出独立贴纸泡。
+        val r = MultiBubbleParser.parse("要给你画一面整墙的手绘墙啦[sticker:眼睛亮晶晶]")
+        assertEquals(2, r.bubbles.size)
+        assertEquals(Bubble.Kind.TEXT, r.bubbles[0].kind)
+        assertEquals("要给你画一面整墙的手绘墙啦", r.bubbles[0].text)
+        assertEquals(Bubble.Kind.STICKER, r.bubbles[1].kind)
+        assertEquals("眼睛亮晶晶", r.bubbles[1].text)
+    }
+
+    @Test
+    fun `trailing img and card markers also split off`() {
+        val r = MultiBubbleParser.parse("给你看我今天的穿搭[img:今日穿搭]")
+        assertEquals(2, r.bubbles.size)
+        assertEquals(Bubble.Kind.IMAGE, r.bubbles[1].kind)
+        assertEquals("给你看我今天的穿搭", r.bubbles[0].text)
+
+        // 卡片行尾缀:拆出的 CARD 泡 text 保留整行标记(落库侧 parseCardLine 解载荷)
+        val c = MultiBubbleParser.parse("给你转了个零花钱[卡片:转账 520|给你买奶茶]")
+        assertEquals(2, c.bubbles.size)
+        assertEquals(Bubble.Kind.CARD, c.bubbles[1].kind)
+        assertEquals("[卡片:转账 520|给你买奶茶]", c.bubbles[1].text)
+    }
+
+    @Test
+    fun `whole line placeholder still parses and fullwidth colon trailing works`() {
+        // 整行占位不受行尾拆分影响;全角冒号行尾缀同样识别
+        val whole = MultiBubbleParser.parse("[sticker:眼睛亮晶晶]")
+        assertEquals(1, whole.bubbles.size)
+        assertEquals(Bubble.Kind.STICKER, whole.bubbles[0].kind)
+
+        val fw = MultiBubbleParser.parse("好可爱呀[sticker：揉脸]")
+        assertEquals(2, fw.bubbles.size)
+        assertEquals("好可爱呀", fw.bubbles[0].text)
+        assertEquals("揉脸", fw.bubbles[1].text)
+    }
+
     // ── 语音条格式归一化(F4 验收 medium 修复)────────────────────────
 
     @Test
