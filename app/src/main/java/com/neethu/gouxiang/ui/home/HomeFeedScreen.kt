@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,7 +49,8 @@ import com.neethu.gouxiang.data.HomeFeedCard
 /**
  * 首页·推荐流(基准 01-home-feed.png):
  * 沉浸式 AI 剧卡(全屏图 + 介绍条 + 开场白气泡 + 名字> + 点赞/分享/评论/历史),
- * 顶部「AI 剧/推荐」双 tab。左右滑动切换剧卡。
+ * 顶部「AI 剧/推荐」双 tab。上下滑动切换人物卡;左右滑动预留为切换 AI 剧
+ * (AI 剧未开放,tab 置灰,横滑无行为)。
  *
  * F3 接线(P1):「名字 >」= openCharacterHome、互动列「历史」= openHistory
  * (与 im 聊天页同款入口,审计报告 §4-3/§5.2);开场白气泡点击进聊天。
@@ -72,7 +73,7 @@ fun HomeFeedScreen(
             Box(Modifier.fillMaxSize().background(Color(0xFF151515)))
         } else {
             val pagerState = rememberPagerState(pageCount = { cards.size })
-            HorizontalPager(
+            VerticalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
             ) { page ->
@@ -117,9 +118,10 @@ private fun TopTabsRow(modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // AI 剧未开放:置灰禁用(横滑预留,不做任何行为)
             Text(
                 "AI 剧",
-                color = Color.White.copy(alpha = 0.75f),
+                color = Color.White.copy(alpha = 0.35f),
                 fontSize = 17.sp,
                 fontWeight = FontWeight.Normal,
             )
