@@ -389,6 +389,17 @@ class MainActivity : ComponentActivity() {
             vm.toggleGenerationSetting(key, enabled)
         }
 
+        // 用户标签(2026-10-31):首次进入未完成性别/喜好选择时自动弹层引导;
+        // 完成后仅从我的页「个人标签」进入修改。进页即读 prefs(同 AiConfigStore
+        // 进页即读惯例),runCatching 兜底不阻塞主框架。
+        var tagSheetOpen by remember { mutableStateOf(false) }
+        LaunchedEffect(catalogContext) {
+            val completed = withContext(Dispatchers.IO) {
+                com.neethu.gouxiang.ui.profile.UserTagPrefs.isCompleted(catalogContext)
+            }
+            if (!completed) tagSheetOpen = true
+        }
+
         // 首页播放器跟随当前卡片和实际可见状态，合成尚未返回时离开也会取消。
         var activeFeedItem by remember { mutableStateOf<FeedItem?>(null) }
         var openingFinished by remember { mutableStateOf(false) }
@@ -640,6 +651,8 @@ class MainActivity : ComponentActivity() {
                         onOpenGenerationSettings = { vm.openGenerationSettings() },
                         // 任务历史页(M0 收尾工作包 1:查看/重试/取消)
                         onOpenTaskHistory = { vm.openTaskHistory() },
+                        // 个人标签(2026-10-31:性别/喜好随时可改,复用首启弹层)
+                        onOpenUserTags = { tagSheetOpen = true },
                     )
                 }
             }
@@ -1016,6 +1029,17 @@ class MainActivity : ComponentActivity() {
                     onSetAvatarCurrent = { id, name -> vm.setCharacterAvatar(id, name) },
                     onDeleteAvatar = { id, name -> vm.deleteCharacterAvatar(id, name) },
                     onRefreshGallery = { vm.refreshEditorGallery(it) },
+                )
+            }
+        }
+
+        // 用户标签弹层(2026-10-31):渲染序置底最末(最后声明者在上),首启
+        // 引导态盖住一切页面;确认在弹层内落盘,这里只管开合。
+        if (tagSheetOpen) {
+            Box(Modifier.fillMaxSize()) {
+                com.neethu.gouxiang.ui.profile.UserTagSheet(
+                    onConfirmed = { tagSheetOpen = false },
+                    onDismiss = { tagSheetOpen = false },
                 )
             }
         }

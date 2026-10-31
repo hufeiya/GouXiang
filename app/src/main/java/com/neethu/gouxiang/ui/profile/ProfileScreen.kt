@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Interests
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Tune
@@ -47,6 +48,7 @@ fun ProfileScreen(
     onOpenAiConfig: () -> Unit,
     onOpenGenerationSettings: () -> Unit = {},
     onOpenTaskHistory: () -> Unit = {},
+    onOpenUserTags: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -90,6 +92,22 @@ fun ProfileScreen(
         val context = androidx.compose.ui.platform.LocalContext.current
         // AI 配置状态摘要(进页即读,改完返回重进可见)
         val config = AiConfigStore.load(context)
+
+        // 个人标签(2026-10-31):性别/喜好摘要(进页即读,弹层确认关闭后
+        // MainFrame 因 tagSheetOpen 翻转重组本页,摘要即时刷新)
+        val userGender = UserTagPrefs.gender(context)
+        val userTagCount = UserTagPrefs.tagIds(context).size
+        ProfileEntry(
+            icon = Icons.Filled.Interests,
+            title = "个人标签",
+            subtitle = if (userGender != null && userTagCount > 0) {
+                "${userGender.label} · $userTagCount 个喜好标签 · 点按可修改"
+            } else {
+                "还没设置 · 选择性别和喜好，让推荐更懂你"
+            },
+            onClick = onOpenUserTags,
+        )
+
         ProfileEntry(
             icon = Icons.Filled.SmartToy,
             title = "AI 服务配置",
