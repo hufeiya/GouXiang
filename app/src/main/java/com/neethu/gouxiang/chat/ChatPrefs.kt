@@ -13,9 +13,16 @@ object ChatPrefs {
     private const val FILE = "chat_style_prefs"
     private const val KEY_MODE = "chat_style_mode"
     private const val KEY_LENGTH = "chat_style_length"
+    private const val KEY_SOUND_ENABLED = "chat_sound_enabled"
 
     private fun prefs(context: Context): SharedPreferences =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+
+    fun soundEnabled(context: Context): Boolean = prefs(context).getBoolean(KEY_SOUND_ENABLED, true)
+
+    fun setSoundEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SOUND_ENABLED, enabled).apply()
+    }
 
     /** 对话模式(缺省 = 心动模式,09 弹层默认勾选)。 */
     fun dialogMode(context: Context): DialogMode =

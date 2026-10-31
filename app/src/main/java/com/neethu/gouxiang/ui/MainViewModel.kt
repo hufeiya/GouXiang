@@ -146,6 +146,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val _isPhoneChat = MutableStateFlow(false)
     val isPhoneChat: StateFlow<Boolean> = _isPhoneChat.asStateFlow()
 
+    private val _chatSoundEnabled = MutableStateFlow(ChatPrefs.soundEnabled(app))
+    val chatSoundEnabled: StateFlow<Boolean> = _chatSoundEnabled.asStateFlow()
+    private val chatSpeechPlayer = com.neethu.gouxiang.ai.speech.ChatSpeechPlayer(viewModelScope) {
+        com.neethu.gouxiang.ai.config.AiConfigStore.load(getApplication())
+    }
+    private var chatSpeechForeground = false
+
+    fun setChatSpeechForeground(foreground: Boolean) {
+        chatSpeechForeground = foreground
+        if (!foreground) chatSpeechPlayer.stop()
+    }
+
+    fun toggleChatSound() {
+        val enabled = !_chatSoundEnabled.value
+        _chatSoundEnabled.value = enabled
+        ChatPrefs.setSoundEnabled(getApplication(), enabled)
+        if (!enabled) chatSpeechPlayer.stop()
+    }
+
+    private fun speakChatReply(conversationId: Long, phoneMode: Boolean, result: com.neethu.gouxiang.chat.TurnResult) {
+        if (chatSpeechForeground && !phoneMode && _chatSoundEnabled.value && _chatConversationId.value == conversationId &&
+            !_isPhoneChat.value && _voiceCallConversationId.value == null
+        ) {
+            (result as? com.neethu.gouxiang.chat.TurnResult.Completed)?.let { chatSpeechPlayer.speak(it.bubbles) }
+        }
+    }
+
+    override fun onCleared() {
+        chatSpeechPlayer.stop()
+        super.onCleared()
+    }
+
     /** characterId → 头像缓存文件绝对路径(null=未生成,UI 画占位)。 */
     private val _avatarFiles = MutableStateFlow<Map<Long, String?>>(emptyMap())
     val avatarFiles: StateFlow<Map<Long, String?>> = _avatarFiles
@@ -282,6 +314,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun openChat(conversationId: Long, phoneMode: Boolean = false) {
         if (_chatConversationId.value == conversationId) return
+        chatSpeechPlayer.stop()
         _chatConversationId.value = conversationId
         _isPhoneChat.value = phoneMode
         // 重建整态:上一会话遗留的失败回合条(failedTurn)一并清空
@@ -335,6 +368,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun closeChat() {
+        chatSpeechPlayer.stop()
         messagesJob?.cancel()
         messagesJob = null
         draftJob?.cancel()
@@ -385,6 +419,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // 这份回合前快照整体回退掉 —— 真机上表现为「回复完成后气泡消失,
                 // 退出重进才出现」。
                 val turnResult = runRound(conversationId, character.id, body, phoneMode, userMessageId)
+                speakChatReply(conversationId, phoneMode, turnResult)
                 _chatUi.value = _chatUi.value.afterTurnResult(turnResult, userMessageId)
                 // 回合收尾兜底刷一次全量(读在全部落库提交之后):Room 流的失效
                 // 通知在并发写(状态生成/记忆收尾同时走库)下存在偶发丢失,
@@ -413,12 +448,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val failed = state.failedTurn ?: return
         val character = state.character ?: return
         if (state.sending) return
+        val phoneMode = _isPhoneChat.value
         _chatUi.value = state.copy(sending = true, failedTurn = null)
         roundJob = viewModelScope.launch {
             try {
                 // 先跑回合再读 state(与 sendChatMessage 同口径):防回合前快照
                 // 在收尾回写时把回合期间实时上屏的气泡回退掉。
-                val turnResult = runRound(failed.conversationId, character.id, failed.userText, phoneMode = _isPhoneChat.value, userMessageId = failed.userMessageId)
+                val turnResult = runRound(failed.conversationId, character.id, failed.userText, phoneMode = phoneMode, userMessageId = failed.userMessageId)
+                speakChatReply(failed.conversationId, phoneMode, turnResult)
                 _chatUi.value = _chatUi.value.afterTurnResult(turnResult, failed.userMessageId)
                 refreshChatBubbles(failed.conversationId)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -502,6 +539,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 打开语音通话页(聊天页电话图标)。 */
     fun openVoiceCall(conversationId: Long) {
+        chatSpeechPlayer.stop()
         _voiceCallConversationId.value = conversationId
     }
 
@@ -806,7 +844,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     draftJob = viewModelScope.launch {
                         orchestrator.streamDraft.collect { _streamDraft.value = it }
                     }
-                    orchestrator.respondProactively(
+                    val result = orchestrator.respondProactively(
                         conversationId = conversationId,
                         characterId = character.id,
                         sceneLine = "(刚刚那条没说好,重新组织一下)重新发一条主动消息,连发 1~3 条。",
@@ -815,6 +853,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         mode = ChatPrefs.dialogMode(getApplication()),
                         phoneStyle = phoneMode,
                     )
+                    if (result is com.neethu.gouxiang.chat.ProactiveTurnResult.Completed) {
+                        speakChatReply(conversationId, phoneMode, com.neethu.gouxiang.chat.TurnResult.Completed(result.bubbles))
+                    }
                     draftJob?.cancel()
                     draftJob = null
                     _streamDraft.value = ""
@@ -832,6 +873,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // 记 failedTurn 出重试条,避免「删了旧泡又没新回复」的空窗。
                 // 先跑回合再读 state(与 sendChatMessage 同口径,防快照回退)。
                 val turnResult = runRound(conversationId, character.id, lastUser.content, phoneMode = phoneMode, userMessageId = lastUser.id)
+                speakChatReply(conversationId, phoneMode, turnResult)
                 _chatUi.value = _chatUi.value.afterTurnResult(turnResult, lastUser.id)
                 refreshChatBubbles(conversationId)
             } catch (e: kotlinx.coroutines.CancellationException) {

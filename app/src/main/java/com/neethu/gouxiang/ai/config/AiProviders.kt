@@ -18,7 +18,7 @@ import kotlinx.serialization.json.put
  *
  * GouXiang 的消费面(与 AIAvatar 的差异,见 AiConfigStore KDoc):
  * - 大模型链路(聊天/记忆/心声/朋友圈生文)全量跟随本目录;
- * - TTS/ASR 只服务语音通话 F6,消费的是 火山豆包语音 Key / 硅基流动 Key /
+ * - TTS 服务聊天朗读和语音通话,ASR 服务语音输入和通话;消费火山豆包语音 Key / 硅基流动 Key /
  *   ASR 模型三项,不做 Edge-TTS/百炼原生协议的多引擎矩阵(未移植那些适配器)。
  */
 enum class AiProvider(
@@ -110,7 +110,7 @@ enum class AiProvider(
         // 语音合成走豆包语音控制台——同选火山也必须各填各的
         llmKeyLabel = "火山方舟 API Key(大模型用)",
         llmKeyHint = "ark-...",
-        ttsKeyLabel = "豆包语音 API Key(语音通话合成用)",
+        ttsKeyLabel = "豆包语音 API Key(语音合成用)",
         ttsKeyHint = "粘贴豆包语音控制台 Key",
     ),
     OPENROUTER(

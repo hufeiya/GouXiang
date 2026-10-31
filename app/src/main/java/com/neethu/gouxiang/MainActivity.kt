@@ -68,6 +68,16 @@ class MainActivity : ComponentActivity() {
         handleNavigationExtras(intent)
     }
 
+    override fun onStart() {
+        super.onStart()
+        viewModel.setChatSpeechForeground(true)
+    }
+
+    override fun onStop() {
+        viewModel.setChatSpeechForeground(false)
+        super.onStop()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -136,6 +146,7 @@ class MainActivity : ComponentActivity() {
         val chatId by vm.chatConversationId.collectAsState()
         val chatUi by vm.chatUi.collectAsState()
         val streamDraft by vm.streamDraft.collectAsState()
+        val chatSoundEnabled by vm.chatSoundEnabled.collectAsState()
         // 手机聊天 F4:形态开关 + 说明页 + 语音播放状态
         val isPhoneChat by vm.isPhoneChat.collectAsState()
         val phoneGuideOpen by vm.phoneGuideOpen.collectAsState()
@@ -423,6 +434,8 @@ class MainActivity : ComponentActivity() {
                     recognizing = voiceInputRecognizing,
                     voiceTranscribed = voiceInputTranscribed,
                     onVoiceTranscribedConsumed = { vm.consumeVoiceInputTranscribed() },
+                    soundEnabled = chatSoundEnabled,
+                    onToggleSound = { vm.toggleChatSound() },
                 )
             }
         }

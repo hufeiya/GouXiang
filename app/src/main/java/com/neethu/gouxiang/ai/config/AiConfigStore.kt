@@ -23,7 +23,7 @@ data class LlmEndpoint(
  *
  * - **大模型**:服务商/Key/模型/自定义端点全量跟随(聊天/记忆/心声/朋友圈生文
  *   同路,见 [llmEndpoint]);
- * - **语音合成(TTS)**:只存语音通话 F6 消费的 火山豆包语音 Key 与 硅基流动 Key
+ * - **语音合成(TTS)**:存聊天朗读与语音通话使用的火山豆包语音 Key 与硅基流动 Key
  *   (引擎内置「火山 seed-tts-2.0 优先、硅基 CosyVoice 兜底」双链,不做
  *   AIAvatar 的多引擎矩阵——Edge-TTS/百炼原生协议适配器未移植);
  * - **语音识别(ASR)**:云端识别的模型名跟随大模型服务商(回落规则见
@@ -41,7 +41,7 @@ data class AiConfig(
     val apiKeySiliconflow: String = "",
     /** 火山方舟(Ark)API Key——火山大模型链路。 */
     val apiKeyVolcano: String = "",
-    /** 豆包语音控制台 API Key——语音通话合成链路(与方舟互不通用)。 */
+    /** 豆包语音控制台 API Key——语音合成链路(与方舟互不通用)。 */
     val apiKeyVolcanoTts: String = "",
     /** OpenRouter API Key——大模型一把通用。 */
     val apiKeyOpenrouter: String = "",
@@ -56,7 +56,7 @@ data class AiConfig(
     /** 自定义端点的 API Key(中转站需要;本地模型随意占位)。 */
     val apiKeyCustom: String = "",
     val ttsModel: String = "",
-    /** 语音通话音色(火山链路消费;留空 = 适配器内置默认)。 */
+    /** 语音音色(火山链路消费;留空 = 适配器内置默认)。 */
     val ttsVoice: String = "",
     /** 云端识别模型名;留空 = 按端点自动推断(见 [resolveAsrModel])。 */
     val asrModel: String = "",
@@ -80,7 +80,7 @@ data class AiConfig(
     fun effectiveApiKey(p: AiProvider): String =
         apiKeyFor(p).ifBlank { defaultKeyFor(p) }
 
-    /** 语音通话合成的生效 key:豆包语音那把优先,留空回落 BuildConfig 默认。 */
+    /** 语音合成的生效 key:豆包语音那把优先,留空回落 BuildConfig 默认。 */
     fun effectiveTtsKey(): String =
         apiKeyVolcanoTts.ifBlank { BuildConfig.VOLCANO_TTS_API_KEY }
 

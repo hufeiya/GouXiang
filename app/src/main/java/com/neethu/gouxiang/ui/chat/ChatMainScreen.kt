@@ -42,8 +42,10 @@ import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.VolumeOff
 import androidx.compose.material.icons.outlined.VolumeUp
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -124,6 +126,9 @@ fun ChatMainScreen(
     voiceTranscribed: String = "",
     /** F4 转写填入草稿后回调(VM 清事件)。 */
     onVoiceTranscribedConsumed: () -> Unit = {},
+    /** 普通聊天回复的自动朗读开关。 */
+    soundEnabled: Boolean = true,
+    onToggleSound: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler { onBack() }
@@ -179,7 +184,12 @@ fun ChatMainScreen(
         }
 
         Column(Modifier.fillMaxSize()) {
-            TopBar(onBack = onBack, onOpenMemory = onOpenMemory)
+            TopBar(
+                onBack = onBack,
+                onOpenMemory = onOpenMemory,
+                soundEnabled = soundEnabled,
+                onToggleSound = onToggleSound,
+            )
             // 消息区占满中部:reverseLayout 使最新一轮贴在信息区之上
             LazyColumn(
                 modifier = Modifier
@@ -308,7 +318,12 @@ fun ChatMainScreen(
 
 /** 顶部:返回 + V 盾 + 右侧搜索/喇叭(沉浸式叠在图上)。 */
 @Composable
-private fun TopBar(onBack: () -> Unit, onOpenMemory: () -> Unit = {}) {
+private fun TopBar(
+    onBack: () -> Unit,
+    onOpenMemory: () -> Unit = {},
+    soundEnabled: Boolean,
+    onToggleSound: () -> Unit,
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -356,12 +371,14 @@ private fun TopBar(onBack: () -> Unit, onOpenMemory: () -> Unit = {}) {
             modifier = Modifier.size(24.dp),
         )
         Spacer(Modifier.width(16.dp))
-        Icon(
-            Icons.Outlined.VolumeUp,
-            contentDescription = "音量",
-            tint = Color.White,
-            modifier = Modifier.size(24.dp),
-        )
+        IconToggleButton(checked = soundEnabled, onCheckedChange = { onToggleSound() }) {
+            Icon(
+                if (soundEnabled) Icons.Outlined.VolumeUp else Icons.Outlined.VolumeOff,
+                contentDescription = if (soundEnabled) "关闭朗读" else "开启朗读",
+                tint = Color.White,
+                modifier = Modifier.size(24.dp),
+            )
+        }
     }
 }
 

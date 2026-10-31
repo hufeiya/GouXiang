@@ -76,7 +76,7 @@ import kotlinx.coroutines.launch
  * 语音通话的合成与识别(豆包语音 Key/硅基流动兜底 Key/ASR 模型)。
  *
  * 与 AIAvatar 设置页的差异(GouXiang 消费面裁剪,详见 AiConfigStore KDoc):
- * - TTS/ASR 只服务语音通话 F6,不做 Edge-TTS 多引擎矩阵与「同服务商」勾选
+ * - TTS 服务普通聊天朗读与语音通话,不做 Edge-TTS 多引擎矩阵与「同服务商」勾选
  *   (通话内置「火山优先、硅基兜底」双链);系统识别与「语音直接发送」无消费面;
  * - 每项改动即存即生效(编排器每回合现读),无需重启。
  */
@@ -239,13 +239,13 @@ private fun withApiKey(config: AiConfig, provider: AiProvider, key: String): AiC
         AiProvider.CUSTOM -> config.copy(apiKeyCustom = key)
     }
 
-// ── 语音合成(语音通话 F6:火山 seed-tts-2.0 优先,硅基 CosyVoice 兜底)────
+// ── 语音合成(普通聊天与语音通话:火山优先,硅基兜底)────
 
 @Composable
 private fun TtsSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
-    CollapsibleSection(title = "语音合成(TTS · 语音通话)") {
+    CollapsibleSection(title = "语音合成(TTS · 聊天朗读和语音通话)") {
         SettingsGroupLabel(
-            "通话语音:火山豆包语音优先,未配置/失败自动落硅基流动兜底。" +
+            "聊天朗读和通话语音:火山豆包语音优先,未配置/失败自动落硅基流动兜底。" +
                 "火山的大模型与语音是两把互不通用的 Key,各填各的。"
         )
         SettingsTextFieldRow(
@@ -266,7 +266,7 @@ private fun TtsSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
             ) { onUpdate(withApiKey(config, AiProvider.SILICONFLOW, it)) }
         }
         SettingsDropdownRow(
-            title = "通话音色(火山)",
+            title = "语音音色(火山)",
             options = AiProvider.VOLCANO.voices.map { DropdownOption(it, it) },
             selectedValue = resolveVoice(AiProvider.VOLCANO, config.ttsVoice),
         ) { value -> onUpdate(config.copy(ttsVoice = value)) }
