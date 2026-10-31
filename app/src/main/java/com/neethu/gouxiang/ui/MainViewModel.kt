@@ -325,9 +325,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             repo.db.characterStatusDao().observeForCharacter(character.id).collect {
-                _chatUi.value = _chatUi.value.copy(
-                    status = statusManager.currentLine(character, conversationId, latestMessages),
-                )
+                // 状态条刷新是挂起路径(currentLine 走库):先算 status 再读 state,
+                // copy 基于挂起后的最新快照 —— 若先读后挂起,期间消息流写进来的
+                // 新气泡会被这份过期快照回退掉(回复完成后气泡消失的一类成因)。
+                val line = statusManager.currentLine(character, conversationId, latestMessages)
+                _chatUi.value = _chatUi.value.copy(status = line)
             }
         }
     }
@@ -377,8 +379,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     userMsg.at,
                 )
                 // 回合失败显式化(02 文档 §3.5):失败记 failedTurn 出重试条,
-                // 成功清 failedTurn(失败后另发新消息成功同样撤旧条)
-                _chatUi.value = _chatUi.value.afterTurnResult(runRound(conversationId, character.id, body, phoneMode, userMessageId), userMessageId)
+                // 成功清 failedTurn(失败后另发新消息成功同样撤旧条)。
+                // 先跑回合再读 state:若先读 `_chatUi.value` 再把整个回合当参数跑
+                // (Kotlin 先求值接收者),回合期间消息流实时上屏的用户/回复泡会被
+                // 这份回合前快照整体回退掉 —— 真机上表现为「回复完成后气泡消失,
+                // 退出重进才出现」。
+                val turnResult = runRound(conversationId, character.id, body, phoneMode, userMessageId)
+                _chatUi.value = _chatUi.value.afterTurnResult(turnResult, userMessageId)
+                // 回合收尾兜底刷一次全量(读在全部落库提交之后):Room 流的失效
+                // 通知在并发写(状态生成/记忆收尾同时走库)下存在偶发丢失,
+                // 收尾主动对账,回复泡不再依赖流推送才上屏。
+                refreshChatBubbles(conversationId)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -405,10 +416,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _chatUi.value = state.copy(sending = true, failedTurn = null)
         roundJob = viewModelScope.launch {
             try {
-                _chatUi.value = _chatUi.value.afterTurnResult(
-                    runRound(failed.conversationId, character.id, failed.userText, phoneMode = _isPhoneChat.value, userMessageId = failed.userMessageId),
-                    failed.userMessageId,
-                )
+                // 先跑回合再读 state(与 sendChatMessage 同口径):防回合前快照
+                // 在收尾回写时把回合期间实时上屏的气泡回退掉。
+                val turnResult = runRound(failed.conversationId, character.id, failed.userText, phoneMode = _isPhoneChat.value, userMessageId = failed.userMessageId)
+                _chatUi.value = _chatUi.value.afterTurnResult(turnResult, failed.userMessageId)
+                refreshChatBubbles(failed.conversationId)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -479,6 +491,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     // 本轮无泡可念,返回空列表不播 TTS。
                     val result = runRound(convId, character.id, userText, phoneMode = false, userMessageId = userMessageId)
                     _chatUi.value = _chatUi.value.applyVoiceRoundResult(convId, result, userMessageId)
+                    // 语音回合的泡同样事务落库:回聊天页前的兜底对账(仅同会话回写)
+                    refreshChatBubbles(convId)
                     (result as? com.neethu.gouxiang.chat.TurnResult.Completed)?.bubbles
                         ?: emptyList()
                 },
@@ -662,6 +676,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         return result
     }
 
+    /**
+     * 回合收尾兜底对账:全量重读当前会话消息并重建气泡列表。
+     *
+     * 气泡上屏的正常通路是 Room 消息流(任一落库自动推送);但回复泡走
+     * `withTransaction` 落库,并发收尾写(状态生成/记忆总结同时走库)下
+     * 失效通知存在偶发丢失 —— 真机实锤:回复已入库、流不推送,页面停在
+     * 回合前状态,退出重进(重读全量)才恢复。这里在回合全部落库提交之后
+     * 主动读一次,让收尾不依赖流推送;流后续推送同一数据时是幂等覆盖。
+     * 仅当聊天页仍停留在该会话时回写,防跨会话污染。
+     */
+    private suspend fun refreshChatBubbles(conversationId: Long) {
+        if (_chatUi.value.conversationId != conversationId) return
+        val all = repo.allMessages(conversationId)
+        // allMessages 挂起期间聊天页可能已关闭/切换;读后复验再写
+        // (读与写之间无挂起点,同线程原子)。
+        if (_chatUi.value.conversationId != conversationId) return
+        _chatUi.value = _chatUi.value.copy(
+            bubbleItems = toBubbleItems(all, _chatUi.value.separatorTurnIds),
+        )
+    }
+
     // ── 手机聊天 F4:主动消息/长按回溯/重生成/语音 ────────────────────
 
     // (D 工作包:进页触发判定升级为账本+频控全链路,见 proactiveService()/
@@ -696,6 +731,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 draftJob?.cancel()
                 draftJob = null
                 _streamDraft.value = ""
+                // 主动连发同样走事务落库,收尾兜底对账(同 sendChatMessage)
+                refreshChatBubbles(conversationId)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -781,6 +818,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     draftJob?.cancel()
                     draftJob = null
                     _streamDraft.value = ""
+                    refreshChatBubbles(conversationId)
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } finally {
@@ -791,11 +829,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _chatUi.value = _chatUi.value.copy(sending = true)
             try {
                 // 重新生成失败(02 文档 §3.5)同样显式化:原用户输入仍在库,
-                // 记 failedTurn 出重试条,避免「删了旧泡又没新回复」的空窗
-                _chatUi.value = _chatUi.value.afterTurnResult(
-                    runRound(conversationId, character.id, lastUser.content, phoneMode = phoneMode, userMessageId = lastUser.id),
-                    lastUser.id,
-                )
+                // 记 failedTurn 出重试条,避免「删了旧泡又没新回复」的空窗。
+                // 先跑回合再读 state(与 sendChatMessage 同口径,防快照回退)。
+                val turnResult = runRound(conversationId, character.id, lastUser.content, phoneMode = phoneMode, userMessageId = lastUser.id)
+                _chatUi.value = _chatUi.value.afterTurnResult(turnResult, lastUser.id)
+                refreshChatBubbles(conversationId)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
