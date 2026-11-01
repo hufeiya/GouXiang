@@ -111,39 +111,3 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }
-
-// 抓取素材只存在开发者本地；构建时提取应用所需字段和图片，不将原始样本加入仓库。
-// 无样本时生成空目录，应用可以正常运行并展示空状态。
-val prepareCatalogAssets by tasks.registering {
-    val sourceDir = rootProject.layout.projectDirectory.dir("charactorSample")
-    val outputDir = layout.buildDirectory.dir("generated/catalogAssets")
-    inputs.files(fileTree(sourceDir) { include("characters.json", "images/**/cover.webp", "images/**/portrait.webp") })
-    outputs.dir(outputDir)
-    doLast {
-        val output = outputDir.get().asFile
-        output.deleteRecursively()
-        val catalogDir = output.resolve("catalog").apply { mkdirs() }
-        val source = sourceDir.file("characters.json").asFile
-        if (source.isFile) {
-            @Suppress("UNCHECKED_CAST")
-            val rows = groovy.json.JsonSlurper().parse(source) as List<Map<String, Any?>>
-            val fields = listOf("sourceId", "name", "intro", "openingLine", "rawSettingsText", "rawStyleText", "profileStatus", "creatorName")
-            val cleaned = rows.filter { it["sourceId"]?.toString()?.matches(Regex("[0-9]+")) == true }
-                .map { row -> fields.associateWith { row[it] } }
-            catalogDir.resolve("characters.json").writeText(groovy.json.JsonOutput.toJson(cleaned), Charsets.UTF_8)
-            cleaned.forEach { row ->
-                val id = row["sourceId"].toString()
-                listOf("cover.webp", "portrait.webp").forEach { name ->
-                    val image = sourceDir.file("images/$id/$name").asFile
-                    if (image.isFile) {
-                        val destination = catalogDir.resolve("images/$id/$name")
-                        destination.parentFile.mkdirs()
-                        image.copyTo(destination, overwrite = true)
-                    }
-                }
-            }
-        }
-    }
-}
-android.sourceSets.getByName("main").assets.srcDir("$buildDir/generated/catalogAssets")
-tasks.named("preBuild").configure { dependsOn(prepareCatalogAssets) }

@@ -26,6 +26,16 @@ class CatalogImportTest {
         source = "maoxiang:$id", createdAt = 10,
     )
 
+    @Test fun catalogReadsAudienceAndDefaultsMissingValuesToUnknown() {
+        val rows = CatalogRepository.parse(
+            """[{"sourceId":"1234567890123456789","name":"女性向","audience":"female"},
+                {"sourceId":"2","name":"既有角色","audience":"unknown"},
+                {"sourceId":"3","name":"旧数据"}]""",
+        )
+        assertEquals(listOf("female", "unknown", "unknown"), rows.map { it.audience })
+        assertEquals("1234567890123456789", rows.first().sourceId)
+    }
+
     @Test fun startsIdempotentlyAndKeepsUserEditsAndHistory() = runBlocking {
         val original = character("1")
         val first = seed.startCatalogChat(original, 10)

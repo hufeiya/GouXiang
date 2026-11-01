@@ -19,6 +19,7 @@ data class CatalogCharacter(
     val coverAsset: String,
     val portraitAsset: String,
     val exampleLines: String = "",
+    val audience: String = "unknown",
 )
 
 object CatalogRepository {
@@ -29,6 +30,10 @@ object CatalogRepository {
         } catch (_: java.io.FileNotFoundException) {
             return emptyList()
         }
+        return parse(json)
+    }
+
+    internal fun parse(json: String): List<CatalogCharacter> {
         val rows = JSONArray(json)
         return (0 until rows.length()).mapNotNull { index ->
             val row = rows.optJSONObject(index) ?: return@mapNotNull null
@@ -46,6 +51,7 @@ object CatalogRepository {
                 coverAsset = "catalog/images/$id/cover.webp",
                 portraitAsset = "catalog/images/$id/portrait.webp",
                 exampleLines = row.string("rawStyleText"),
+                audience = row.string("audience").trim().lowercase().ifBlank { "unknown" },
             )
         }.distinctBy { it.sourceId }
     }

@@ -397,6 +397,9 @@ class MainActivity : ComponentActivity() {
         // 完成后仅从我的页「个人标签」进入修改。进页即读 prefs(同 AiConfigStore
         // 进页即读惯例),runCatching 兜底不阻塞主框架。
         var tagSheetOpen by remember { mutableStateOf(false) }
+        var feedUserGender by remember(catalogContext) {
+            mutableStateOf(com.neethu.gouxiang.ui.profile.UserTagPrefs.gender(catalogContext))
+        }
         LaunchedEffect(catalogContext) {
             val completed = withContext(Dispatchers.IO) {
                 com.neethu.gouxiang.ui.profile.UserTagPrefs.isCompleted(catalogContext)
@@ -586,6 +589,7 @@ class MainActivity : ComponentActivity() {
                         avatarFiles = avatarFiles,
                         introBarText = "本地版 · 角色形象由 AI 生成",
                         catalog = catalog,
+                        userGender = feedUserGender,
                         onOpenHall = {
                             if (embeddedChatKey != null) {
                                 embeddedChatKey = null
@@ -1057,7 +1061,10 @@ class MainActivity : ComponentActivity() {
         if (tagSheetOpen) {
             Box(Modifier.fillMaxSize()) {
                 com.neethu.gouxiang.ui.profile.UserTagSheet(
-                    onConfirmed = { tagSheetOpen = false },
+                    onConfirmed = {
+                        feedUserGender = com.neethu.gouxiang.ui.profile.UserTagPrefs.gender(catalogContext)
+                        tagSheetOpen = false
+                    },
                     onDismiss = { tagSheetOpen = false },
                 )
             }

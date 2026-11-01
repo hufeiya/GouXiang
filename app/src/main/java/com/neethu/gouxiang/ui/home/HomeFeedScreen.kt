@@ -55,6 +55,7 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.launch
 import com.neethu.gouxiang.data.HomeFeedCard
 import com.neethu.gouxiang.data.CatalogCharacter
+import com.neethu.gouxiang.ui.profile.UserGender
 import com.neethu.gouxiang.ui.chat.InputBar
 import com.neethu.gouxiang.ui.chat.NameAndActionsRow
 import com.neethu.gouxiang.ui.chat.HomeChatPresentation
@@ -78,6 +79,7 @@ fun HomeFeedScreen(
     avatarFiles: Map<Long, String?>,
     introBarText: String,
     catalog: List<CatalogCharacter> = emptyList(),
+    userGender: UserGender? = null,
     onOpenHall: () -> Unit = {},
     onOpenCatalogCharacter: (CatalogCharacter) -> Unit = {},
     onStartCatalogChat: (CatalogCharacter) -> Unit = {},
@@ -106,10 +108,8 @@ fun HomeFeedScreen(
         val shuffleSeed = remember { kotlin.random.Random.nextLong() }
         // 固定同一轮浏览中首次看到的立绘；目录人物转存时 cover 不替换 portrait。
         val imageModels = remember { mutableMapOf<String, Any>() }
-        val items = remember(cards, catalog, shuffleSeed) {
-            val localSources = cards.map { it.character.source }.toSet()
-            (cards.map { FeedItem.Local(it.copy(openingLine = it.character.openingLine)) } +
-                catalog.filterNot { "maoxiang:${it.sourceId}" in localSources }.map { FeedItem.Catalog(it) })
+        val items = remember(cards, catalog, userGender, shuffleSeed) {
+            homeFeedItems(cards, catalog, userGender)
                 .sortedBy { item ->
                     val key = item.stableKey()
                     kotlin.random.Random(shuffleSeed xor key.hashCode().toLong()).nextLong()

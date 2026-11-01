@@ -4,11 +4,11 @@
 
 人物目录和已有聊天角色分开。第一次开始聊天时才创建角色和会话；再次进入同一来源人物会打开原会话，不会覆盖已有聊天或编辑。来源没有公开完整人设时，详情页会提示聊天使用公开简介作为背景。
 
-## 本地样本和构建
+## 预置人物和构建
 
-构建时 `app` 的 `prepareCatalogAssets` 任务读取项目根目录下被 Git 忽略的 `charactorSample/characters.json` 和 `charactorSample/images/<来源 ID>/`，只将应用使用的字段、`cover.webp`、`portrait.webp` 生成到 `app/build/generated/catalogAssets/`，并打包进 APK。原始抓取文件和构建产物不纳入 Git。
+预置目录位于 `app/src/main/assets/catalog/`，包含 `characters.json` 和 `images/<来源 ID>/` 下的封面、立绘。Android 构建直接将该目录打包进 APK，不依赖项目根目录的 `charactorSample/`。原始样本仍保存在被 Git 忽略的本地目录。
 
-没有本地样本时应用仍可构建，人物大厅会显示空目录。新增或更新样本后重新构建并安装 APK 即可更新目录；已有聊天和用户修改不会被目录更新覆盖。请确认有权使用和分发所打包的人物文字和图片。
+更新预置目录后重新构建并安装 APK 即可更新人物；已有聊天和用户修改不会被目录更新覆盖。请确认有权使用和分发所打包的人物文字和图片。
 
 ## 人物音色
 
