@@ -81,6 +81,12 @@ fun GenerationSettingsScreen(
         )
 
         SwitchRow(
+            title = "状态详情自动生成",
+            subtitle = "开启后自动生成详情；关闭后点开标题生成详情",
+            checked = snapshot.statusDetailAuto,
+            onCheckedChange = { onToggle(com.neethu.gouxiang.ai.GenerationPrefs.KEY_STATUS_DETAIL_AUTO, it) },
+        )
+        SwitchRow(
             title = "心声正文自动生成",
             subtitle = "开启后自动生成正文；关闭后点开标题生成正文",
             checked = snapshot.innerVoiceAuto,

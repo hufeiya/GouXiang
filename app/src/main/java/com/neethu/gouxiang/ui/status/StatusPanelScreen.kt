@@ -1,8 +1,8 @@
 package com.neethu.gouxiang.ui.status
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,6 +18,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBackIosNew
@@ -26,208 +26,258 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import com.neethu.gouxiang.data.CharacterStatusDetailEntity
+import java.io.File
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
-/**
- * 状态面板(E 工作包 E3,「TA 的状态」本地版;对齐 08-status-system.md 的
- * 当前态卡 + 历史时间轴结构,去商业化字段):
- *
- * - 顶栏「{角色名}的状态」+ 返回;
- * - 当前状态卡:emoji + 正在做的事 + 心情/内心想法 + 生成时间与来源
- *   (E3:可查看来源);无记录时提示「暂无状态记录,聊天中会自动生成」;
- * - 状态记录时间轴(生成时间倒序,不含当前卡那条的重复展示——当前卡即最新
- *   active,时间轴从第二条开始);
- * - 失效记录区:已随回溯失效的行置灰 + 「已随回溯失效」标签 + 「清理失效记录」
- *   (对齐猫箱冲突记录可清理语义,本地版直接删除 stale 行)。
- */
+/** 状态标题时间线与按需加载的状态详情。 */
 @Composable
 fun StatusPanelScreen(
     state: StatusPanelUiState,
     onBack: () -> Unit,
     onClearStale: () -> Unit = {},
+    backgroundFile: String? = null,
+    onOpenDetail: (Long) -> Unit = {},
+    onCloseDetail: () -> Unit = {},
+    onRetryDetail: () -> Unit = {},
+    onViewConversation: () -> Unit = onBack,
     modifier: Modifier = Modifier,
 ) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFF14141A)),
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(240.dp)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0xFF5A6A8A).copy(alpha = 0.5f), Color(0xFF14141A)),
-                    ),
-                ),
+    val selected = state.rows.firstOrNull { it.id == state.selectedId }
+    BackHandler { if (state.selectedId != null) onCloseDetail() else onBack() }
+    if (state.selectedId != null && selected != null) {
+        StatusDetailScreen(
+            row = selected,
+            detail = state.detail,
+            loading = state.detailLoading,
+            failed = state.detailFailed,
+            backgroundFile = backgroundFile,
+            onBack = onCloseDetail,
+            onRetry = onRetryDetail,
+            onViewConversation = onViewConversation,
+            modifier = modifier,
         )
-        Column(
-            Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .imePadding(),
-        ) {
-            // ── 顶栏:返回 + 标题「{角色名}的状态」─────────────────────
+    } else {
+        StatusTimelineScreen(state, backgroundFile, onBack, onOpenDetail, onClearStale, modifier)
+    }
+}
+
+@Composable
+private fun StatusTimelineScreen(
+    state: StatusPanelUiState,
+    backgroundFile: String?,
+    onBack: () -> Unit,
+    onOpenDetail: (Long) -> Unit,
+    onClearStale: () -> Unit,
+    modifier: Modifier,
+) {
+    Box(modifier.fillMaxSize().background(Color(0xFF263E4A))) {
+        CharacterImage(backgroundFile, Modifier.fillMaxSize().blur(24.dp))
+        Box(Modifier.fillMaxSize().background(Color(0xD9294350)))
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            PanelHeader("状态记录", Color.White, onBack)
+            Text(
+                "继续聊天触发状态更新 | 由 AI 生成",
+                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                color = Color.White.copy(alpha = 0.5f), fontSize = 13.sp, textAlign = TextAlign.Center,
+            )
+            when {
+                state.loadFailed -> TimelineMessage("会话不存在或已关闭")
+                state.loading && state.empty -> TimelineMessage("加载中…")
+                state.empty -> TimelineMessage("暂无状态记录，继续聊天后会自动生成")
+                else -> LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                ) {
+                    items(state.rows, key = { it.id }) { row ->
+                        TimelineRow(row, onClick = { onOpenDetail(row.id) })
+                    }
+                    if (state.staleRows.isNotEmpty()) {
+                        item {
+                            TextButton(onClick = onClearStale, modifier = Modifier.padding(start = 42.dp)) {
+                                Text("清理失效记录", color = Color.White.copy(alpha = 0.75f))
+                            }
+                        }
+                    }
+                    item { Spacer(Modifier.navigationBarsPadding().height(20.dp)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TimelineMessage(message: String) {
+    Text(message, color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp, modifier = Modifier.padding(24.dp))
+}
+
+@Composable
+private fun TimelineRow(row: StatusRow, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(16.dp)) {
+            Box(Modifier.padding(top = 5.dp).size(10.dp).background(Color.White.copy(alpha = 0.38f), CircleShape), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(4.dp).background(Color(0xFFC2D3D9), CircleShape))
+            }
+            Box(Modifier.width(1.dp).height(82.dp).background(Color.White.copy(alpha = 0.12f)))
+        }
+        Column(Modifier.weight(1f).padding(start = 14.dp, bottom = 16.dp)) {
+            Text(row.timeLabel, color = Color.White.copy(alpha = 0.56f), fontSize = 14.sp)
+            Spacer(Modifier.height(9.dp))
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .height(44.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                    .background(Color.White.copy(alpha = if (row.stale) 0.07f else 0.12f))
+                    .then(if (row.stale) Modifier else Modifier.clickable(onClick = onClick))
+                    .padding(horizontal = 18.dp, vertical = 17.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    Icons.Filled.ArrowBackIosNew,
-                    contentDescription = "返回",
-                    tint = Color.White,
-                    modifier = Modifier
-                        .size(22.dp)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) { onBack() },
-                )
+                Text(row.emoji, fontSize = 23.sp)
                 Spacer(Modifier.width(10.dp))
-                Text(
-                    if (state.characterName.isBlank()) "TA 的状态" else "${state.characterName}的状态",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            }
-            if (state.loadFailed) {
-                Text(
-                    "会话不存在或已关闭",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(20.dp),
-                )
-                return@Column
-            }
-            if (state.loading && state.empty) {
-                Text(
-                    "加载中…",
-                    color = Color.White.copy(alpha = 0.6f),
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(20.dp),
-                )
-                return@Column
-            }
-            if (state.empty) {
-                Text(
-                    "暂无状态记录,和 TA 聊几轮后会自动生成(断网时保持最近有效状态,无记录走规则状态条)",
-                    color = Color.White.copy(alpha = 0.55f),
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(20.dp),
-                )
-                return@Column
-            }
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                item { CurrentCard(state.current!!) }
-                val history = state.rows.filter { !it.stale }.drop(1)
-                if (history.isNotEmpty()) {
-                    item {
-                        SectionTitle("状态记录")
-                    }
+                Column(Modifier.weight(1f)) {
+                    Text(row.doing, color = Color(0xFFFFEF82).copy(alpha = if (row.stale) 0.55f else 1f), fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                    if (row.stale) Text("已随对话回溯失效，无法查看", color = Color.White.copy(alpha = 0.55f), fontSize = 11.sp)
                 }
-                items(history, key = { "h-${it.id}" }) { row -> RecordRow(row) }
-                if (state.staleRows.isNotEmpty()) {
-                    item { SectionTitle("失效记录(因对话回溯)") }
-                    items(state.staleRows, key = { "s-${it.id}" }) { row -> RecordRow(row, stale = true) }
-                    item {
-                        TextButton(onClick = onClearStale) {
-                            Text("清理失效记录", color = Color(0xFFF2C94C), fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PanelHeader(title: String, color: Color, onBack: () -> Unit, action: (@Composable () -> Unit)? = null) {
+    Box(Modifier.fillMaxWidth().height(52.dp), contentAlignment = Alignment.Center) {
+        Text(title, color = color, fontWeight = FontWeight.SemiBold, fontSize = 19.sp)
+        Box(Modifier.align(Alignment.CenterStart).size(52.dp).clickable(onClick = onBack), contentAlignment = Alignment.Center) {
+            Icon(Icons.Filled.ArrowBackIosNew, contentDescription = "返回", tint = color, modifier = Modifier.size(21.dp))
+        }
+        if (action != null) Box(Modifier.align(Alignment.CenterEnd).padding(end = 18.dp)) { action() }
+    }
+}
+
+@Composable
+private fun StatusDetailScreen(
+    row: StatusRow,
+    detail: CharacterStatusDetailEntity?,
+    loading: Boolean,
+    failed: Boolean,
+    backgroundFile: String?,
+    onBack: () -> Unit,
+    onRetry: () -> Unit,
+    onViewConversation: () -> Unit,
+    modifier: Modifier,
+) {
+    val ink = Color(0xFF20242B)
+    Box(modifier.fillMaxSize().background(Color(0xFFF3F6FC))) {
+        CharacterImage(backgroundFile, Modifier.fillMaxSize().blur(40.dp))
+        Box(Modifier.fillMaxSize().background(Color(0xEAF4F7FF)))
+        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+            PanelHeader("TA 的状态", ink, onBack) {
+                Text("查看对话", modifier = Modifier.clickable(onClick = onViewConversation), color = Color(0xFF6E7D92), fontSize = 15.sp)
+            }
+            LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                item {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Box(Modifier.width(122.dp).height(166.dp).clip(RoundedCornerShape(20.dp)).background(Color(0xFFD9E0EB))) {
+                            CharacterImage(backgroundFile, Modifier.fillMaxSize())
+                        }
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            if (!detail?.location.isNullOrBlank()) DetailField("◎ 位置", detail!!.location)
+                            DetailField("♡ 心情", detail?.mood?.takeIf { it.isNotBlank() } ?: row.mood.ifBlank { "暂未记录" })
+                            DetailField("☁ 状态", detail?.action?.takeIf { it.isNotBlank() } ?: row.doing)
                         }
                     }
                 }
-                item { Spacer(Modifier.height(24.dp)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(
-        text,
-        color = Color.White.copy(alpha = 0.6f),
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.padding(top = 8.dp),
-    )
-}
-
-/** 当前置顶卡(emoji 大号 + doing 主行 + mood/thought 副行 + 时间与来源)。 */
-@Composable
-private fun CurrentCard(row: StatusRow) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
-            .padding(16.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(row.emoji, fontSize = 26.sp)
-            Spacer(Modifier.width(10.dp))
-            Column {
-                Text(row.doing, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                if (row.mood.isNotBlank()) {
-                    Text("心情:${row.mood}", color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp)
+                if (loading) item { DetailMessage("正在生成状态详情…") }
+                if (failed) item {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(20.dp)).padding(18.dp)) {
+                        Text("详情生成失败，请稍后重试", color = Color(0xFF656C77), fontSize = 14.sp)
+                        TextButton(onClick = onRetry) { Text("重试") }
+                    }
                 }
+                if (detail != null) {
+                    val metrics = parseMetrics(detail.metricsJson)
+                    if (metrics.isNotEmpty()) item {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(20.dp)).padding(20.dp), verticalArrangement = Arrangement.spacedBy(22.dp)) {
+                            metrics.forEachIndexed { index, metric -> MetricItem(metric, index) }
+                        }
+                    }
+                    if (detail.monologue.isNotBlank()) item { MonologueCard(detail.monologue) }
+                } else if (!loading && !failed && row.thought.isNotBlank()) {
+                    item { MonologueCard(row.thought) }
+                }
+                item { Spacer(Modifier.navigationBarsPadding().height(20.dp)) }
             }
         }
-        if (row.thought.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Text("内心:${row.thought}", color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp)
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "${row.timeLabel} · ${row.sourceLabel}",
-            color = Color(0xFFF2C94C).copy(alpha = 0.85f),
-            fontSize = 12.sp,
-        )
     }
 }
 
-/** 时间轴行(当前卡之外的历史记录;stale 行置灰)。 */
 @Composable
-private fun RecordRow(row: StatusRow, stale: Boolean = false) {
-    val alpha = if (stale) 0.45f else 1f
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .background(Color.White.copy(alpha = if (stale) 0.04f else 0.06f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(row.emoji, fontSize = 18.sp)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(row.doing, color = Color.White.copy(alpha = alpha), fontSize = 14.sp, fontWeight = FontWeight.Medium)
-            if (row.mood.isNotBlank() || row.thought.isNotBlank()) {
-                val detail = listOf(
-                    row.mood.takeIf { it.isNotBlank() }?.let { "心情:$it" },
-                    row.thought.takeIf { it.isNotBlank() }?.let { "内心:$it" },
-                ).filterNotNull().joinToString(" · ")
-                Text(detail, color = Color.White.copy(alpha = alpha * 0.7f), fontSize = 12.sp)
-            }
-            Text(
-                "${row.timeLabel} · ${row.sourceLabel}",
-                color = Color.White.copy(alpha = alpha * 0.55f),
-                fontSize = 11.sp,
-            )
+private fun CharacterImage(path: String?, modifier: Modifier) {
+    val file = path?.let(::File)?.takeIf { it.isFile }
+    if (file != null) AsyncImage(model = file, contentDescription = null, contentScale = ContentScale.Crop, modifier = modifier)
+}
+
+@Composable
+private fun DetailField(label: String, text: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(label, color = Color(0xFF88909C), fontSize = 13.sp)
+        Text(text, color = Color(0xFF3566B4), fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun DetailMessage(text: String) {
+    Text(text, color = Color(0xFF747E8C), fontSize = 14.sp, modifier = Modifier.padding(horizontal = 24.dp))
+}
+
+private data class StatusMetric(val emoji: String, val label: String, val value: Int, val description: String)
+
+private fun parseMetrics(raw: String): List<StatusMetric> = runCatching {
+    Json.parseToJsonElement(raw).jsonArray.mapNotNull { element ->
+        runCatching metric@{
+            val obj = element.jsonObject
+            val label = obj["label"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val value = obj["value"]?.jsonPrimitive?.intOrNull ?: return@metric null
+            if (label.isBlank()) return@metric null
+            StatusMetric(obj["emoji"]?.jsonPrimitive?.contentOrNull.orEmpty(), label, value.coerceIn(0, 100), obj["description"]?.jsonPrimitive?.contentOrNull.orEmpty())
+        }.getOrNull()
+    }
+}.getOrDefault(emptyList())
+
+@Composable
+private fun MetricItem(metric: StatusMetric, index: Int) {
+    val colors = listOf(Color(0xFFF44750), Color(0xFFFF9874), Color(0xFFF3AFC1), Color(0xFF91C897), Color(0xFFF5C85E))
+    val color = colors[index % colors.size]
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("${metric.emoji} ${metric.label}", color = Color(0xFF20242B), fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            Text(metric.value.toString(), color = color, fontSize = 16.sp)
         }
+        Box(Modifier.fillMaxWidth().height(6.dp).clip(CircleShape).background(Color(0xFFE9EAEB))) {
+            Box(Modifier.fillMaxWidth(metric.value / 100f).height(6.dp).background(color, CircleShape))
+        }
+        if (metric.description.isNotBlank()) Text(metric.description, color = Color(0xFF656A72), fontSize = 15.sp, lineHeight = 23.sp)
+    }
+}
+
+@Composable
+private fun MonologueCard(thought: String) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(20.dp)).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("☁ 内心独白", color = Color(0xFF20242B), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        Text(thought, color = Color(0xFF656A72), fontSize = 15.sp, lineHeight = 23.sp)
     }
 }

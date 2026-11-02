@@ -2,6 +2,7 @@ package com.neethu.gouxiang.ui.status
 
 import androidx.compose.runtime.Immutable
 import com.neethu.gouxiang.data.CharacterStatusEntity
+import com.neethu.gouxiang.data.CharacterStatusDetailEntity
 import java.util.Calendar
 
 /**
@@ -15,6 +16,10 @@ data class StatusPanelUiState(
     val loadFailed: Boolean = false,
     /** 近期记录(生成时间倒序;含失效行,面板分「状态记录/失效记录」两区)。 */
     val rows: List<StatusRow> = emptyList(),
+    val selectedId: Long? = null,
+    val detail: CharacterStatusDetailEntity? = null,
+    val detailLoading: Boolean = false,
+    val detailFailed: Boolean = false,
 ) {
     /** 当前置顶卡(最新 active;null = 无记录,提示规则兜底口径)。 */
     val current: StatusRow? get() = rows.firstOrNull { !it.stale }

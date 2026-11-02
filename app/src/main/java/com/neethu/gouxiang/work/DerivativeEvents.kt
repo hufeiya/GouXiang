@@ -45,6 +45,7 @@ object DerivativeEvents {
  */
 data class GenerationSettingsSnapshot(
     val innerVoiceAuto: Boolean = false,
+    val statusDetailAuto: Boolean = false,
     val momentsDaily: Boolean = false,
     val memoryOvernight: Boolean = false,
     val proactiveOutbox: Boolean = true,

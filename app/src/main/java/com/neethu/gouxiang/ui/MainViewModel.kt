@@ -138,6 +138,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         llm = ChatOrchestrator.defaultLlm(),
         llmConfig = { orchestrator.llmConfigForMemory() },
         scope = viewModelScope,
+        autoDetail = { com.neethu.gouxiang.ai.GenerationPrefs.statusDetailAuto(getApplication<Application>()) },
     )
 
     init {
@@ -3128,6 +3129,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _generationSettings.value =
             com.neethu.gouxiang.work.GenerationSettingsSnapshot(
                 innerVoiceAuto = com.neethu.gouxiang.ai.GenerationPrefs.innerVoiceAuto(app),
+                statusDetailAuto = com.neethu.gouxiang.ai.GenerationPrefs.statusDetailAuto(app),
                 momentsDaily = com.neethu.gouxiang.ai.GenerationPrefs.momentsDaily(app),
                 memoryOvernight = com.neethu.gouxiang.ai.GenerationPrefs.memoryOvernight(app),
                 proactiveOutbox = com.neethu.gouxiang.ai.GenerationPrefs.proactiveOutbox(app),
@@ -3148,6 +3150,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val app = getApplication<Application>()
         val sched = com.neethu.gouxiang.work.DerivativeScheduler
         when (key) {
+            com.neethu.gouxiang.ai.GenerationPrefs.KEY_STATUS_DETAIL_AUTO ->
+                com.neethu.gouxiang.ai.GenerationPrefs.setStatusDetailAuto(app, enabled)
             com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_AUTO -> {
                 com.neethu.gouxiang.ai.GenerationPrefs.setInnerVoiceAuto(app, enabled)
             }
@@ -3330,10 +3334,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val statusPanelUi: StateFlow<com.neethu.gouxiang.ui.status.StatusPanelUiState> = _statusPanelUi.asStateFlow()
 
     private var statusPanelJob: Job? = null
+    private var statusDetailJob: Job? = null
 
     /** 打开状态面板:解析角色并订阅其状态记录(最新在前;含失效区)。 */
     fun openStatusPanel(conversationId: Long) {
         if (_statusPanelConversationId.value == conversationId) return
+        statusDetailJob?.cancel()
+        statusDetailJob = null
         _statusPanelConversationId.value = conversationId
         _statusPanelUi.value = com.neethu.gouxiang.ui.status.StatusPanelUiState(loading = true)
         statusPanelJob?.cancel()
@@ -3344,9 +3351,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 _statusPanelUi.value = com.neethu.gouxiang.ui.status.StatusPanelUiState(loadFailed = true)
                 return@launch
             }
-            repo.db.characterStatusDao().observeForCharacter(character.id).collect { records ->
-                _statusPanelUi.value = com.neethu.gouxiang.ui.status.StatusPanelUiState(
+            repo.db.characterStatusDao().observeForCharacter(character.id, limit = Int.MAX_VALUE).collect { records ->
+                _statusPanelUi.value = _statusPanelUi.value.copy(
                     characterName = character.name,
+                    loading = false,
                     rows = records.map { com.neethu.gouxiang.ui.status.toStatusRow(it) },
                 )
             }
@@ -3355,10 +3363,67 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 关闭状态面板。 */
     fun closeStatusPanel() {
+        statusDetailJob?.cancel()
+        statusDetailJob = null
         statusPanelJob?.cancel()
         statusPanelJob = null
         _statusPanelConversationId.value = null
         _statusPanelUi.value = com.neethu.gouxiang.ui.status.StatusPanelUiState()
+    }
+
+    /** 展开记录时才请求详情；已生成的详情由管理器从本地读取。 */
+    fun openStatusDetail(id: Long) {
+        if (_statusPanelConversationId.value == null) return
+        if (_statusPanelUi.value.rows.none { it.id == id }) return
+        statusDetailJob?.cancel()
+        _statusPanelUi.value = _statusPanelUi.value.copy(
+            selectedId = id, detail = null, detailLoading = true, detailFailed = false,
+        )
+        statusDetailJob = viewModelScope.launch {
+            val record = repo.db.characterStatusDao().byId(id)
+            val character = record?.let { repo.characterById(it.characterId) }
+            val detail = if (record != null && character != null) {
+                try {
+                    statusManager.generateDetail(character, record)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    null
+                }
+            } else null
+            if (_statusPanelUi.value.selectedId == id) {
+                _statusPanelUi.value = _statusPanelUi.value.copy(
+                    detail = detail, detailLoading = false, detailFailed = detail == null,
+                )
+            }
+        }
+    }
+
+    fun closeStatusDetail() {
+        statusDetailJob?.cancel()
+        statusDetailJob = null
+        _statusPanelUi.value = _statusPanelUi.value.copy(
+            selectedId = null, detail = null, detailLoading = false, detailFailed = false,
+        )
+    }
+
+    fun retryStatusDetail() {
+        _statusPanelUi.value.selectedId?.let { openStatusDetail(it) }
+    }
+
+    /** 打开生成该状态的会话；没有来源时回到当前聊天。 */
+    fun viewStatusConversation() {
+        val id = _statusPanelUi.value.selectedId ?: return
+        viewModelScope.launch {
+            val record = repo.db.characterStatusDao().byId(id)
+            val sourceId = record?.sourceConversationId
+            val source = sourceId?.let { repo.db.conversationDao().byId(it) }
+            if (_statusPanelUi.value.selectedId != id) return@launch
+            closeStatusPanel()
+            if (record != null && source != null && source.characterId == record.characterId) {
+                openChat(source.id, phoneMode = source.mode == "phone")
+            }
+        }
     }
 
     /** 清理当前角色的失效记录(面板「清理失效记录」;一次删光 stale 行)。 */

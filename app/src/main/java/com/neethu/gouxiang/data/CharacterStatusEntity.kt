@@ -3,6 +3,7 @@ package com.neethu.gouxiang.data
 import androidx.room.Dao
 import androidx.room.Entity
 import androidx.room.Index
+import androidx.room.ForeignKey
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.PrimaryKey
@@ -67,6 +68,20 @@ data class CharacterStatusEntity(
     }
 }
 
+/** 按需生成的状态详情，与历史记录一对一保存。 */
+@Entity(
+    tableName = "character_status_details",
+    foreignKeys = [ForeignKey(entity = CharacterStatusEntity::class, parentColumns = ["id"], childColumns = ["statusId"], onDelete = ForeignKey.CASCADE)],
+)
+data class CharacterStatusDetailEntity(
+    @PrimaryKey val statusId: Long,
+    val location: String,
+    val mood: String,
+    val action: String,
+    val monologue: String,
+    val metricsJson: String,
+)
+
 @Dao
 interface CharacterStatusDao {
 
@@ -83,6 +98,18 @@ interface CharacterStatusDao {
             "ORDER BY generatedAt DESC, id DESC LIMIT :limit",
     )
     suspend fun forCharacter(characterId: Long, limit: Int = STATUS_PANEL_LIMIT): List<CharacterStatusEntity>
+
+    @Query("SELECT * FROM character_status_details WHERE statusId = :statusId")
+    fun observeDetail(statusId: Long): Flow<CharacterStatusDetailEntity?>
+
+    @Query("SELECT * FROM character_status_details WHERE statusId = :statusId")
+    suspend fun detail(statusId: Long): CharacterStatusDetailEntity?
+
+    @Query("SELECT * FROM character_status_records WHERE id = :statusId")
+    suspend fun byId(statusId: Long): CharacterStatusEntity?
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDetail(detail: CharacterStatusDetailEntity): Long
 
     /** 当前生效状态(最新 active 一条;null = 无记录 → 规则兜底)。 */
     @Query(

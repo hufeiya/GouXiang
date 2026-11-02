@@ -108,9 +108,9 @@ class CharacterStatusManagerTest {
         assertEquals(1, rows.size)
         val row = rows.single()
         assertEquals("🤔", row.emoji)
-        assertEquals("开心", row.mood)
+        assertEquals("", row.mood)
         assertEquals("在等你的消息", row.doing)
-        assertEquals("他在忙什么", row.thought)
+        assertEquals("", row.thought)
         assertEquals(CharacterStatusEntity.SOURCE_TURN, row.sourceKind)
         assertEquals(convA, row.conversationId)
         assertEquals(10L, row.sourceStartMessageId)
@@ -282,4 +282,44 @@ class CharacterStatusManagerTest {
         assertEquals(0, db.characterStatusDao().markStaleFrom(convA, 1L))
         assertFalse(db.characterStatusDao().latestActive(charA)!!.isStale)
     }
+    @Test
+    fun `detail uses anchored messages caches result and excludes later conversation`() = runBlocking {
+        val start = db.messageDao().insert(MessageEntity(conversationId = convA, turnId = "old", role = "user", content = "旧对话内容", at = 2))
+        val end = db.messageDao().insert(MessageEntity(conversationId = convA, turnId = "old", role = "assistant", content = "旧回复", at = 3))
+        db.messageDao().insert(MessageEntity(conversationId = convA, turnId = "new", role = "user", content = "后来的秘密", at = 4))
+        val record = CharacterStatusEntity(characterId = charA, conversationId = convA, emoji = "✨", mood = "", doing = "在聊天", thought = "", sourceKind = CharacterStatusEntity.SOURCE_TURN, sourceStartMessageId = start, sourceEndMessageId = end, generatedAt = 5)
+        val id = db.characterStatusDao().insert(record)
+        var calls = 0
+        var prompt = ""
+        val llm = ChatOrchestrator.Llm { messages, _ ->
+            calls++
+            prompt = messages.last().content
+            flow { emit(com.neethu.gouxiang.ai.adapter.LlmStreamEvent.TextDelta("""{"location":"家里","mood":"开心","action":"聊天","monologue":"真好","metrics":[{"label":"好感度","value":120,"description":"开心"}]}""")) }
+        }
+        val m = manager(llm)
+        val result = m.generateDetail(entityOf(charA), record.copy(id = id))!!
+        assertTrue(prompt.contains("旧对话内容"))
+        assertFalse(prompt.contains("后来的秘密"))
+        assertTrue(result.metricsJson.contains("100"))
+        assertEquals(result, m.generateDetail(entityOf(charA), record.copy(id = id)))
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun `detail failure can retry and rewind blocks write`() = runBlocking {
+        val m = manager(okLlm("invalid"))
+        val character = entityOf(charA)
+        val record = m.injectManual(character, convA, "开心", "在聊天", "", "✨")
+        assertNull(m.generateDetail(character, record))
+        assertNull(db.characterStatusDao().detail(record.id))
+        val racing = manager(ChatOrchestrator.Llm { _, _ -> flow {
+            db.memoryWindowDao().setVersion(MemoryConversationVersion(convA, 1L))
+            emit(com.neethu.gouxiang.ai.adapter.LlmStreamEvent.TextDelta("""{"action":"聊天","monologue":"真好"}"""))
+        } })
+        assertNull(racing.generateDetail(character, record))
+        assertNull(db.characterStatusDao().detail(record.id))
+        val retry = manager(okLlm("""{"action":"聊天","monologue":"真好"}"""))
+        assertNotNull(retry.generateDetail(character, record))
+    }
+
 }

@@ -26,13 +26,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ProactiveOutboxEntity::class,
         ProactiveConversationStateEntity::class,
         CharacterStatusEntity::class,
+        CharacterStatusDetailEntity::class,
         SidestoryRecordEntity::class,
         ChatDerivativeEntity::class,
         ContentTurnEntity::class,
         ContentDiscoveryState::class,
         ContentCandidateEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -56,6 +57,12 @@ abstract class GouXiangDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        val MIGRATION_15_16: Migration = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `character_status_details` (`statusId` INTEGER NOT NULL, `location` TEXT NOT NULL, `mood` TEXT NOT NULL, `action` TEXT NOT NULL, `monologue` TEXT NOT NULL, `metricsJson` TEXT NOT NULL, PRIMARY KEY(`statusId`), FOREIGN KEY(`statusId`) REFERENCES `character_status_records`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)")
+            }
+        }
 
         val MIGRATION_14_15: Migration = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {

@@ -528,6 +528,7 @@ class MainActivity : ComponentActivity() {
                 onOpenCharacterHome = { chatId?.let { vm.openCharacterHome(it) } },
                 onOpenVoiceCall = { chatId?.let { vm.openVoiceCall(it) } },
                 onOpenHistory = { chatId?.let { vm.openHistory(it) } },
+                onOpenStatusPanel = { chatId?.let { vm.openStatusPanel(it) } },
                 onRetryFailedTurn = { vm.retryFailedTurn() },
                 onRewind = { vm.rewindToMessage(it) },
                 onRegenerate = { vm.regenerateTurn(it) },
@@ -945,6 +946,12 @@ class MainActivity : ComponentActivity() {
                     state = statusPanelUi,
                     onBack = { vm.closeStatusPanel() },
                     onClearStale = { vm.clearStaleStatuses() },
+                    backgroundFile = chatBackgrounds[statusPanelId]
+                        ?: chatUi.character?.let { avatarFiles[it.id] },
+                    onOpenDetail = { vm.openStatusDetail(it) },
+                    onCloseDetail = { vm.closeStatusDetail() },
+                    onRetryDetail = { vm.retryStatusDetail() },
+                    onViewConversation = { vm.viewStatusConversation() },
                 )
             }
         }

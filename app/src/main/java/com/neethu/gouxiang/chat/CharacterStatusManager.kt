@@ -4,12 +4,17 @@ import androidx.room.withTransaction
 import com.neethu.gouxiang.data.CharacterEntity
 import com.neethu.gouxiang.data.CharacterStatusDao
 import com.neethu.gouxiang.data.CharacterStatusEntity
+import com.neethu.gouxiang.data.CharacterStatusDetailEntity
 import com.neethu.gouxiang.data.GouXiangDatabase
 import com.neethu.gouxiang.data.MessageEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -99,6 +104,7 @@ class CharacterStatusManager(
     private val llm: ChatOrchestrator.Llm,
     private val llmConfig: () -> com.neethu.gouxiang.ai.adapter.LlmConfig,
     private val scope: CoroutineScope,
+    private val autoDetail: () -> Boolean = { false },
 ) {
 
     private val dao: CharacterStatusDao get() = db.characterStatusDao()
@@ -132,7 +138,7 @@ class CharacterStatusManager(
         }
         scope.launch {
             try {
-                generate(
+                val record = generate(
                     character = character,
                     conversationId = conversationId,
                     turnId = turnId,
@@ -141,6 +147,7 @@ class CharacterStatusManager(
                     userMessageId = userMessageId,
                     sourceKind = CharacterStatusEntity.SOURCE_TURN,
                 )
+                if (record != null && autoDetail()) generateDetail(character, record)
             } finally {
                 synchronized(this@CharacterStatusManager) { inFlight -= character.id }
             }
@@ -174,9 +181,9 @@ class CharacterStatusManager(
             characterId = character.id,
             conversationId = conversationId,
             emoji = snapshot.emoji,
-            mood = snapshot.mood,
+            mood = "",
             doing = snapshot.doing,
-            thought = snapshot.thought,
+            thought = "",
             sourceKind = sourceKind,
             sourceConversationId = conversationId,
             sourceTurnId = turnId,
@@ -191,6 +198,63 @@ class CharacterStatusManager(
             val id = dao.insert(record)
             record.copy(id = id)
         }
+    }
+
+    private val detailLocks = HashMap<Long, Mutex>()
+
+    /** 根据该记录的来源对话生成详情；失败不保存，之后可重试。 */
+    suspend fun generateDetail(character: CharacterEntity, record: CharacterStatusEntity): CharacterStatusDetailEntity? {
+        val lock = synchronized(detailLocks) { detailLocks.getOrPut(record.id) { Mutex() } }
+        return lock.withLock {
+            val current = dao.byId(record.id) ?: return@withLock null
+            if (current.characterId != character.id) return@withLock null
+            dao.detail(current.id)?.let { return@withLock it }
+            if (!current.isActive) return@withLock null
+            val version = db.memoryWindowDao().version(current.conversationId) ?: 0L
+            val start = current.sourceStartMessageId
+            val end = current.sourceEndMessageId
+            val messages = if (start != null && end != null && start <= end) {
+                db.messageDao().rangeForConversation(current.conversationId, start, end)
+            } else emptyList()
+            val source = messages.joinToString("\n") { "${it.role}: ${it.content}" }.take(6000)
+            val raw = request(StatusPrompts.detailSystem(character.name),
+                "状态标题: ${current.emoji} ${current.doing}\n已有心情: ${current.mood}\n已有想法: ${current.thought}\n来源对话:\n${source.ifBlank { "（无可用来源对话）" }}") ?: return@withLock null
+            val detail = parseDetail(current.id, raw) ?: return@withLock null
+            db.withTransaction {
+                val latest = dao.byId(current.id)
+                if (latest == null || !latest.isActive || (db.memoryWindowDao().version(current.conversationId) ?: 0L) != version) {
+                    return@withTransaction null
+                }
+                dao.insertDetail(detail)
+                dao.detail(current.id)
+            }
+        }
+    }
+
+    internal fun parseDetail(statusId: Long, raw: String): CharacterStatusDetailEntity? {
+        val fragment = MemoryOpsParser.firstJsonObject(raw) ?: return null
+        val root = runCatching { Json { isLenient = true }.parseToJsonElement(fragment).jsonObject }.getOrNull() ?: return null
+        val action = root.strMember("action")?.take(300) ?: return null
+        val monologue = root.strMember("monologue")?.take(1500) ?: return null
+        val metrics = (root["metrics"] as? JsonArray).orEmpty().mapNotNull { element ->
+            val metric = element as? JsonObject ?: return@mapNotNull null
+            val label = metric.strMember("label")?.take(20) ?: return@mapNotNull null
+            val value = (metric["value"] as? JsonPrimitive)?.intOrNull?.coerceIn(0, 100) ?: return@mapNotNull null
+            JsonObject(mapOf(
+                "emoji" to JsonPrimitive(metric.strMember("emoji")?.take(8) ?: "✨"),
+                "label" to JsonPrimitive(label),
+                "value" to JsonPrimitive(value),
+                "description" to JsonPrimitive(metric.strMember("description")?.take(600).orEmpty()),
+            ))
+        }.take(5)
+        return CharacterStatusDetailEntity(
+            statusId = statusId,
+            location = root.strMember("location")?.take(300).orEmpty(),
+            mood = root.strMember("mood")?.take(300).orEmpty(),
+            action = action,
+            monologue = monologue,
+            metricsJson = JsonArray(metrics).toString(),
+        )
     }
 
     /**
@@ -272,13 +336,16 @@ class CharacterStatusManager(
 object StatusPrompts {
 
     fun system(charName: String): String =
-        "你在为虚拟人角色「$charName」维护一条『TA 的状态』快照(心情/正在做的事/内心想法)。" +
-            "根据下面的最近对话片段,描述 TA 此刻的状态,只输出一行 JSON,不要输出任何其他内容:\n" +
-            "{\"emoji\":\"一个 emoji\",\"mood\":\"心情(如 开心/有点紧张)\",\"doing\":\"正在做的事(第三人称一句话)\",\"thinking\":\"没说出口的内心想法(第一人称)\"}\n" +
-            "规则:\n" +
-            "- 只依据对话里真实出现的内容,不要编造没有依据的事;doing 是第三人称短句(如「在等你的消息」),不超过 24 字。\n" +
-            "- mood/thinking 各不超过 40 字;emoji 只放一个表情字符。\n" +
-            "- 对话不足以判断时输出你此刻最保守的推断(如「在等你回复」),不要长篇发挥。"
+        "你在为虚拟人角色「$charName」写一条状态标题。根据最近对话，只输出一行 JSON：" +
+            "{\"emoji\":\"一个表情\",\"doing\":\"正在做的事或状态标题\"}。" +
+            "只依据对话，不编造；doing 使用第三人称短句，不超过 24 字。"
+
+    fun detailSystem(charName: String): String =
+        "你在为虚拟角色「$charName」写一条历史状态详情。只依据给定的状态标题和来源对话，" +
+            "不把现在的情况当作过去的事实；信息不足时保守描述。只输出 JSON：" +
+            "{\"location\":\"位置\",\"mood\":\"心情\",\"action\":\"状态和动作\",\"monologue\":\"第一人称内心独白\", " +
+            "\"metrics\":[{\"emoji\":\"❤️\",\"label\":\"好感度\",\"value\":50,\"description\":\"变化和心情描述\"}]}。" +
+            "metrics 按对话写 1 至 3 个有意义的情绪指标，value 为 0 到 100 的整数；不要输出图片。"
 
     fun user(userText: String, assistantText: String): String =
         "[最近对话片段]\n用户: ${userText.ifBlank { "(没有说话,是 TA 主动开口的回合)" }}\nTA: $assistantText"

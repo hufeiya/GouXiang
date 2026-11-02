@@ -65,7 +65,7 @@ class DatabaseMigrationTest {
                 GouXiangDatabase.MIGRATION_9_10,
                 GouXiangDatabase.MIGRATION_10_11,
                 GouXiangDatabase.MIGRATION_11_12,
-                GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15,
+                GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16,
             )
             .allowMainThreadQueries().build()
         try {
@@ -124,7 +124,7 @@ class DatabaseMigrationTest {
     @Test fun v6TaskHistoryGainsFailureKindColumnAndKeepsRows() {
         createV6FromV5WithTaskHistoryRow()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15)
+            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -152,7 +152,7 @@ class DatabaseMigrationTest {
     @Test fun v7CharactersGainAvatarVersionColumnAndKeepsRows() {
         createV7FromV6()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15)
+            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -182,7 +182,7 @@ class DatabaseMigrationTest {
     @Test fun v8ProactiveLedgerTablesCreatedAndOldDataKept() {
         createV8FromV7()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15)
+            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -267,7 +267,7 @@ class DatabaseMigrationTest {
     @Test fun v9CharacterStatusRecordsTableCreatedAndOldDataKept() {
         createV9FromV8()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15)
+            .addMigrations(GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -327,7 +327,7 @@ class DatabaseMigrationTest {
     @Test fun v10SidestoryRecordsTableCreatedAndOldDataKept() {
         createV10FromV9()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15)
+            .addMigrations(GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -411,7 +411,7 @@ class DatabaseMigrationTest {
     @Test fun v11ChatDerivativeRecordsCreatedAndInnerVoicesKept() {
         createV11FromV10()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15)
+            .addMigrations(GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -505,7 +505,7 @@ class DatabaseMigrationTest {
         db.close()
 
         val db2 = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15)
+            .addMigrations(GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
             .allowMainThreadQueries().build()
         try {
             val sql = db2.openHelper.writableDatabase

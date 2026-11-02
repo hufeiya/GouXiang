@@ -15,6 +15,10 @@ object GenerationPrefs {
     /** 朋友圈正文自动生成，沿用旧键以保留偏好。 */
     const val KEY_MOMENTS_DAILY = "gen_moments_daily"
 
+    const val KEY_STATUS_DETAIL_AUTO = "gen_status_detail_auto"
+    fun statusDetailAuto(context: Context): Boolean = read(context, KEY_STATUS_DETAIL_AUTO, false)
+    fun setStatusDetailAuto(context: Context, enabled: Boolean) = write(context, KEY_STATUS_DETAIL_AUTO, enabled)
+
     const val KEY_INNER_VOICE_IMAGES = "gen_inner_voice_images"
     const val KEY_MOMENTS_IMAGES = "gen_moments_images"
 
