@@ -107,6 +107,12 @@ class ProactiveOutboxServiceTest {
         )
         charId = saved.characterId
         convId = saved.conversationId
+        db.messageDao().insert(
+            MessageEntity(
+                conversationId = convId, turnId = "user-turn", role = "user",
+                kind = "text", content = "你好", at = now - 3 * 3_600_000L,
+            ),
+        )
     }
 
     @After fun close() = db.close()
@@ -127,7 +133,7 @@ class ProactiveOutboxServiceTest {
     @Test
     fun scanOnceGeneratesPerConversationWithDirectedNotifications() = runBlocking {
         // 第二个角色/会话(名字不同,验证通知不串会话不串名)
-        val saved2 = db.seedDao().saveCharacterAtomic(
+        db.seedDao().saveCharacterAtomic(
             character = CharacterEntity(
                 name = "另一个人",
                 profile = "设定",
@@ -144,12 +150,44 @@ class ProactiveOutboxServiceTest {
             appearanceChanged = false,
         )
         val report = service().scanOnce()
-        // 每个角色建了 im+phone 两条会话(种子原子保存),共 4 条,全部首开命中
-        assertEquals(4, report.generated.size)
-        assertEquals(4, notifications.size)
-        assertEquals(4, notifications.map { it.conversationId }.toSet().size)
-        assertEquals("通知不串名", setOf("非小唐", "另一个人"), notifications.map { it.characterName }.toSet())
+        // 只有用户发过言的会话参与扫描，另一模式及未聊过的人物不占分页。
+        assertEquals(1, report.generated.size)
+        assertEquals(1, notifications.size)
+        assertEquals(setOf("非小唐"), notifications.map { it.characterName }.toSet())
+        assertTrue(notifications.any { it.conversationId == convId })
         assertEquals(2, db.proactiveDao().forConversation(convId).single().count)
+    }
+
+    @Test
+    fun neverChattedConversationDoesNotGenerateOnEntryOrScanEvenWithOldAssistantMessages() = runBlocking {
+        val saved = db.seedDao().saveCharacterAtomic(
+            character = CharacterEntity(
+                name = "仅浏览", profile = "设定", intro = "", exampleLines = "",
+                openingLine = "嗨", appearance = "", appearanceStyle = "", createdAt = 3L,
+            ),
+            openingContent = "嗨", openingActions = emptyList(), openingAt = 3L,
+            appearanceChanged = false,
+        )
+        val phone = db.conversationDao().byCharacter(saved.characterId, "phone")!!
+        db.messageDao().insert(
+            MessageEntity(
+                conversationId = phone.id, turnId = "proactive-old", role = "assistant",
+                kind = "text", content = "旧主动消息", at = now - 4 * 3_600_000L,
+            ),
+        )
+        // 旧账本也不能代替真实用户消息。
+        ledger.noteUserActivity(phone.id, saved.characterId, now - 4 * 3_600_000L)
+        service().onConversationOpened(phone.id, generateIfAllowed = true)
+        val scan = service().scanOnce()
+        assertTrue(scan.reports.none { when (it) {
+            is ProactiveOutboxService.Report.Generated -> it.conversationId == phone.id
+            is ProactiveOutboxService.Report.Blocked -> it.conversationId == phone.id
+            is ProactiveOutboxService.Report.Failed -> it.conversationId == phone.id
+            is ProactiveOutboxService.Report.Skipped -> it.conversationId == phone.id
+        } })
+        assertTrue(requests.none { it.conversationId == phone.id })
+        assertTrue(notifications.none { it.conversationId == phone.id })
+        assertTrue(db.proactiveDao().forConversation(phone.id).isEmpty())
     }
 
     // ── 真实成功(D3/验收 #2)─────────────────────────────────────

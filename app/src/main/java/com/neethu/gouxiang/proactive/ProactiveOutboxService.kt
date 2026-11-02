@@ -98,10 +98,10 @@ class ProactiveOutboxService(
         val config = policyConfig()
         val now = clock()
         ledger.recoverStaleAll(STALE_LEASE_MS, now)
-        val total = db.conversationDao().countAll()
+        val total = db.conversationDao().countProactiveEligible()
         val offset = ProactivePolicy.nextScanOffset(GenerationPrefs.proactiveScanCursor(context), config.scanLimit, total)
         GenerationPrefs.advanceProactiveScanCursor(context)
-        val conversations = db.conversationDao().latestPaged(config.scanLimit, offset)
+        val conversations = db.conversationDao().proactiveEligiblePaged(config.scanLimit, offset)
         val reports = mutableListOf<Report>()
         for (conv in conversations) {
             reports += autoGenerate(conv.id, background = true)
@@ -120,6 +120,11 @@ class ProactiveOutboxService(
         if (!switch()) return Report.Skipped(conversationId, "自动开关已关闭")
         val conv = db.conversationDao().byId(conversationId)
             ?: return Report.Skipped(conversationId, "会话不存在")
+        // 开场白或旧主动消息并不代表用户在此会话聊过；账本中的旧活跃
+        // 时间也不能代替真实消息记录，避免通知指向历史列表中不可见的会话。
+        if (db.messageDao().lastUserMessageAt(conversationId) == null) {
+            return Report.Blocked(conversationId, "用户尚未在此会话发言")
+        }
         val character = db.characterDao().byId(conv.characterId)
             ?: return Report.Skipped(conversationId, "角色不存在")
         val config = policyConfig()

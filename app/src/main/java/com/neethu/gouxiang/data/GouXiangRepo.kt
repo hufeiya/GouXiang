@@ -71,7 +71,7 @@ class GouXiangRepo private constructor(context: Context) {
         }
         .shareIn(scope, SharingStarted.Lazily, replay = 1)
 
-    // ── 消息列表 02:聊过会话行 ─────────────────────────────────────
+    // 全量会话供角色主页和创作页入口定位。
     val conversations: Flow<List<ConversationRow>> = db.conversationDao().observeAll()
         .map { convs ->
             convs.map { conv ->
@@ -79,6 +79,15 @@ class GouXiangRepo private constructor(context: Context) {
                     conversation = conv,
                     character = db.characterDao().byId(conv.characterId),
                 )
+            }
+        }
+        .shareIn(scope, SharingStarted.Lazily, replay = 1)
+
+    // 消息列表和最近聊过仅展示用户实际发过消息的会话。
+    val chattedConversations: Flow<List<ConversationRow>> = db.conversationDao().observeChatted()
+        .map { convs ->
+            convs.map { conv ->
+                ConversationRow(conversation = conv, character = db.characterDao().byId(conv.characterId))
             }
         }
         .shareIn(scope, SharingStarted.Lazily, replay = 1)

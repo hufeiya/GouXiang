@@ -174,8 +174,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val homeFeed: StateFlow<List<HomeFeedCard>> = repo.homeFeed
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** 消息 02:聊过会话行。 */
+    /** 角色入口需要的全部会话，包括尚未开始对话的预建会话。 */
     val conversations: StateFlow<List<ConversationRow>> = repo.conversations
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 消息列表和最近聊过只展示用户发过消息的会话。 */
+    val chattedConversations: StateFlow<List<ConversationRow>> = repo.chattedConversations
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** 聊天主页 03 打开的会话 id(null=未进入)。 */
@@ -1341,6 +1345,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
         val conv = repo.db.conversationDao().byId(conversationId)
             ?: throw IllegalStateException("conversation $conversationId not found")
+        if (repo.db.messageDao().lastUserMessageAt(conversationId) == null) {
+            return "last user activity=从未发言 verdict=blocked: 用户尚未在此会话发言"
+        }
         val character = repo.characterById(conv.characterId)
             ?: throw IllegalStateException("character of conversation $conversationId not found")
         val service = proactiveService()

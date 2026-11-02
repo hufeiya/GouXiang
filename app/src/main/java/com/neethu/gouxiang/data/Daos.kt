@@ -37,9 +37,15 @@ interface CharacterDao {
 
 @Dao
 interface ConversationDao {
-    /** 消息列表 02:按最近时间倒序的会话行。 */
+    /** 所有预建会话，供角色入口使用。 */
     @Query("SELECT * FROM conversations ORDER BY lastAt DESC")
     fun observeAll(): Flow<List<ConversationEntity>>
+
+    /** 仅用户发过消息的会话进入聊天历史；开场白不算对话。 */
+    @Query("SELECT * FROM conversations AS c WHERE EXISTS (" +
+        "SELECT 1 FROM messages AS m WHERE m.conversationId = c.id AND m.role = 'user') " +
+        "ORDER BY c.lastAt DESC, c.id DESC")
+    fun observeChatted(): Flow<List<ConversationEntity>>
 
     /** 首页推荐流 01:取最新会话对应的角色卡。 */
     @Query("SELECT * FROM conversations ORDER BY lastAt DESC LIMIT :limit")
@@ -55,6 +61,16 @@ interface ConversationDao {
      */
     @Query("SELECT * FROM conversations ORDER BY lastAt DESC, id DESC LIMIT :limit OFFSET :offset")
     suspend fun latestPaged(limit: Int, offset: Int): List<ConversationEntity>
+
+    /** 主动消息只扫描用户发过言的会话。 */
+    @Query("SELECT COUNT(*) FROM conversations AS c WHERE EXISTS (" +
+        "SELECT 1 FROM messages AS m WHERE m.conversationId = c.id AND m.role = 'user')")
+    suspend fun countProactiveEligible(): Int
+
+    @Query("SELECT * FROM conversations AS c WHERE EXISTS (" +
+        "SELECT 1 FROM messages AS m WHERE m.conversationId = c.id AND m.role = 'user') " +
+        "ORDER BY c.lastAt DESC, c.id DESC LIMIT :limit OFFSET :offset")
+    suspend fun proactiveEligiblePaged(limit: Int, offset: Int): List<ConversationEntity>
 
     /** 未读角标累加(主动消息批次收口;负数自减由 setUnread 收口)。 */
     @Query("UPDATE conversations SET unread = unread + :n WHERE id = :id")

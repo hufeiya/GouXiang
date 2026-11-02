@@ -3,6 +3,7 @@ package com.neethu.gouxiang.data
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
@@ -60,5 +61,21 @@ class CatalogImportTest {
         seed.saveCharacterAtomic(edited, edited.openingLine, emptyList(), 30, false)
         assertEquals("编辑同名角色", seed.characterByIdRow(second.characterId)!!.profile)
         assertEquals("原始设定", seed.characterByIdRow(first.characterId)!!.profile)
+    }
+
+    @Test fun historyRequiresAUserMessageInEachConversation() = runBlocking {
+        val browsed = seed.startCatalogChat(character("1"), 10)
+        val chatted = seed.startCatalogChat(character("2"), 20)
+        val dao = db.conversationDao()
+        // The opening line and prebuilt phone sessions do not constitute a chat.
+        assertTrue(dao.observeChatted().first().isEmpty())
+        val userMessage = db.messageDao().insert(MessageEntity(
+            conversationId = chatted.conversationId, turnId = "user-1", role = "user", content = "你好", at = 30,
+        ))
+        assertEquals(listOf(chatted.conversationId), dao.observeChatted().first().map { it.id })
+        assertNotNull(dao.byCharacter(browsed.characterId, "im"))
+        assertNotNull(dao.byCharacter(chatted.characterId, "phone"))
+        db.messageDao().deleteById(userMessage)
+        assertTrue(dao.observeChatted().first().isEmpty())
     }
 }

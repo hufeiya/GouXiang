@@ -54,6 +54,7 @@ import com.neethu.gouxiang.ui.messages.formatRelativeTime
 fun DiscoverScreen(
     characters: List<CharacterEntity>,
     conversations: List<ConversationRow>,
+    chattedConversations: List<ConversationRow>,
     avatarFiles: Map<Long, String?>,
     onOpenMoments: () -> Unit = {},
     onOpenCharacterHome: (Long) -> Unit = {},
@@ -65,8 +66,8 @@ fun DiscoverScreen(
     val filtered = if (keyword.isEmpty()) characters else characters.filter { c ->
         c.name.contains(keyword) || c.intro.contains(keyword) || c.profile.contains(keyword)
     }
-    // 最近聊过(历史):按会话最近时间倒序去重取角色(只取有会话的角色)
-    val recentIds = conversations
+    // 最近聊过(历史):按有用户消息的会话排序并去重。
+    val recentIds = chattedConversations
         .sortedByDescending { it.conversation.lastAt }
         .map { it.conversation.characterId }
         .distinct()
@@ -148,7 +149,7 @@ fun DiscoverScreen(
                 items(recentIds, key = { "recent-$it" }) { characterId ->
                     val character = characters.firstOrNull { it.id == characterId }
                     if (character != null) {
-                        val lastAt = conversations
+                        val lastAt = chattedConversations
                             .filter { it.conversation.characterId == characterId }
                             .maxOf { it.conversation.lastAt }
                         CharacterRow(character, avatarFiles[characterId], lastAt, onOpenCharacterHome, conversations)

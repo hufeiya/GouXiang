@@ -201,6 +201,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         val conversations by vm.conversations.collectAsState()
+        val chattedConversations by vm.chattedConversations.collectAsState()
         val avatarFiles by vm.avatarFiles.collectAsState()
         // 角色创作与管理(C 工作包):创作页列表/头像状态/编辑页
         val allCharacters by vm.allCharacters.collectAsState()
@@ -566,7 +567,7 @@ class MainActivity : ComponentActivity() {
                         }
                         vm.selectedTab.value = it
                     },
-                    messageBadge = conversations.count { it.conversation.unread > 0 },
+                    messageBadge = chattedConversations.count { it.conversation.unread > 0 },
                 )
             },
         ) { innerPadding ->
@@ -624,6 +625,7 @@ class MainActivity : ComponentActivity() {
                     BottomTab.DISCOVER -> com.neethu.gouxiang.ui.discover.DiscoverScreen(
                         characters = allCharacters,
                         conversations = conversations,
+                        chattedConversations = chattedConversations,
                         avatarFiles = avatarFiles,
                         onOpenMoments = { vm.openMomentsGlobal() },
                         onOpenCharacterHome = { vm.openCharacterHome(it) },
@@ -640,7 +642,7 @@ class MainActivity : ComponentActivity() {
                         onRetryAvatar = { vm.retryAvatar(it) },
                     )
                     BottomTab.MESSAGES -> MessagesScreen(
-                        rows = conversations,
+                        rows = chattedConversations,
                         avatarFiles = avatarFiles,
                         onOpenChat = { vm.openChat(it) },
                         onOpenPhoneChat = { vm.openChat(it, phoneMode = true) },
