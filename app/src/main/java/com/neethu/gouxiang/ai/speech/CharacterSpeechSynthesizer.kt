@@ -17,7 +17,7 @@ data class SpeechVoice(val primary: String?, val fallback: String? = null)
 internal class CharacterSpeechSynthesizer(
     private val adapter: (String) -> TtsAdapter,
 ) {
-    suspend fun synthesize(text: String, config: AiConfig, voice: SpeechVoice): TtsResult? {
+    suspend fun synthesize(text: String, config: AiConfig, voice: SpeechVoice, contextText: String = ""): TtsResult? {
         val key = config.effectiveTtsKey()
         if (key.isBlank()) return null
         val candidates = if (!voice.primary.isNullOrBlank()) {
@@ -30,7 +30,8 @@ internal class CharacterSpeechSynthesizer(
             try {
                 return adapter(key).synthesize(
                     text,
-                    TtsConfig(model = "", voice = candidate, sampleRate = VolcanoEngineTtsAdapter.DEFAULT_SAMPLE_RATE),
+                    TtsConfig(model = "", voice = candidate, sampleRate = VolcanoEngineTtsAdapter.DEFAULT_SAMPLE_RATE,
+                        instruction = config.ttsInstruction, contextText = if (config.ttsQuoteContext) contextText else ""),
                 )
             } catch (e: CancellationException) {
                 throw e

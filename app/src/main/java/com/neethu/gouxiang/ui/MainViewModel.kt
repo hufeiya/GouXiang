@@ -300,7 +300,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (!enabled) chatSpeechPlayer.stop()
     }
 
-    private fun speakChatReply(conversationId: Long, phoneMode: Boolean, result: com.neethu.gouxiang.chat.TurnResult) {
+    private fun speakChatReply(conversationId: Long, phoneMode: Boolean, result: com.neethu.gouxiang.chat.TurnResult, contextText: String = "") {
         if (chatSpeechForeground && !phoneMode && _chatSoundEnabled.value && _chatConversationId.value == conversationId &&
             !_isPhoneChat.value && _voiceCallConversationId.value == null
         ) {
@@ -309,7 +309,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     android.widget.Toast.makeText(
                         getApplication(), "语音播放失败，请检查语音服务和系统文字转语音设置", android.widget.Toast.LENGTH_LONG,
                     ).show()
-                }) { speechVoiceForConversation(conversationId) }
+                }, contextText = contextText) { speechVoiceForConversation(conversationId) }
             }
         }
     }
@@ -565,7 +565,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // 这份回合前快照整体回退掉 —— 真机上表现为「回复完成后气泡消失,
                 // 退出重进才出现」。
                 val turnResult = runRound(conversationId, character.id, body, phoneMode, userMessageId)
-                speakChatReply(conversationId, phoneMode, turnResult)
+                speakChatReply(conversationId, phoneMode, turnResult, body)
                 if (_chatUi.value.conversationId == conversationId) {
                     _chatUi.value = _chatUi.value.afterTurnResult(turnResult, userMessageId)
                 }
@@ -607,7 +607,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // 先跑回合再读 state(与 sendChatMessage 同口径):防回合前快照
                 // 在收尾回写时把回合期间实时上屏的气泡回退掉。
                 val turnResult = runRound(failed.conversationId, character.id, failed.userText, phoneMode = phoneMode, userMessageId = failed.userMessageId)
-                speakChatReply(failed.conversationId, phoneMode, turnResult)
+                speakChatReply(failed.conversationId, phoneMode, turnResult, failed.userText)
                 _chatUi.value = _chatUi.value.afterTurnResult(turnResult, failed.userMessageId)
                 refreshChatBubbles(failed.conversationId)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -1041,7 +1041,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 // 记 failedTurn 出重试条,避免「删了旧泡又没新回复」的空窗。
                 // 先跑回合再读 state(与 sendChatMessage 同口径,防快照回退)。
                 val turnResult = runRound(conversationId, character.id, lastUser.content, phoneMode = phoneMode, userMessageId = lastUser.id)
-                speakChatReply(conversationId, phoneMode, turnResult)
+                speakChatReply(conversationId, phoneMode, turnResult, lastUser.content)
                 _chatUi.value = _chatUi.value.afterTurnResult(turnResult, lastUser.id)
                 refreshChatBubbles(conversationId)
             } catch (e: kotlinx.coroutines.CancellationException) {

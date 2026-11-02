@@ -37,15 +37,15 @@ class ChatSpeechPlayer internal constructor(
     val speaking: StateFlow<Boolean> = _speaking.asStateFlow()
 
     /** 音色随会话异步读取，取消时不会播放过期的回复。 */
-    fun speak(bubbles: List<Bubble>, onUnavailable: () -> Unit = {}, voiceSource: suspend () -> SpeechVoice) {
-        speakText(CallSpeech.composeSpeechText(bubbles).first, onUnavailable, voiceSource)
+    fun speak(bubbles: List<Bubble>, onUnavailable: () -> Unit = {}, contextText: String = "", voiceSource: suspend () -> SpeechVoice) {
+        speakText(CallSpeech.composeSpeechText(bubbles).first, onUnavailable, contextText, voiceSource)
     }
 
     /**
      * 朗读一段整句文本(心声详情等非聊天泡场景):同一合成/播放/系统兜底链,
      * 复用 generation token 防过期播放。准备时置 [speaking],播完/打断回零。
      */
-    fun speakText(text: String, onUnavailable: () -> Unit = {}, voiceSource: suspend () -> SpeechVoice) {
+    fun speakText(text: String, onUnavailable: () -> Unit = {}, contextText: String = "", voiceSource: suspend () -> SpeechVoice) {
         stop()
         val token = generation.get()
         if (text.isBlank()) return
@@ -53,7 +53,7 @@ class ChatSpeechPlayer internal constructor(
         synthesis = scope.launch {
             try {
                 val voice = voiceSource()
-                val result = CharacterSpeechSynthesizer(adapter).synthesize(text, configSource(), voice)
+                val result = CharacterSpeechSynthesizer(adapter).synthesize(text, configSource(), voice, contextText)
                 coroutineContext.ensureActive()
                 if (generation.get() != token) return@launch
                 if (result != null) {

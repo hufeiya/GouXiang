@@ -19,11 +19,13 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -31,13 +33,16 @@ import androidx.compose.material.icons.filled.ArrowBackIosNew
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +71,8 @@ import com.neethu.gouxiang.ai.config.asrExplicitAsrModels
 import com.neethu.gouxiang.ai.config.asrProviderFor
 import com.neethu.gouxiang.ai.config.chatModelOptions
 import com.neethu.gouxiang.ai.config.resolveAsrModel
+import com.neethu.gouxiang.ai.config.volcanoVoiceName
+import com.neethu.gouxiang.ai.speech.VolcanoEngineTtsAdapter
 import com.neethu.gouxiang.ui.theme.GouXiangTheme
 import kotlinx.coroutines.launch
 
@@ -254,12 +261,27 @@ private fun TtsSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
             placeholder = AiProvider.VOLCANO.ttsKeyHint,
             password = true,
         ) { onUpdate(config.copy(apiKeyVolcanoTts = it)) }
-        SettingsDropdownRow(
+        VolcanoVoiceDropdownRow(
             title = "未匹配角色的全局音色(火山)",
-            options = listOf(DropdownOption("", "未选择（不播放）")) +
-                AiProvider.VOLCANO.voices.map { DropdownOption(it, it) },
             selectedValue = config.ttsVoice,
         ) { value -> onUpdate(config.copy(ttsVoice = value)) }
+        SettingsTextFieldRow(
+            title = "语音指令（火山）",
+            value = config.ttsInstruction,
+            placeholder = "例如：用温柔、轻声的语气说话；留空不使用",
+        ) { onUpdate(config.copy(ttsInstruction = it)) }
+        SettingsGroupLabel("语音指令用于聊天朗读和语音通话，不会被朗读。官方音色表未标明纯真少女等 ICL 音色支持指令，使用这些音色时不会发送；如需使用，请切换到标有「支持指令」的音色。")
+        Row(
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("引用上文（火山）", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Switch(checked = config.ttsQuoteContext, onCheckedChange = { onUpdate(config.copy(ttsQuoteContext = it)) })
+        }
+        SettingsGroupLabel("开启后，聊天和通话会将本轮用户发言发给火山作为语境，不会朗读。存在上文时优先引用上文；没有上文时使用语音指令。仅标有「支持指令」的音色生效。")
     }
 }
 
@@ -398,6 +420,57 @@ private fun SettingsTextFieldRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 4.dp),
+        )
+    }
+}
+
+/** 音色目录较长，支持按名称或 ID 搜索。 */
+@Composable
+private fun VolcanoVoiceDropdownRow(title: String, selectedValue: String, onSelect: (String) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
+    val voices = remember { AiProvider.VOLCANO.voices }
+    val selectedLabel = if (selectedValue.isBlank()) "未选择（不播放）" else volcanoVoiceName(selectedValue)
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .clickable { query = ""; expanded = true }
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 6.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(selectedLabel, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            Icon(Icons.Default.KeyboardArrowDown, contentDescription = "选择$title", modifier = Modifier.size(20.dp))
+        }
+    }
+    if (expanded) {
+        val filtered = remember(query, voices) {
+            voices.filter { volcanoVoiceName(it).contains(query.trim(), ignoreCase = true) || it.contains(query.trim(), ignoreCase = true) }
+        }
+        AlertDialog(
+            onDismissRequest = { expanded = false },
+            title = { Text("选择火山音色") },
+            text = {
+                Column {
+                    OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
+                        label = { Text("搜索音色名称或 ID") }, modifier = Modifier.fillMaxWidth())
+                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
+                        if (query.isBlank()) item {
+                            Text("未选择（不播放）", modifier = Modifier.fillMaxWidth().clickable {
+                                expanded = false; onSelect("")
+                            }.padding(vertical = 12.dp))
+                        }
+                        items(filtered, key = { it }) { id ->
+                            val marker = if (VolcanoEngineTtsAdapter.supportsInstruction(id)) " · 支持指令" else ""
+                            Text((if (id == selectedValue) "✓ " else "") + volcanoVoiceName(id) + marker,
+                                modifier = Modifier.fillMaxWidth().clickable { expanded = false; onSelect(id) }
+                                    .padding(vertical = 12.dp))
+                        }
+                        if (filtered.isEmpty()) item { Text("没有找到音色", modifier = Modifier.padding(vertical = 12.dp)) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { expanded = false }) { Text("关闭") } },
         )
     }
 }

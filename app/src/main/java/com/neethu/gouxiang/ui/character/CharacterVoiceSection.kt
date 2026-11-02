@@ -8,10 +8,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -26,10 +27,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.neethu.gouxiang.ai.config.AiProvider
+import com.neethu.gouxiang.ai.config.volcanoVoiceName
 import com.neethu.gouxiang.ai.speech.CharacterVoiceStore
 import com.neethu.gouxiang.ai.speech.VoiceAge
 import com.neethu.gouxiang.ai.speech.VoiceCandidates
 import com.neethu.gouxiang.ai.speech.VoiceGender
+import com.neethu.gouxiang.ai.speech.VolcanoEngineTtsAdapter
 import com.neethu.gouxiang.data.CharacterEntity
 
 /** 音色单独即时保存，避免角色表单校验阻止用户修正错误匹配。 */
@@ -67,68 +70,64 @@ internal fun CharacterVoiceSection(character: CharacterEntity) {
         )
     }
     if (showOptions) {
+        var query by remember { mutableStateOf("") }
+        val filteredOptions = remember(options, query) {
+            val search = query.trim()
+            options.filter { voice ->
+                search.isEmpty() || volcanoVoiceName(voice).contains(search, ignoreCase = true) ||
+                    voice.contains(search, ignoreCase = true)
+            }
+        }
         AlertDialog(
             onDismissRequest = { showOptions = false },
             title = { Text("选择火山音色") },
             text = {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("选择后立即保存。年龄感仅供参考，可在火山控制台试听；可用性取决于账号权限。", fontSize = 12.sp)
+                Column {
+                    Text("选择后立即保存。标有「支持指令」的音色会应用 AI 服务配置中的语音指令；可在火山控制台试听，可用性取决于账号权限。", fontSize = 12.sp)
                     Spacer(Modifier.height(8.dp))
-                    options.forEach { voice ->
-                        Row(
-                            Modifier.fillMaxWidth().clickable {
-                                store.setManual(character, voice)
-                                assignment = store.getOrAssign(character)
-                                showOptions = false
-                            }.padding(vertical = 9.dp),
-                        ) {
-                            Text(
-                                (if (assignment.voiceId == voice) "✓  " else "     ") + voiceLabel(voice),
-                                fontSize = 14.sp,
-                            )
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = { Text("搜索音色名称或 ID") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    LazyColumn(Modifier.fillMaxWidth().height(300.dp)) {
+                        if (filteredOptions.isEmpty()) {
+                            item { Text("没有匹配的音色", modifier = Modifier.padding(vertical = 12.dp)) }
+                        }
+                        items(filteredOptions, key = { it }) { voice ->
+                            Row(
+                                Modifier.fillMaxWidth().clickable {
+                                    store.setManual(character, voice)
+                                    assignment = store.getOrAssign(character)
+                                    showOptions = false
+                                }.padding(vertical = 9.dp),
+                            ) {
+                                Text(
+                                    (if (assignment.voiceId == voice) "✓  " else "     ") + voiceLabel(voice),
+                                    fontSize = 14.sp,
+                                )
+                            }
                         }
                     }
-                    TextButton(onClick = {
-                        store.reset(character)
-                        assignment = store.getOrAssign(character)
-                        showOptions = false
-                    }) { Text("恢复自动匹配") }
                 }
             },
-            confirmButton = { TextButton(onClick = { showOptions = false }) { Text("关闭") } },
+            confirmButton = {
+                TextButton(onClick = {
+                    store.reset(character)
+                    assignment = store.getOrAssign(character)
+                    showOptions = false
+                }) { Text("恢复自动匹配") }
+            },
+            dismissButton = { TextButton(onClick = { showOptions = false }) { Text("关闭") } },
         )
     }
 }
 
 /** 展示易辨认的名称并保留 ID，方便核对火山控制台。 */
 private fun voiceLabel(id: String): String {
-    val label = when (id) {
-        "zh_female_vv_uranus_bigtts" -> "女声 · Vivi（年龄感待试听）"
-        "zh_female_xiaohe_uranus_bigtts" -> "女声 · 小何（年龄感待试听）"
-        "zh_male_m191_uranus_bigtts" -> "男声 · 云舟（年龄感待试听）"
-        "zh_male_taocheng_uranus_bigtts" -> "男声 · 小天（年龄感待试听）"
-        "zh_male_shaonianzixin_uranus_bigtts" -> "男声 · 少年梓辛（少年感）"
-        "zh_female_meilinvyou_uranus_bigtts" -> "女声 · 魅力女友（年龄感待试听）"
-        "zh_female_sophie_uranus_bigtts" -> "女声 · 魅力苏菲（年龄感待试听）"
-        "zh_female_qingxinnvsheng_uranus_bigtts" -> "女声 · 清新女声（年龄感待试听）"
-        "zh_female_cancan_uranus_bigtts" -> "女声 · 知性灿灿（年龄感待试听）"
-        "ICL_uranus_zh_male_qingshuangshaonian_tob" -> "男声 · 清爽少年（少年感）"
-        "ICL_uranus_zh_male_wennuanshaonian_tob" -> "男声 · 温暖少年（少年感）"
-        "ICL_uranus_zh_female_chunzhenshaonv_tob" -> "女声 · 纯真少女（少女感）"
-        "ICL_uranus_zh_female_qingxinshaonv_tob" -> "女声 · 倾心少女（少女感）"
-        "ICL_uranus_zh_female_bingruoshaonv_tob" -> "女声 · 病弱少女（少女感）"
-        "zh_male_ruyaqingnian_uranus_bigtts" -> "男声 · 儒雅青年（青年感）"
-        "zh_male_fanjuanqingnian_uranus_bigtts" -> "男声 · 反卷青年（青年感）"
-        "zh_female_wenroushunv_uranus_bigtts" -> "女声 · 温柔淑女（年龄感待试听）"
-        "zh_female_roumeinvyou_uranus_bigtts" -> "女声 · 柔美女友（年龄感待试听）"
-        "zh_male_baqiqingshu_uranus_bigtts" -> "男声 · 霸气青叔（成熟感）"
-        "zh_male_yuanboxiaoshu_uranus_bigtts" -> "男声 · 渊博小叔（成熟感）"
-        "zh_female_wenroumama_uranus_bigtts" -> "女声 · 温柔妈妈（成熟感）"
-        "ICL_uranus_zh_female_linjuayi_tob" -> "女声 · 邻居阿姨（成熟感）"
-        "ICL_uranus_zh_male_youmodaye_tob" -> "男声 · 幽默大爷（年长感）"
-        "zh_female_popo_uranus_bigtts" -> "女声 · 婆婆（年长感）"
-        "ICL_uranus_zh_female_heainainai_tob" -> "女声 · 和蔼奶奶（年长感）"
-        else -> "$id（年龄感待试听）"
-    }
-    return "$label\n$id"
+    val label = volcanoVoiceName(id)
+    val instructionLabel = if (VolcanoEngineTtsAdapter.supportsInstruction(id)) " · 支持指令" else ""
+    return "$label$instructionLabel\n$id"
 }

@@ -34,6 +34,10 @@ data class TtsConfig(
     val sampleRate: Int? = null,
     /** Sample rate of [TtsAudioFormat.RAW_PCM_16LE] results (OpenAI pcm is 24 kHz). */
     val rawPcmSampleRate: Int = 24_000,
+    /** Natural-language delivery instruction for supported Volcano TTS 2.0 voices. */
+    val instruction: String = "",
+    /** Previous user utterance, provided as context but not synthesized. */
+    val contextText: String = "",
     val extraParams: Map<String, String> = emptyMap(),
 )
 

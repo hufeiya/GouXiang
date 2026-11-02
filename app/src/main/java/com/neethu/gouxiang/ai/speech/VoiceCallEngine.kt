@@ -182,7 +182,7 @@ class VoiceCallEngine(
                 }
                 _state.update { it.copy(phase = Phase.SPEAKING) }
                 playDone = CompletableDeferred()
-                if (speak(caption).not()) {
+                if (speak(caption, userText).not()) {
                     // TTS 全挂:字幕照出,停 4s 回聆听(期间可打断/挂断)
                     withTimeoutOrNull(TTS_FAIL_HOLD_MS) { playDone.await() }
                     if (interruptRequested.not()) {
@@ -221,9 +221,9 @@ class VoiceCallEngine(
     }
 
     /** 开口说:合成 + 播放。true = 已开始播(完成/打断由 [playDone] 收口)。 */
-    private suspend fun speak(text: String): Boolean {
+    private suspend fun speak(text: String, contextText: String): Boolean {
         val result = CharacterSpeechSynthesizer(::volcanoTts)
-            .synthesize(text, aiConfigSource(), voiceSource()) ?: return false
+            .synthesize(text, aiConfigSource(), voiceSource(), contextText) ?: return false
         speaker.play(result)
         return true
     }

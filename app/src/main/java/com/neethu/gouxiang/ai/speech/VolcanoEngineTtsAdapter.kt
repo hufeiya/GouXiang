@@ -5,6 +5,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -105,7 +106,7 @@ class VolcanoEngineTtsAdapter(
                     frame(
                         event = EVENT_START_SESSION,
                         tagBytes = connIdBytes,
-                        payload = startSessionPayload(speaker, sampleRate),
+                        payload = startSessionPayload(speaker, sampleRate, config.instruction, config.contextText),
                     ).toByteString()
                 )
                 val sessionStarted = awaitFirstFrame(inbox, expectEvent = EVENT_SESSION_STARTED, label = TEXTS.stepSessionStart())
@@ -172,13 +173,23 @@ class VolcanoEngineTtsAdapter(
         return ev ?: InboxEvent(failure = IOException(TEXTS.messageTimeout(MESSAGE_TIMEOUT_MS)))
     }
 
-    private fun startSessionPayload(speaker: String, sampleRate: Int): ByteArray {
+    internal fun startSessionPayload(speaker: String, sampleRate: Int, instruction: String = "", contextText: String = ""): ByteArray {
         val params = buildJsonObject {
             put("speaker", speaker.ifBlank { DEFAULT_SPEAKER })
             put("audio_params", buildJsonObject {
                 put("format", "pcm")
                 put("sample_rate", sampleRate)
             })
+            // The curated 2.0 preset voices ending in _uranus_bigtts support instructions;
+            // the ICL_uranus_*_tob presets are not marked as supported. Unknown/custom voices are not assumed to support them.
+            // Only the first context_texts entry is used. Prefer the user utterance;
+            // use the configured instruction when no context is available.
+            val prompt = contextText.trim().ifEmpty { instruction.trim() }
+            prompt.takeIf { it.isNotEmpty() && supportsInstruction(speaker) }?.let {
+                put("additions", buildJsonObject {
+                    put("context_texts", buildJsonArray { add(kotlinx.serialization.json.JsonPrimitive(it)) })
+                }.toString())
+            }
         }
         return buildJsonObject {
             put("event", EVENT_START_SESSION)
@@ -212,6 +223,9 @@ class VolcanoEngineTtsAdapter(
 
         // 官方默认音色（speaker 留空时兜底）
         const val DEFAULT_SPEAKER = "zh_female_vv_uranus_bigtts"
+
+        internal fun supportsInstruction(speaker: String): Boolean =
+            speaker in com.neethu.gouxiang.ai.config.AiProvider.VOLCANO.voices && speaker.endsWith("_uranus_bigtts")
 
         private const val MESSAGE_TIMEOUT_MS = 30_000L
 

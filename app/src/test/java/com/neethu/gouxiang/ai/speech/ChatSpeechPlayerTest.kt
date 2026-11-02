@@ -72,6 +72,33 @@ class ChatSpeechPlayerTest {
     }
 
     @Test
+    fun `chat reply passes user context to each voice attempt without reading it aloud`() = runTest {
+        val attempts = mutableListOf<Pair<String, TtsConfig>>()
+        val player = ChatSpeechPlayer(this, { config.copy(ttsQuoteContext = true) }, {
+            adapter { spoken, cfg ->
+                attempts += spoken to cfg
+                if (cfg.voice == "primary") throw IllegalStateException("primary failed")
+                audio
+            }
+        }, FakePlayback(), FakeSystemSpeech())
+        player.speak(listOf(text("我陪着你")), contextText = "今天我很难过") { SpeechVoice("primary", "fallback") }
+        advanceUntilIdle()
+        assertEquals(listOf("我陪着你", "我陪着你"), attempts.map { it.first })
+        assertEquals(listOf("今天我很难过", "今天我很难过"), attempts.map { it.second.contextText })
+    }
+
+    @Test
+    fun `standalone speech has no chat context by default`() = runTest {
+        var contextText: String? = null
+        val player = ChatSpeechPlayer(this, { config }, {
+            adapter { _, cfg -> contextText = cfg.contextText; audio }
+        }, FakePlayback(), FakeSystemSpeech())
+        player.speakText("一段心声") { SpeechVoice("voice") }
+        advanceUntilIdle()
+        assertEquals("", contextText)
+    }
+
+    @Test
     fun `unknown character uses system voice instead of a fabricated character voice`() = runTest {
         val playback = FakePlayback()
         val system = FakeSystemSpeech()

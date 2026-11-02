@@ -58,6 +58,10 @@ data class AiConfig(
     val ttsModel: String = "",
     /** 未匹配人物的全局火山音色；留空表示不指定回退音色。 */
     val ttsVoice: String = "",
+    /** 火山语音合成 2.0 的自然语言表达指令，留空不附加指令。 */
+    val ttsInstruction: String = "",
+    /** 使用本轮用户消息作为语音合成的上文。 */
+    val ttsQuoteContext: Boolean = false,
     /** 云端识别模型名;留空 = 按端点自动推断(见 [resolveAsrModel])。 */
     val asrModel: String = "",
 ) {
@@ -147,6 +151,8 @@ private const val KEY_CUSTOM_BASE_URL = "ai_custom_base_url"
 private const val KEY_API_KEY_CUSTOM = "ai_api_key_custom"
 private const val KEY_TTS_MODEL = "ai_tts_model"
 private const val KEY_TTS_VOICE = "ai_tts_voice"
+private const val KEY_TTS_INSTRUCTION = "ai_tts_instruction"
+private const val KEY_TTS_QUOTE_CONTEXT = "ai_tts_quote_context"
 private const val KEY_ASR_MODEL = "ai_asr_model"
 
 /** 读枚举偏好;名字失效(改过枚举名)或未存过返回 null。 */
@@ -180,6 +186,8 @@ object AiConfigStore {
             apiKeyCustom = sp.getString(KEY_API_KEY_CUSTOM, "").orEmpty(),
             ttsModel = sp.getString(KEY_TTS_MODEL, "").orEmpty(),
             ttsVoice = sp.getString(KEY_TTS_VOICE, "").orEmpty(),
+            ttsInstruction = sp.getString(KEY_TTS_INSTRUCTION, "").orEmpty(),
+            ttsQuoteContext = sp.getBoolean(KEY_TTS_QUOTE_CONTEXT, false),
             asrModel = sp.getString(KEY_ASR_MODEL, "").orEmpty(),
         )
     }
@@ -199,6 +207,8 @@ object AiConfigStore {
             .putString(KEY_API_KEY_CUSTOM, c.apiKeyCustom.trim())
             .putString(KEY_TTS_MODEL, c.ttsModel.trim())
             .putString(KEY_TTS_VOICE, c.ttsVoice.trim())
+            .putString(KEY_TTS_INSTRUCTION, c.ttsInstruction.trim())
+            .putBoolean(KEY_TTS_QUOTE_CONTEXT, c.ttsQuoteContext)
             .putString(KEY_ASR_MODEL, c.asrModel.trim())
             .apply()
     }
