@@ -52,7 +52,7 @@ interface ContentDiscoveryDao {
     @Query("UPDATE content_candidates SET imageStatus = :status WHERE id = :id AND bodyStatus != 'STALE'") suspend fun setImageStatus(id: Long, status: String): Int
     @Query("SELECT * FROM content_candidates WHERE bodyStatus IN ('BODY_QUEUED', 'BODY_GENERATING') OR (bodyStatus = 'TITLE_READY' AND autoEligible = 1)") suspend fun pendingBodies(): List<ContentCandidateEntity>
     @Query("SELECT COUNT(*) FROM content_candidates WHERE conversationId = :conversationId AND reminderStatus = 'UNSEEN' AND bodyStatus != 'STALE'") suspend fun unseenCount(conversationId: Long): Int
-    @Query("SELECT COUNT(*) FROM content_candidates WHERE characterId = :characterId AND createdAt >= :since AND createdAt < :until") suspend fun countForDay(characterId: Long, since: Long, until: Long): Int
+    @Query("SELECT COUNT(*) FROM content_candidates WHERE characterId = :characterId AND kind = :kind AND bodyStatus != 'STALE' AND sourceStale = 0") suspend fun countForKind(characterId: Long, kind: String): Int
     @Query("UPDATE content_candidates SET sourceVersion = :version WHERE conversationId = :conversationId AND endMessageId < :messageId AND sourceStale = 0") suspend fun updateUnaffectedVersion(conversationId: Long, messageId: Long, version: Long)
     @Query("UPDATE content_candidates SET sourceStale = 1 WHERE conversationId = :conversationId AND endMessageId >= :messageId AND bodyStatus = 'READY'") suspend fun markCompletedStaleFrom(conversationId: Long, messageId: Long)
     @Query("UPDATE content_candidates SET bodyStatus = 'STALE', reminderStatus = 'DISMISSED' WHERE conversationId = :conversationId AND endMessageId >= :messageId AND bodyStatus != 'READY'") suspend fun invalidateFrom(conversationId: Long, messageId: Long)

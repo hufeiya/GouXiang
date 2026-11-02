@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.neethu.gouxiang.ai.GenerationPrefs
 import com.neethu.gouxiang.chat.DerivativeKind
+import com.neethu.gouxiang.chat.DerivativeFailure
 import com.neethu.gouxiang.chat.DerivativeTask
 import com.neethu.gouxiang.data.ChatDerivativeEntity
 import com.neethu.gouxiang.data.ContentCandidateEntity
@@ -32,7 +33,16 @@ class ContentCandidateBodyWorker(context: Context, params: WorkerParameters) : C
         var candidate = dao.byId(id) ?: return Result.success()
         if (candidate.bodyStatus in setOf("READY", "STALE")) return Result.success()
         if (!candidate.userRequested && !automaticEnabledFor(applicationContext, candidate.kind)) {
-            if (dao.deferAutomatic(id, candidate.bodyStatus) > 0) return Result.success()
+            val deferred = db.withTransaction {
+                val changed = dao.deferAutomatic(id, candidate.bodyStatus) > 0
+                if (changed) {
+                    db.chatDerivativeDao().byRequestId(candidate.requestId ?: "candidate-$id")?.let {
+                        db.chatDerivativeDao().markFailedIfGenerating(it.id, "自动生成已暂停，点开标题后可继续", System.currentTimeMillis())
+                    }
+                }
+                changed
+            }
+            if (deferred) return Result.success()
             candidate = dao.byId(id) ?: return Result.success()
             if (!candidate.userRequested) return Result.success()
         }
@@ -107,10 +117,12 @@ class ContentCandidateBodyWorker(context: Context, params: WorkerParameters) : C
             dao.setBodyState(id, "BODY_GENERATING", "STALE")
             dao.setBodyState(id, "BODY_QUEUED", "STALE")
             return Result.failure()
-        } catch (_: Exception) {
-            dao.setBodyState(id, "BODY_GENERATING", "BODY_FAILED")
-            dao.setBodyState(id, "BODY_QUEUED", "BODY_FAILED")
-            return Result.failure()
+        } catch (error: Exception) {
+            val retry = settleCandidateBodyFailure(db, id, error, runAttemptCount)
+            if (retry) return Result.retry()
+            // A user tap can have appended explicit work to this running job. The database
+            // carries the failure state; success here lets that queued request run.
+            return Result.success()
         }
     }
 
@@ -165,4 +177,26 @@ class ContentCandidateBodyWorker(context: Context, params: WorkerParameters) : C
                 if (manual) ExistingWorkPolicy.APPEND_OR_REPLACE else ExistingWorkPolicy.KEEP, request)
         }
     }
+}
+
+/** Three total automatic attempts; manual requests and permanent errors fail immediately. */
+internal fun shouldRetryCandidateBody(error: Throwable, userRequested: Boolean, runAttemptCount: Int): Boolean =
+    !userRequested && runAttemptCount < 2 && DerivativeFailure.from(error).retryable
+
+/** Keep the candidate and any handbook/novel record in agreement at the terminal attempt. */
+internal suspend fun settleCandidateBodyFailure(
+    db: com.neethu.gouxiang.data.GouXiangDatabase,
+    id: Long,
+    error: Throwable,
+    runAttemptCount: Int,
+): Boolean = db.withTransaction {
+    val dao = db.contentDiscoveryDao()
+    val current = dao.byId(id) ?: return@withTransaction false
+    if (current.bodyStatus !in setOf("BODY_GENERATING", "BODY_QUEUED")) return@withTransaction false
+    if (shouldRetryCandidateBody(error, current.userRequested, runAttemptCount)) return@withTransaction true
+    dao.setBodyState(id, current.bodyStatus, "BODY_FAILED")
+    db.chatDerivativeDao().byRequestId(current.requestId ?: "candidate-$id")?.let {
+        db.chatDerivativeDao().markFailedIfGenerating(it.id, DerivativeFailure.from(error).reason, System.currentTimeMillis())
+    }
+    false
 }

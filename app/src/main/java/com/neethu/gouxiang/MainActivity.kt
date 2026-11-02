@@ -270,19 +270,11 @@ class MainActivity : ComponentActivity() {
                 vm.consumeVoiceInputNotice()
             }
         }
-        // F4 麦克风权限懒申请:首按「按住说话/🎤」未授权时弹系统弹窗,授权后
-        // 需再按一次开录(与 VoiceCallScreen 进页即申请不同,聊天页不主动打扰)。
-        val micLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-            androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
-        ) { }
+        // 首次授权后重新按住开始录音；被系统永久拒绝时引导用户去设置。
+        val requestMicrophonePermission =
+            com.neethu.gouxiang.ui.permission.rememberMicrophonePermissionRequest()
         val holdStartWithPermission: () -> Unit = {
-            if (toastContext.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                vm.voiceInputStart()
-            } else {
-                micLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-            }
+            if (requestMicrophonePermission()) vm.voiceInputStart()
         }
 
         // 角色头像:一次生成缓存本地(火山→硅基→占位兜底在 provider 内)

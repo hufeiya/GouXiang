@@ -90,4 +90,16 @@ class ContentDiscoveryDaoTest {
         assertEquals("TITLE_READY", dao.byId(unaffected)?.bodyStatus)
         assertEquals(1, dao.unseenCount(1))
     }
+
+    @Test fun `per-kind counts ignore stale results and isolate characters`() = runBlocking {
+        dao.insertCandidate(candidate(key = "h1"))
+        dao.insertCandidate(candidate(key = "h2").copy(bodyStatus = "STALE"))
+        dao.insertCandidate(candidate(key = "h3").copy(sourceStale = true))
+        dao.insertCandidate(candidate(key = "other-kind").copy(kind = "NOVEL"))
+        dao.insertCandidate(candidate(key = "other-character").copy(characterId = 3))
+        assertEquals(1, dao.countForKind(2, "HANDBOOK"))
+        assertEquals(1, dao.countForKind(2, "NOVEL"))
+        assertEquals(1, dao.countForKind(3, "HANDBOOK"))
+        assertEquals(0, dao.countForKind(2, "INNER_VOICE"))
+    }
 }

@@ -1,10 +1,6 @@
 package com.neethu.gouxiang.ai.speech
 
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.BackHandler
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -45,7 +41,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -78,18 +73,9 @@ fun VoiceCallScreen(
     val state by engine.state.collectAsState()
 
     BackHandler { onHangUp() }
-    // 请求录音权限(按住说话需要;拒绝只影响语音输入,调试输入照常)
-    val micLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { }
-    val context = LocalContext.current
-    LaunchedEffect(Unit) {
-        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-        }
-    }
+    val requestMicrophonePermission =
+        com.neethu.gouxiang.ui.permission.rememberMicrophonePermissionRequest()
+    LaunchedEffect(Unit) { requestMicrophonePermission() }
     // 进页即「聆听中」/退页停一切(引擎由调用方按 conversationId 缓存复用)
     LaunchedEffect(Unit) { engine.start() }
     DisposableEffect(Unit) { onDispose { engine.close() } }
@@ -257,11 +243,13 @@ fun VoiceCallScreen(
                         .pointerInput(state.phase) {
                             detectTapGestures(
                                 onPress = {
-                                    engine.holdStart()
-                                    try {
-                                        awaitRelease()
-                                    } finally {
-                                        engine.holdRelease()
+                                    if (requestMicrophonePermission()) {
+                                        engine.holdStart()
+                                        try {
+                                            awaitRelease()
+                                        } finally {
+                                            engine.holdRelease()
+                                        }
                                     }
                                 },
                             )
