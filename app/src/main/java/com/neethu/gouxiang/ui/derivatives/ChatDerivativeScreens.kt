@@ -68,22 +68,9 @@ fun HandbookScreen(
         onOpenDetail = onOpenDetail,
         onRetry = onRetry,
         onDelete = onDelete,
-        detailContent = { record ->
-            val handbook = remember(record.bodyJson) { handbookOf(record) }
-            if (record.imageFile.isNotBlank()) {
-                RecordImage(record.imageFile)
-                Spacer(Modifier.height(12.dp))
-            }
-            if (handbook?.mood?.isNotBlank() == true) {
-                Text("心情:${handbook.mood}", color = Color(0xFFF2C94C), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
-            }
-            handbook?.paragraphs?.forEach { p ->
-                ParagraphCard(body = p.body)
-            }
-            if (handbook == null && record.isSucceeded) {
-                ParagraphCard(body = "(这篇手帐内容为空)")
-            }
+        detailContent = {},
+        customDetail = { record ->
+            HandbookReader(record = record, characterName = state.characterName, onClose = onCloseDetail)
         },
         onCloseDetail = onCloseDetail,
         modifier = modifier,
@@ -270,6 +257,7 @@ private fun DerivativeScreenScaffold(
     onRetry: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     detailContent: @Composable (ChatDerivativeEntity) -> Unit,
+    customDetail: (@Composable (ChatDerivativeEntity) -> Unit)? = null,
     onCloseDetail: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -356,7 +344,8 @@ private fun DerivativeScreenScaffold(
         }
 
         state.detail?.let { record ->
-            DetailOverlay(record = record, title = title, content = detailContent, onClose = onCloseDetail)
+            if (customDetail != null) customDetail(record)
+            else DetailOverlay(record = record, title = title, content = detailContent, onClose = onCloseDetail)
         }
     }
 }

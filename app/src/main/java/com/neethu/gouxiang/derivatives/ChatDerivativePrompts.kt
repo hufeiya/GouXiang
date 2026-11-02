@@ -32,20 +32,24 @@ object ChatDerivativePrompts {
         s.appendLine("你是「${character.name}」,以 TA 的口吻写一篇聊天手帐——把你们最近的对话记成" +
             "一篇带心情的图文手帐,写给用户看,像悄悄整理的回忆。")
         s.appendLine("[人设] ${character.profile}")
+        character.exampleLines.takeIf { it.isNotBlank() }?.let { s.appendLine("[说话示例] $it") }
         memoriesBlock?.takeIf { it.isNotBlank() }?.let { s.appendLine(it) }
         s.appendLine("[输出协议] 只输出一行 JSON,不要输出任何其他内容:")
         s.appendLine(
             "{\"title\":\"不超过${ChatDerivativeOutput.HANDBOOK_TITLE_MAX}字的篇名\"," +
                 "\"mood\":\"不超过${ChatDerivativeOutput.HANDBOOK_MOOD_MAX}字的心情\"," +
-                "\"paragraphs\":[{${jstr("body", "手帐一段正文")}}]," +
+                "\"subtitle\":\"一句有角色语气的短副标题\"," +
+                "\"paragraphs\":[{${jstr("body", "手帐一段正文")},${jstr("highlight", "正文里要画荧光笔的短句")},${jstr("circle", "正文里要圈出的短句")}}]," +
                 "\"imagePrompt\":\"配图画面描述,简体中文,${ChatDerivativeOutput.IMAGE_PROMPT_MAX}字内\"}",
         )
         s.appendLine("规则:")
         s.appendLine("1. paragraphs 输出 ${ChatDerivativeOutput.HANDBOOK_PARAGRAPH_MIN}~${ChatDerivativeOutput.HANDBOOK_PARAGRAPH_MAX} 段," +
-            "每段不超过 ${HANDBOOK_BODY_MAX}字;先叙事再收在一点心情上。")
-        s.appendLine("2. 只依据上面给到的对话与记忆取材,引用真实说过的内容,不编造没发生过的事。")
-        s.appendLine("3. 第一人称「我」,称呼用户沿用你们聊天里的习惯;()内可描述动作与神态。")
-        s.appendLine("4. 不出现「JSON」「字段」「输出」这类字眼;不出现任何额度、次数、道具相关的表述。")
+            "每段最好 40~90 字、最多 ${HANDBOOK_BODY_MAX}字,每段围绕一个瞬间或心情,便于排版翻页。")
+        s.appendLine("2. 像角色亲手写给自己的手账:挑选最有趣或触动角色的细节、原话和反应,写出独有的观察、口头禅与小心思;不要按时间逐句复述聊天,不要套用千篇一律的抒情。")
+        s.appendLine("3. 第一人称「我」,称呼用户沿用你们聊天里的习惯。只依据选中对话与记忆,不要把想象写成发生过的事实;引用必须确实说过。")
+        s.appendLine("4. 挑一两处最有感觉的短句填 highlight 或 circle,其余留空;它们必须逐字出现在同一段 body 中、每处不超过 ${ChatDerivativeOutput.HANDBOOK_MARK_MAX} 字,不要重复或自行添加标记符号。")
+        s.appendLine("5. imagePrompt 描述本次回忆中一个具体、有画面感的瞬间,不要文字、水印或无依据的情节。subtitle 是一行短短的心情或旁白。")
+        s.appendLine("6. 不出现「JSON」「字段」「输出」这类字眼;不出现任何额度、次数、道具相关的表述。")
         return s.toString().trim()
     }
 

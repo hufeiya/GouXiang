@@ -212,6 +212,7 @@ class MainActivity : ComponentActivity() {
         val selectedContentCandidate by vm.selectedContentCandidate.collectAsState()
         val candidateBodyText by vm.candidateBodyText.collectAsState()
         val candidateImageFile by vm.candidateImageFile.collectAsState()
+        val candidateHandbook by vm.candidateHandbook.collectAsState()
         val streamDraft by vm.streamDraft.collectAsState()
         val chatSoundEnabled by vm.chatSoundEnabled.collectAsState()
         // 手机聊天 F4:形态开关 + 说明页 + 语音播放状态
@@ -1007,14 +1008,29 @@ class MainActivity : ComponentActivity() {
         }
 
         selectedContentCandidate?.let { candidate ->
-            com.neethu.gouxiang.ui.chat.ContentCandidateDetail(
-                candidate = candidate,
-                body = candidateBodyText,
-                imageFile = candidateImageFile,
-                onBack = { vm.closeContentCandidate() },
-                onRetry = { vm.retryContentCandidate(candidate.id) },
-                onRetryImage = { vm.retryContentCandidateImage(candidate.id) },
-            )
+            val handbook = candidateHandbook?.takeIf { it.id == candidate.resultId }
+            if (candidate.kind == "HANDBOOK" && candidate.bodyStatus == "READY" && handbook != null) {
+                val imageStatus = when (candidate.imageStatus) {
+                    "FAILED" -> com.neethu.gouxiang.data.ChatDerivativeEntity.IMAGE_FAILED
+                    "QUEUED", "GENERATING" -> com.neethu.gouxiang.data.ChatDerivativeEntity.IMAGE_PENDING
+                    else -> handbook.imageStatus
+                }
+                com.neethu.gouxiang.ui.derivatives.HandbookReader(
+                    record = handbook.copy(isStale = handbook.isStale || candidate.sourceStale, imageStatus = imageStatus),
+                    characterName = chatUi.character?.name.orEmpty(),
+                    onClose = { vm.closeContentCandidate() },
+                    onRetryImage = if (candidate.sourceStale) null else ({ vm.retryContentCandidateImage(candidate.id) }),
+                )
+            } else {
+                com.neethu.gouxiang.ui.chat.ContentCandidateDetail(
+                    candidate = candidate,
+                    body = candidateBodyText,
+                    imageFile = candidateImageFile,
+                    onBack = { vm.closeContentCandidate() },
+                    onRetry = { vm.retryContentCandidate(candidate.id) },
+                    onRetryImage = { vm.retryContentCandidateImage(candidate.id) },
+                )
+            }
         }
 
         // 角色编辑页(C 工作包 C1~C3):创作页「新建/编辑」进入的全屏覆盖层;

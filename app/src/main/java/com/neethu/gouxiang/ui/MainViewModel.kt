@@ -201,12 +201,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val candidateBodyText: StateFlow<String?> = _candidateBodyText.asStateFlow()
     private val _candidateImageFile = MutableStateFlow<String?>(null)
     val candidateImageFile: StateFlow<String?> = _candidateImageFile.asStateFlow()
+    private val _candidateHandbook = MutableStateFlow<com.neethu.gouxiang.data.ChatDerivativeEntity?>(null)
+    val candidateHandbook: StateFlow<com.neethu.gouxiang.data.ChatDerivativeEntity?> = _candidateHandbook.asStateFlow()
 
     init {
         viewModelScope.launch {
             selectedContentCandidate.collectLatest { candidate ->
                 _candidateBodyText.value = null
                 _candidateImageFile.value = null
+                if (_candidateHandbook.value?.id != candidate?.resultId || candidate?.kind != "HANDBOOK") {
+                    _candidateHandbook.value = null
+                }
                 val resultId = candidate?.resultId ?: return@collectLatest
                 when (candidate.kind) {
                     "INNER_VOICE" -> repo.db.innerVoiceDao().forCharacter(candidate.characterId)
@@ -219,6 +224,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         _candidateImageFile.value = it.imageFile.takeIf(String::isNotBlank)
                     }
                     "HANDBOOK", "NOVEL" -> repo.db.chatDerivativeDao().byId(resultId)?.let { record ->
+                        if (candidate.kind == "HANDBOOK") _candidateHandbook.value = record
                         _candidateBodyText.value = if (candidate.kind == "HANDBOOK") {
                             com.neethu.gouxiang.derivatives.ChatDerivativeOutput.handbookFromJson(record.bodyJson)
                                 ?.paragraphs?.joinToString("\n\n") { it.body }

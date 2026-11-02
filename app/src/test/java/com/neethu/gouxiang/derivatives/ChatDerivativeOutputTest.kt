@@ -29,6 +29,20 @@ class ChatDerivativeOutputTest {
     }
 
     @Test
+    fun `handbook keeps only marks that occur in the paragraph and reads old records`() {
+        val raw = """{"title":"约定","subtitle":"那天的晚风","paragraphs":[{"body":"我记得那天的晚风","highlight":"那天的晚风","circle":"不存在"},{"body":"你笑了","circle":"你笑了"},{"body":"我也笑了"}]}"""
+        val h = ChatDerivativeOutput.parseHandbook(raw)!!
+        assertEquals("那天的晚风", h.subtitle)
+        assertEquals("那天的晚风", h.paragraphs[0].highlight)
+        assertEquals("", h.paragraphs[0].circle)
+        assertEquals("你笑了", h.paragraphs[1].circle)
+        assertEquals(h, ChatDerivativeOutput.handbookFromJson(ChatDerivativeOutput.handbookToJson(h)))
+        val old = ChatDerivativeOutput.handbookFromJson("""{"paragraphs":[{"body":"旧手账"}]}""")!!
+        assertEquals("", old.subtitle)
+        assertEquals("", old.paragraphs.single().highlight)
+    }
+
+    @Test
     fun `handbook below three paragraphs fails closed`() {
         assertNull(ChatDerivativeOutput.parseHandbook(handbookRaw(2)))
         assertNull(ChatDerivativeOutput.parseHandbook(handbookRaw(0)))
