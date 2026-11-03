@@ -21,14 +21,16 @@ data class MessageEntity(
     /** "user" / "assistant"。 */
     val role: String,
     /**
-     * 气泡类型:text / sticker(存量,2026-10-31 起协议不再新产) / img / voice
-     * (默认 text)。
+     * 气泡类型:text / sticker(存量,2026-10-31 起协议不再新产) / img /
+     * image(用户真实选图,2026-11-02「+」面板) / voice(默认 text)。
      */
     val kind: String = "text",
-    /** 正文;sticker/img = 占位描述;voice = 语音条转写。 */
+    /** 正文;sticker/img = 占位描述;voice = 语音条转写;image = 上下文提示行。 */
     val content: String,
     /** 内嵌 () 动作,JSON 数组字符串(仅 assistant text 泡)。 */
     val actionsJson: String = "[]",
+    /** 真实图片文件路径(kind=image 时非空,app filesDir 内;其余为空串)。 */
+    val mediaPath: String = "",
     /** 时间(epoch millis)。 */
     val at: Long = 0,
 )

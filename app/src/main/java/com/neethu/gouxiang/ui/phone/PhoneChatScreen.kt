@@ -476,6 +476,11 @@ private fun PhoneBubble(
             "card" -> CardBody(bubble)
             "sticker" -> StickerBody(bubble.content)
             "img" -> ImageBody(bubble.content)
+            // 用户真实选图泡(普通聊天页「+」面板发送,切皮肤后同库可见);
+            // 路径缺失回落文本泡
+            "image" ->
+                if (bubble.mediaPath.isNotBlank()) RealImageBody(bubble.mediaPath)
+                else TextBody(bubble, fromUser)
             else -> TextBody(bubble, fromUser)
         }
     }
@@ -579,6 +584,19 @@ private fun ImageBody(desc: String) {
         Text("🖼️", fontSize = 32.sp)
         Text(desc, color = Color(0xFF9A9A9A), fontSize = 11.sp, maxLines = 1)
     }
+}
+
+/** 用户真实选图泡(与普通聊天页 ImageBubbleContent 同源,尺寸对齐手机泡宽)。 */
+@Composable
+private fun RealImageBody(path: String) {
+    AsyncImage(
+        model = java.io.File(path),
+        contentDescription = "图片",
+        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        modifier = Modifier
+            .size(180.dp)
+            .clip(RoundedCornerShape(10.dp)),
+    )
 }
 
 /**

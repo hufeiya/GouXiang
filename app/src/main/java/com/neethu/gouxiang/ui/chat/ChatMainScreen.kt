@@ -1,6 +1,9 @@
 package com.neethu.gouxiang.ui.chat
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -40,19 +43,24 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBackIosNew
+import androidx.compose.material.icons.filled.Bookmarks
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Smartphone
 import androidx.compose.material.icons.outlined.VolumeOff
 import androidx.compose.material.icons.outlined.VolumeUp
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.Text
@@ -145,6 +153,21 @@ fun ChatMainScreen(
     onRewind: (messageId: Long) -> Unit = {},
     /** 长按「重新生成」回调(仅角色侧泡;F1 与手机聊天页同款 VM 出口)。 */
     onRegenerate: (turnId: String) -> Unit = {},
+    // ── 「+」扩展面板(对照猫箱聊天加号面板,复用现有页面/VM 出口)──
+    /** 面板「回溯」:一键回溯上一轮(定位最后一条角色回复删到该点,VM 兜底)。 */
+    onRewindLastTurn: () -> Unit = {},
+    /** 面板「发送图片」:相册选图回调(VM 压缩落盘 + kind=image 回合)。 */
+    onSendImage: (android.net.Uri) -> Unit = {},
+    /** 面板「心动指令」:番外剧场·心动事件页(复用现有心动事件管线)。 */
+    onOpenHeartCommands: () -> Unit = {},
+    /** 面板「聊天转小说」:跳小说列表页(不直接生成,入口语义)。 */
+    onOpenNovel: () -> Unit = {},
+    /** 面板「手机聊天」:同一会话切手机形态皮肤。 */
+    onOpenPhoneChat: () -> Unit = {},
+    /** 面板「拍合照」:跳合照页(AI 合照 + 设为聊天背景)。 */
+    onOpenPhoto: () -> Unit = {},
+    /** 面板「聊天转手账」:跳手账列表页(不直接生成,入口语义)。 */
+    onOpenHandbook: () -> Unit = {},
     /** 按住说话:按下开录 / 松手按手势去向分发(原地=直接发送,上划=取消,侧移=动作场景输入)。 */
     onHoldStart: () -> Unit = {},
     onHoldRelease: (MainViewModel.VoiceInputAction) -> Unit = {},
@@ -176,6 +199,17 @@ fun ChatMainScreen(
     var longPressTarget by remember { mutableStateOf<Long?>(null) }
     var rewindTarget by remember { mutableStateOf<Long?>(null) }
     var rewindTargetText by remember { mutableStateOf("") }
+    // 「+」扩展面板开关 + 一键回溯的二次确认目标(面板收起后弹确认,点名
+    // 最后一条角色回复的开头,与长按回溯同一 RewindConfirmDialog)。
+    var panelOpen by remember { mutableStateOf(false) }
+    var rewindLastTargetText by remember { mutableStateOf<String?>(null) }
+    // 相册选图(系统 Photo Picker,免存储权限);选中即收面板交 VM 落盘。
+    val imagePicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            panelOpen = false
+            onSendImage(uri)
+        }
+    }
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     Box(modifier = modifier.fillMaxSize()) {
@@ -354,6 +388,7 @@ fun ChatMainScreen(
                 sending = state.sending,
                 onSend = onSend,
                 onOpenVoiceCall = onOpenVoiceCall,
+                onTogglePanel = { panelOpen = !panelOpen },
                 onHoldStart = onHoldStart,
                 onHoldRelease = onHoldRelease,
                 onHoldModeSwitch = onHoldModeSwitch,
@@ -407,6 +442,72 @@ fun ChatMainScreen(
                 onConfirm = {
                     onRewind(msgId)
                     rewindTarget = null
+                    android.widget.Toast.makeText(
+                        context,
+                        "因为回溯，聊天记录已发生变化",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                },
+            )
+        }
+
+        // ── 「+」扩展面板(对照猫箱聊天加号面板)──
+        if (panelOpen) {
+            ChatPlusPanel(
+                enabled = state.bubbleItems.any { !it.fromUser },
+                onRewind = {
+                    panelOpen = false
+                    // 点名最后一条角色回复的开头(与长按回溯同一确认弹窗);
+                    // 无角色回复时提示,不弹空确认。
+                    val lastAssistantText = state.bubbleItems
+                        .lastOrNull { !it.fromUser }?.bubbles?.lastOrNull()?.content
+                    if (lastAssistantText.isNullOrBlank()) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "还没有可回溯的回复",
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    } else {
+                        rewindLastTargetText = rewindSnippetShared(lastAssistantText)
+                    }
+                },
+                onPickImage = {
+                    imagePicker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                    )
+                },
+                onOpenHeartCommands = {
+                    panelOpen = false
+                    onOpenHeartCommands()
+                },
+                onOpenNovel = {
+                    panelOpen = false
+                    onOpenNovel()
+                },
+                onOpenPhoneChat = {
+                    panelOpen = false
+                    onOpenPhoneChat()
+                },
+                onOpenPhoto = {
+                    panelOpen = false
+                    onOpenPhoto()
+                },
+                onOpenHandbook = {
+                    panelOpen = false
+                    onOpenHandbook()
+                },
+                onDismiss = { panelOpen = false },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+        // 面板「回溯」二次确认(与长按回溯同款弹窗,点名目标防误触)
+        rewindLastTargetText?.let { targetText ->
+            RewindConfirmDialog(
+                targetText = targetText,
+                onDismiss = { rewindLastTargetText = null },
+                onConfirm = {
+                    onRewindLastTurn()
+                    rewindLastTargetText = null
                     android.widget.Toast.makeText(
                         context,
                         "因为回溯，聊天记录已发生变化",
@@ -687,6 +788,10 @@ private fun SingleBubble(bubble: ChatBubble, fromUser: Boolean, onLongPress: (Lo
             bubble.kind == "sticker" ->
                 TextContent(bubble.copy(actions = listOf(bubble.content), content = ""), fromUser)
             bubble.kind == "img" -> ImageContent(bubble.content)
+            // 用户真实选图泡(「+」面板发送):mediaPath 为本地持久文件;
+            // 路径缺失(文件被清/存量异常)回落括号文本不崩
+            bubble.kind == "image" && bubble.mediaPath.isNotBlank() ->
+                ImageBubbleContent(bubble.mediaPath)
             bubble.kind == "voice" -> VoiceContent(bubble.content, fromUser)
             else -> TextContent(bubble, fromUser)
         }
@@ -729,6 +834,19 @@ private fun ImageContent(desc: String) {
             overflow = TextOverflow.Ellipsis,
         )
     }
+}
+
+/** 用户真实选图泡:「+」面板发送,本地文件经压缩落盘后 Coil 直读。 */
+@Composable
+private fun ImageBubbleContent(path: String) {
+    AsyncImage(
+        model = java.io.File(path),
+        contentDescription = "图片",
+        contentScale = ContentScale.Crop,
+        modifier = Modifier
+            .size(180.dp)
+            .clip(RoundedCornerShape(10.dp)),
+    )
 }
 
 /** 语音条占位:麦克风 + 转写文本(语音合成/播放为后续功能)。 */
@@ -807,6 +925,8 @@ internal fun InputBar(
     sending: Boolean,
     onSend: (String) -> Unit,
     onOpenVoiceCall: () -> Unit = {},
+    /** 「+」扩展面板开关(猫箱加号面板:功能宫格悬于输入条上方)。 */
+    onTogglePanel: () -> Unit = {},
     onHoldStart: () -> Unit = {},
     onHoldRelease: (MainViewModel.VoiceInputAction) -> Unit = {},
     onHoldModeSwitch: (Boolean) -> Unit = {},
@@ -1007,7 +1127,13 @@ internal fun InputBar(
                     .clickable(enabled = enabled) { textMode = !textMode },
             )
             Spacer(Modifier.width(12.dp))
-            Box {
+            Box(
+                Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    enabled = enabled,
+                ) { onTogglePanel() },
+            ) {
                 Box(
                     Modifier
                         .size(30.dp)
@@ -1079,14 +1205,118 @@ internal fun InputBar(
 }
 
 /**
+ * 「+」扩展面板(对照猫箱聊天加号面板):全屏暗 scrim + 输入条上方功能宫格。
+ * 七格两行(4+3):回溯 / 发送图片 / 心动指令 / 聊天转小说 + 手机聊天 / 拍合照 /
+ * 聊天转手账 —— 全部复用既有页面与 VM 出口(转手账/小说=跳列表页不直接生成);
+ * 手机页 ExtPanel 同款交互范式(条件渲染,点空白收起)。
+ */
+@Composable
+private fun ChatPlusPanel(
+    /** 无角色回复时「回溯」点击侧提示不弹确认(列表有无 assistant 组)。 */
+    enabled: Boolean,
+    onRewind: () -> Unit,
+    onPickImage: () -> Unit,
+    onOpenHeartCommands: () -> Unit,
+    onOpenNovel: () -> Unit,
+    onOpenPhoneChat: () -> Unit,
+    onOpenPhoto: () -> Unit,
+    onOpenHandbook: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier.fillMaxSize()) {
+        // 点击空白收起(全屏 scrim,盖住输入条与消息区)
+        Box(
+            Modifier
+                .matchParentSize()
+                .background(Color.Black.copy(alpha = 0.35f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onDismiss() },
+        )
+        Column(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(bottom = 84.dp)
+                .background(
+                    Color(0xFF3A4254).copy(alpha = 0.97f),
+                    RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                )
+                .padding(horizontal = 16.dp, vertical = 18.dp),
+        ) {
+            Row {
+                PlusTile(Icons.Filled.History, "回溯", Modifier.weight(1f)) { onRewind() }
+                Spacer(Modifier.width(10.dp))
+                PlusTile(Icons.Outlined.Image, "发送图片", Modifier.weight(1f)) { onPickImage() }
+                Spacer(Modifier.width(10.dp))
+                PlusTile(Icons.Filled.Favorite, "心动指令", Modifier.weight(1f)) { onOpenHeartCommands() }
+                Spacer(Modifier.width(10.dp))
+                PlusTile(Icons.AutoMirrored.Filled.MenuBook, "聊天转小说", Modifier.weight(1f)) { onOpenNovel() }
+            }
+            Spacer(Modifier.height(10.dp))
+            Row {
+                PlusTile(Icons.Outlined.Smartphone, "手机聊天", Modifier.weight(1f)) { onOpenPhoneChat() }
+                Spacer(Modifier.width(10.dp))
+                PlusTile(Icons.Outlined.PhotoCamera, "拍合照", Modifier.weight(1f)) { onOpenPhoto() }
+                Spacer(Modifier.width(10.dp))
+                PlusTile(Icons.Filled.Bookmarks, "聊天转手账", Modifier.weight(1f)) { onOpenHandbook() }
+                Spacer(Modifier.weight(1f))
+            }
+            // 回溯可用性小注(无角色回复时点了只会 Toast,提前透明告知)
+            if (!enabled) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "还没有可回溯的回复",
+                    color = Color.White.copy(alpha = 0.55f),
+                    fontSize = 11.sp,
+                )
+            }
+        }
+    }
+}
+
+/** 面板宫格单卡:半透明蓝灰圆角块 + 白图标 + 白标签(对齐猫箱加号面板观感)。 */
+@Composable
+private fun PlusTile(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) { onClick() }
+            .padding(vertical = 6.dp),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(64.dp)
+                .background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(16.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(icon, contentDescription = label, tint = Color.White, modifier = Modifier.size(26.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(label, color = Color.White.copy(alpha = 0.88f), fontSize = 12.sp)
+    }
+}
+
+/**
  * 回合进行中:流式打字泡。草稿非空时展示实时累积的回复内容(可见逐字流式),
  * 末尾带闪烁光标;首字到达前退化为「正在输入…」。渲染在列表底部=reverseLayout 首项。
  *
  * 样式与正式回复泡(SingleBubble 文本态)完全同源:同圆角/同底色/同内边距/
  * 同字号行高 —— 流式结束后草稿泡被正式泡原位替换时无字号跳变(猫箱口径,
  * 用户验收 2026-10-31)。尾部预览按码点截,防把代理对劈成未配对高位代理。
- */
-@Composable
+ */@Composable
 private fun TypingHint(streamDraft: String) {
     val draft = streamDraft.takeLastCodePoints(200)
     Row(

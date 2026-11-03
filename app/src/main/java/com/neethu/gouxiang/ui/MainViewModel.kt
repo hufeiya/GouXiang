@@ -630,6 +630,123 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         sendChatMessage(payload.toProtocolLine(), phoneMode = true)
     }
 
+    /** 普通聊天页「+」面板「发送图片」的上下文提示行(落库正文 + 回合 userText)。 */
+    private fun imageMessageNote(): String = "（发来一张图片）"
+
+    /**
+     * 普通聊天页「+」面板「发送图片」:相册选图 → 压缩拷贝进 app 私有目录 →
+     * kind=image 消息落库(真实文件路径存 mediaPath,正文=括号提示行,模型可
+     * 感知「发来一张图片」)→ 照常跑一个回复回合。回合链路/失败显式化与
+     * [sendChatMessage] 完全同构(02 文档 §3.5),仅用户侧落库行构造不同。
+     */
+    fun sendImageMessage(uri: android.net.Uri) {
+        val state = _chatUi.value
+        val conversationId = state.conversationId
+        val character = state.character ?: return
+        if (state.sending) return
+        val phoneMode = _isPhoneChat.value
+        viewModelScope.launch {
+            // 选图 URI 是一次性读权限,先在 IO 线程压缩拷贝为持久文件再走回合
+            val path = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                copyPickedImage(uri)
+            }
+            if (path == null) {
+                android.widget.Toast.makeText(getApplication(), "图片读取失败", android.widget.Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            _chatUi.value = _chatUi.value.copy(sending = true)
+            var userMessageId: Long? = null
+            try {
+                val at = System.currentTimeMillis()
+                val userMsg = MessageEntity(
+                    conversationId = conversationId,
+                    turnId = "turn-user-$at",
+                    role = "user",
+                    kind = "image",
+                    content = imageMessageNote(),
+                    mediaPath = path,
+                    at = at,
+                )
+                userMessageId = repo.insertMessage(userMsg)
+                // 同 sendChatMessage:活跃时间回写 + 会话行摘要按泡型降级(image→[图片])
+                runCatching { repo.noteUserActivity(conversationId, character.id, userMsg.at) }
+                repo.touchConversation(
+                    conversationId,
+                    conversationSummary(userMsg.kind, userMsg.content, userMsg.actionsJson),
+                    userMsg.at,
+                )
+                // 先跑回合再读 state(快照回退防护,与 sendChatMessage 同口径)
+                val turnResult = runRound(conversationId, character.id, userMsg.content, phoneMode, userMessageId)
+                speakChatReply(conversationId, phoneMode, turnResult, userMsg.content)
+                if (_chatUi.value.conversationId == conversationId) {
+                    _chatUi.value = _chatUi.value.afterTurnResult(turnResult, userMessageId)
+                }
+                refreshChatBubbles(conversationId)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("ChatOrchestrator", "image round failed", e)
+                if (_chatUi.value.conversationId == conversationId) {
+                    _chatUi.value = _chatUi.value.copy(
+                        failedTurn = FailedTurn(conversationId, imageMessageNote(), userMessageId),
+                    )
+                }
+            } finally {
+                if (_chatUi.value.conversationId == conversationId) {
+                    _chatUi.value = _chatUi.value.copy(sending = false)
+                }
+            }
+        }
+    }
+
+    /**
+     * 选图落盘:contentResolver 读流,按最长边粗降采样(>1600px 按 2 的幂缩)
+     * 后转 JPEG(~85)写 `filesDir/chat_images/`,返回绝对路径;读图/写盘任一
+     * 失败返回 null 由调用方提示。本地无多模态管线,模型侧只见提示行文本。
+     */
+    private fun copyPickedImage(uri: android.net.Uri): String? = runCatching {
+        val app = getApplication<Application>()
+        val resolver = app.contentResolver
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        resolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+        val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 1600)
+        val opts = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        val bitmap = resolver.openInputStream(uri)?.use {
+            android.graphics.BitmapFactory.decodeStream(it, null, opts)
+        } ?: return null
+        val dir = java.io.File(app.filesDir, "chat_images").apply { mkdirs() }
+        val out = java.io.File(dir, "img-${System.currentTimeMillis()}.jpg")
+        out.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }
+        bitmap.recycle()
+        out.absolutePath
+    }.getOrNull()
+
+    /**
+     * 「+」面板「回溯」一键回到上一轮:定位最后一条角色回复,复用长按回溯
+     * [rewindToMessage](删该条及之后 + 联动清记忆/主动账本)。无角色回复时
+     * 静默返回(UI 侧已先确认目标存在,这里兜底防并发删除)。
+     */
+    fun rewindLastTurn() {
+        val conversationId = _chatUi.value.conversationId
+        if (conversationId == 0L) return
+        viewModelScope.launch {
+            val lastAssistant = repo.allMessages(conversationId)
+                .lastOrNull { it.role == "assistant" }?.id ?: return@launch
+            rewindToMessage(lastAssistant)
+        }
+    }
+
+    /**
+     * 「+」面板「手机聊天」:同一会话切手机形态皮肤(F4)。不重载消息流 ——
+     * 两形态共用同一份 chatUi 订阅与记忆;后续发送按 _isPhoneChat 取连发参数,
+     * 与从消息列表角标进入手机聊天语义一致。
+     */
+    fun switchChatSkin(phoneMode: Boolean) {
+        if (_chatConversationId.value == null) return
+        if (_isPhoneChat.value == phoneMode) return
+        _isPhoneChat.value = phoneMode
+    }
+
     // ── 语音通话 12(F6)──────────────────────────────────────────────
 
     /** 语音通话打开的会话 id(null=未进入;入口:聊天页输入条电话图标)。 */
@@ -3704,6 +3821,8 @@ data class ChatBubble(
     val durationSec: Int = 0,
     /** 卡片载荷(kind=card 时非空;解码失败为 null 走文本降级)。 */
     val cardPayload: com.neethu.gouxiang.protocol.CardPayload? = null,
+    /** 真实图片文件路径(kind=image 用户选图泡;空串=无,测试构造默认)。 */
+    val mediaPath: String = "",
     /** 行时间(epoch millis;历史页 11 组尾时间/日期分组用;测试构造默认 0)。 */
     val at: Long = 0,
 ) {
@@ -3755,6 +3874,7 @@ internal fun toBubbleItems(
                         id = m.id, turnId = m.turnId,
                         durationSec = if (m.kind == "voice") ChatBubble.durationFor(m.content) else 0,
                         cardPayload = if (m.kind == "card") com.neethu.gouxiang.protocol.CardPayload.decode(m.actionsJson) else null,
+                        mediaPath = m.mediaPath,
                         at = m.at,
                     ),
                 ))
@@ -3776,6 +3896,7 @@ internal fun toBubbleItems(
                     turnId = row.turnId,
                     durationSec = if (row.kind == "voice") ChatBubble.durationFor(row.content) else 0,
                     cardPayload = if (row.kind == "card") com.neethu.gouxiang.protocol.CardPayload.decode(row.actionsJson) else null,
+                    mediaPath = row.mediaPath,
                     at = row.at,
                 )
             }

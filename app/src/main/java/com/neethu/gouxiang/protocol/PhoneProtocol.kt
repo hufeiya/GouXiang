@@ -137,7 +137,7 @@ fun conversationSummary(kind: String, text: String, actionsJson: String = ""): S
     when (kind) {
         "voice" -> "[语音]"
         "sticker" -> "[表情]"
-        "img" -> "[图片]"
+        "img", "image" -> "[图片]"
         "card" ->
             CardPayload.decode(actionsJson)?.summary()
                 ?: parseCardLine(text)?.summary()

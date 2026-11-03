@@ -534,6 +534,14 @@ class MainActivity : ComponentActivity() {
                 onRetryFailedTurn = { vm.retryFailedTurn() },
                 onRewind = { vm.rewindToMessage(it) },
                 onRegenerate = { vm.regenerateTurn(it) },
+                // 「+」扩展面板(对照猫箱):复用既有页面/VM 出口
+                onRewindLastTurn = { vm.rewindLastTurn() },
+                onSendImage = { uri -> vm.sendImageMessage(uri) },
+                onOpenHeartCommands = { chatId?.let { vm.openSidestory(it) } },
+                onOpenNovel = { chatId?.let { vm.openNovel(it) } },
+                onOpenPhoneChat = { vm.switchChatSkin(phoneMode = true) },
+                onOpenPhoto = { chatId?.let { vm.openPhoto(it) } },
+                onOpenHandbook = { chatId?.let { vm.openHandbook(it) } },
                 onHoldStart = holdStartWithPermission,
                 onHoldRelease = { vm.voiceInputRelease(it) },
                 onHoldModeSwitch = { vm.voiceInputModeSwitch(it) },
@@ -692,7 +700,17 @@ class MainActivity : ComponentActivity() {
                 PhoneChatScreen(
                     state = chatUi,
                     avatarFile = chatUi.character?.let { avatarFiles[it.id] },
-                    onBack = { vm.closeChat() },
+                    // 「+」面板可从首页内嵌聊天切进手机形态(switchChatSkin):
+                    // 返回逻辑与内嵌聊天 onBack 同款,只 closeChat 会留下永远
+                    // loading 的内嵌占位
+                    onBack = {
+                        if (embeddedChatKey != null) {
+                            dismissedChatKey = embeddedChatKey
+                            embeddedChatKey = null
+                            embeddedConversationId = null
+                        }
+                        vm.closeChat()
+                    },
                     onSend = { vm.sendChatMessage(it, phoneMode = true) },
                     onSendCard = { vm.sendCard(it) },
                     onOpenGuide = { vm.openPhoneGuide() },

@@ -33,7 +33,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         ContentDiscoveryState::class,
         ContentCandidateEntity::class,
     ],
-    version = 16,
+    version = 17,
     exportSchema = false,
 )
 abstract class GouXiangDatabase : RoomDatabase() {
@@ -57,6 +57,17 @@ abstract class GouXiangDatabase : RoomDatabase() {
 
     companion object {
         const val NAME = "gouxiang.db"
+
+        /**
+         * 聊天「+」面板迁移(v16→v17,单列纯增量):`messages` 加 `mediaPath`
+         * 真实图片文件路径列(kind=image 用户选图消息,既有行回填 '' = 纯文本
+         * 口径不变);其余表不动。
+         */
+        val MIGRATION_16_17: Migration = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN mediaPath TEXT NOT NULL DEFAULT ''")
+            }
+        }
 
         val MIGRATION_15_16: Migration = object : Migration(15, 16) {
             override fun migrate(db: SupportSQLiteDatabase) {

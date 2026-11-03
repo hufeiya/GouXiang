@@ -65,7 +65,7 @@ class DatabaseMigrationTest {
                 GouXiangDatabase.MIGRATION_9_10,
                 GouXiangDatabase.MIGRATION_10_11,
                 GouXiangDatabase.MIGRATION_11_12,
-                GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16,
+                GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16, GouXiangDatabase.MIGRATION_16_17,
             )
             .allowMainThreadQueries().build()
         try {
@@ -124,7 +124,7 @@ class DatabaseMigrationTest {
     @Test fun v6TaskHistoryGainsFailureKindColumnAndKeepsRows() {
         createV6FromV5WithTaskHistoryRow()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
+            .addMigrations(GouXiangDatabase.MIGRATION_6_7, GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16, GouXiangDatabase.MIGRATION_16_17)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -152,7 +152,7 @@ class DatabaseMigrationTest {
     @Test fun v7CharactersGainAvatarVersionColumnAndKeepsRows() {
         createV7FromV6()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
+            .addMigrations(GouXiangDatabase.MIGRATION_7_8, GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16, GouXiangDatabase.MIGRATION_16_17)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -182,7 +182,7 @@ class DatabaseMigrationTest {
     @Test fun v8ProactiveLedgerTablesCreatedAndOldDataKept() {
         createV8FromV7()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
+            .addMigrations(GouXiangDatabase.MIGRATION_8_9, GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16, GouXiangDatabase.MIGRATION_16_17)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -267,7 +267,7 @@ class DatabaseMigrationTest {
     @Test fun v9CharacterStatusRecordsTableCreatedAndOldDataKept() {
         createV9FromV8()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
+            .addMigrations(GouXiangDatabase.MIGRATION_9_10, GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16, GouXiangDatabase.MIGRATION_16_17)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -327,7 +327,7 @@ class DatabaseMigrationTest {
     @Test fun v10SidestoryRecordsTableCreatedAndOldDataKept() {
         createV10FromV9()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
+            .addMigrations(GouXiangDatabase.MIGRATION_10_11, GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16, GouXiangDatabase.MIGRATION_16_17)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -411,7 +411,7 @@ class DatabaseMigrationTest {
     @Test fun v11ChatDerivativeRecordsCreatedAndInnerVoicesKept() {
         createV11FromV10()
         val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
+            .addMigrations(GouXiangDatabase.MIGRATION_11_12, GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16, GouXiangDatabase.MIGRATION_16_17)
             .allowMainThreadQueries().build()
         try {
             val sql = db.openHelper.writableDatabase
@@ -505,7 +505,7 @@ class DatabaseMigrationTest {
         db.close()
 
         val db2 = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
-            .addMigrations(GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16)
+            .addMigrations(GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16, GouXiangDatabase.MIGRATION_16_17)
             .allowMainThreadQueries().build()
         try {
             val sql = db2.openHelper.writableDatabase
@@ -544,5 +544,42 @@ class DatabaseMigrationTest {
             sql.execSQL("UPDATE characters SET momentsJoined = 0 WHERE id = 1")
             assertEquals(0L, longScalar("SELECT momentsJoined FROM characters WHERE id=1"))
         } finally { db2.close() }
+    }
+
+    /**
+     * v16→v17(聊天「+」面板,messages 加 mediaPath 列):旧消息 mediaPath
+     * 回填 ''(纯文本口径不变),kind=image 新行路径可写可读;其余表不动。
+     */
+    @Test fun v17MessagesGainMediaPathColumnAndKeepsRows() {
+        createV5()
+        val db = Room.databaseBuilder(context, GouXiangDatabase::class.java, name)
+            .addMigrations(
+                GouXiangDatabase.MIGRATION_5_6,
+                GouXiangDatabase.MIGRATION_6_7,
+                GouXiangDatabase.MIGRATION_7_8,
+                GouXiangDatabase.MIGRATION_8_9,
+                GouXiangDatabase.MIGRATION_9_10,
+                GouXiangDatabase.MIGRATION_10_11,
+                GouXiangDatabase.MIGRATION_11_12,
+                GouXiangDatabase.MIGRATION_12_13, GouXiangDatabase.MIGRATION_13_14, GouXiangDatabase.MIGRATION_14_15, GouXiangDatabase.MIGRATION_15_16, GouXiangDatabase.MIGRATION_16_17,
+            )
+            .allowMainThreadQueries().build()
+        try {
+            val sql = db.openHelper.writableDatabase
+            fun scalar(query: String): String = sql.query(query).use { it.moveToFirst(); it.getString(0) }
+            // 旧消息原样可见,mediaPath 回填 ''(默认值,纯文本口径不变)
+            assertEquals("聊天", scalar("SELECT content FROM messages WHERE id=3"))
+            assertEquals("", scalar("SELECT mediaPath FROM messages WHERE id=3"))
+            // kind=image 用户选图行:mediaPath 可写可读(「+」面板发送的落地面)
+            sql.execSQL(
+                "INSERT INTO messages (conversationId, turnId, role, kind, content, actionsJson, mediaPath, at) " +
+                    "VALUES (2, 'turn-img', 'user', 'image', '（发来一张图片）', '', '/data/user/0/app/files/chat_images/img-1.jpg', 9)",
+            )
+            assertEquals(
+                "/data/user/0/app/files/chat_images/img-1.jpg",
+                scalar("SELECT mediaPath FROM messages WHERE turnId='turn-img'"),
+            )
+            assertEquals("image", scalar("SELECT kind FROM messages WHERE turnId='turn-img'"))
+        } finally { db.close() }
     }
 }
