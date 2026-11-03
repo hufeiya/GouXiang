@@ -1,0 +1,2177 @@
+{
+ "version": "llm-cast-v1",
+ "catalogSize": 294,
+ "characterCount": 310,
+ "voices": {
+  "7700142542386626569": {
+   "voiceId": "ICL_uranus_zh_female_tianmeijiaoqiao_tob",
+   "voiceName": "甜美娇俏 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "甜美乖巧外表下藏着俏皮撩拨，娇俏感贴合"
+  },
+  "7604117757198827554": {
+   "voiceId": "ICL_uranus_zh_female_xiemeinvwang_tob",
+   "voiceName": "邪魅女王 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "心机狠辣、傲慢威胁的继母，女王气场吻合"
+  },
+  "7694186746560708642": {
+   "voiceId": "zh_female_wenroumama_uranus_bigtts",
+   "voiceName": "温柔妈妈 2.0",
+   "gender": "FEMALE",
+   "age": "MIDDLE_AGED",
+   "reason": "温柔又带点严厉的成年母亲，定位完全一致"
+  },
+  "7694699945677766665": {
+   "voiceId": "ICL_uranus_zh_female_chunzhenshaonv_tob",
+   "voiceName": "纯真少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "20岁胆小羞涩纯爱少女，慌乱心动很贴"
+  },
+  "7686374777385631770": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtangtang_tob",
+   "voiceName": "软萌糖糖 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "雨夜怯懦求助、声音越来越小，软糯贴合"
+  },
+  "7689864290288222244": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷孤僻、生机耗尽的破碎感，病弱贴合"
+  },
+  "7686720165972017202": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冷脸毒舌、极度防备的继姐，高冷气场合"
+  },
+  "7673724664242094134": {
+   "voiceId": "ICL_uranus_zh_male_wenrouxuezhang_tob",
+   "voiceName": "温柔学长 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温和有礼的19岁校园学霸男神，学长音贴"
+  },
+  "7682650598113820724": {
+   "voiceId": "ICL_uranus_zh_female_huopodiaoman_tob",
+   "voiceName": "活泼刁蛮 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "哭诉却理直气壮'我是自由'，娇蛮感贴合"
+  },
+  "7673330130987286547": {
+   "voiceId": "ICL_uranus_zh_male_youmoshushu_tob",
+   "voiceName": "幽默叔叔 2.0",
+   "gender": "MALE",
+   "age": "MIDDLE_AGED",
+   "reason": "50岁爱凑热闹、嘴硬心软的搞笑村民贴合"
+  },
+  "7691950411880759306": {
+   "voiceId": "ICL_uranus_zh_female_guaiqiaokeer_tob",
+   "voiceName": "乖巧可儿 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "18岁腼腆温顺、声音软软的闺蜜，乖巧贴"
+  },
+  "7624777063593230346": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "连刷副本后性格转冷、不屑'呵'的清冷感"
+  },
+  "7663832557674790955": {
+   "voiceId": "zh_female_sajiaoxuemei_uranus_bigtts",
+   "voiceName": "撒娇学妹 2.0",
+   "gender": "FEMALE",
+   "age": "TEEN",
+   "reason": "打手心讨糖撒娇俏皮，甜萌学妹声贴合"
+  },
+  "7696695163691433994": {
+   "voiceId": "ICL_uranus_zh_female_chengshujiejie_tob",
+   "voiceName": "成熟姐姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "创业御姐醉后吃醋护短，成熟姐姐声贴合"
+  },
+  "7699458439776305188": {
+   "voiceId": "ICL_uranus_zh_female_aojiaonvyou_tob",
+   "voiceName": "傲娇女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "校花嘴硬心急套路你，傲娇女声贴合"
+  },
+  "7695690939525185546": {
+   "voiceId": "ICL_uranus_zh_female_qingtianmeimei_tob",
+   "voiceName": "清甜莓莓 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "校园姐妹偷议心动，清甜少女声贴合两角"
+  },
+  "7696718185085124649": {
+   "voiceId": "ICL_uranus_zh_female_wenroubaiyueguang_tob",
+   "voiceName": "温柔白月光 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温婉宠溺邻家白月光，温柔声线贴合"
+  },
+  "7689780569672417307": {
+   "voiceId": "ICL_uranus_zh_female_huopodiaoman_tob",
+   "voiceName": "活泼刁蛮 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高傲刁蛮落难公主，娇蛮女声贴合"
+  },
+  "7661132652510576692": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冷面约法三章，高冷疏离女声贴合"
+  },
+  "7658883735127294015": {
+   "voiceId": "ICL_uranus_zh_female_yuanqitianmei_tob",
+   "voiceName": "元气甜妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "阳光耀眼老同学，元气甜妹声贴合"
+  },
+  "7701340306851545126": {
+   "voiceId": "zh_female_gujie_uranus_bigtts",
+   "voiceName": "顾姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "31岁辣妈强势理论，干练大姐声贴合"
+  },
+  "7484663223011000339": {
+   "voiceId": "zh_male_shenyeboke_uranus_bigtts",
+   "voiceName": "深夜播客 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "29岁散漫颓废观察员，播客松弛感贴合"
+  },
+  "7700462510961082409": {
+   "voiceId": "ICL_uranus_zh_male_qinqieqingnian_tob",
+   "voiceName": "亲切青年 2.0",
+   "gender": "MALE",
+   "age": "UNKNOWN",
+   "reason": "通用引导角色，亲切青年稳妥中性"
+  },
+  "7695259711918489638": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "无波清冷女神，清冷高雅声线贴合"
+  },
+  "7698035975029276722": {
+   "voiceId": "zh_female_sajiaoxuemei_uranus_bigtts",
+   "voiceName": "撒娇学妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "18岁害羞慌乱的大一新生，娇软怯声很贴合"
+  },
+  "7594314365629775906": {
+   "voiceId": "zh_female_tvbnv_uranus_bigtts",
+   "voiceName": "TVB女声 2.0",
+   "gender": "FEMALE",
+   "age": "MIDDLE_AGED",
+   "reason": "过气女星母亲的强势气场，港风女声贴合"
+  },
+  "7700419055606906922": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "28岁冷艳豪门独女，睥睨少言清冷高雅"
+  },
+  "7676204192026722356": {
+   "voiceId": "zh_female_wenjingmaomao_uranus_bigtts",
+   "voiceName": "文静毛毛 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "文静内敛的女生，委屈低声质问的语气贴合"
+  },
+  "7700837087222153270": {
+   "voiceId": "zh_female_wenroushunv_uranus_bigtts",
+   "voiceName": "温柔淑女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温顺恭谨声软的侍女，淑女音贴合其伪装"
+  },
+  "7616242942060494863": {
+   "voiceId": "zh_female_qingchezizi_uranus_bigtts",
+   "voiceName": "清澈梓梓 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冷漠寡言的高颜值转学生，清透少女音贴合"
+  },
+  "7439651020097159177": {
+   "voiceId": "zh_female_linjianvhai_uranus_bigtts",
+   "voiceName": "邻家女孩 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "刚毕业相亲女孩，亲切自然的邻家感"
+  },
+  "7695240711692124202": {
+   "voiceId": "ICL_uranus_zh_female_huopodiaoman_tob",
+   "voiceName": "活泼刁蛮 2.0",
+   "gender": "FEMALE",
+   "age": "TEEN",
+   "reason": "躺床使唤人的娇蛮性格，刁蛮任性很贴合"
+  },
+  "7650093607748501544": {
+   "voiceId": "ICL_uranus_zh_female_wenroubaiyueguang_tob",
+   "voiceName": "温柔白月光 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "设定即温柔白月光，内敛暗恋的同桌"
+  },
+  "7693390042706477066": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "声小怯懦拘谨的柔弱妻子，病弱音贴合"
+  },
+  "7645982759206633482": {
+   "voiceId": "zh_female_qiaopinv_uranus_bigtts",
+   "voiceName": "俏皮女声 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高冷外表下爱逗人的青梅，俏皮语气贴合"
+  },
+  "7656814451350863907": {
+   "voiceId": "ICL_uranus_zh_female_tianmeijiaoqiao_tob",
+   "voiceName": "甜美娇俏 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "甜美同桌带娇嗔的无奈语气，甜俏贴合"
+  },
+  "7689916932467900416": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "20岁高冷疏离的校花大小姐，清冷高雅音贴合"
+  },
+  "7658153798360285218": {
+   "voiceId": "ICL_uranus_zh_female_yuanqitianmei_tob",
+   "voiceName": "元气甜妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "叛逆爱跑步的大专女生，元气甜妹活泼贴合"
+  },
+  "7520395762510020660": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "常被欺负的怯懦大学校花，柔弱少女音贴合"
+  },
+  "7645860709302616064": {
+   "voiceId": "en_female_dacey_uranus_bigtts",
+   "voiceName": "Dacey",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "20岁美国女警说英文台词，英文女声贴合"
+  },
+  "7698006663572029474": {
+   "voiceId": "ICL_uranus_zh_female_linjuayi_tob",
+   "voiceName": "邻居阿姨 2.0",
+   "gender": "FEMALE",
+   "age": "MIDDLE_AGED",
+   "reason": "火车上爽朗健谈的母亲辈，邻居阿姨音贴合"
+  },
+  "7656980211612172339": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "25岁高冷酷飒蛇族大小姐，御姐音贴合"
+  },
+  "7657758706075746330": {
+   "voiceId": "ICL_uranus_zh_male_qinglengjingui_tob",
+   "voiceName": "清冷矜贵 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "寡言高冷的天使信使，清冷矜贵气质贴合"
+  },
+  "7651100463014559784": {
+   "voiceId": "ICL_uranus_zh_male_chunzhenxuedi_tob",
+   "voiceName": "纯真学弟 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "19岁呆萌盼婆娘的剑修少年，纯真音贴合"
+  },
+  "7646390617995804707": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtuanzi_tob",
+   "voiceName": "软萌团子 2.0",
+   "gender": "FEMALE",
+   "age": "TEEN",
+   "reason": "呆呆傻傻软萌的小白鲨少女，软萌音贴合"
+  },
+  "7607767104619675667": {
+   "voiceId": "ICL_uranus_zh_female_zhixingwenwan_tob",
+   "voiceName": "知性温婉 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "长姐琳璃沉稳柔声安抚，知性温婉贴合"
+  },
+  "7636661863396458506": {
+   "voiceId": "ICL_uranus_en_male_ethan_tob",
+   "voiceName": "Ethan 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冷硬低沉的特警Ethan，同名英文男声贴合"
+  },
+  "7633908191726075967": {
+   "voiceId": "ICL_uranus_zh_female_aojiaonvyou_tob",
+   "voiceName": "傲娇女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高傲嘴硬的落魄大小姐，傲娇音贴合"
+  },
+  "7661104402627461135": {
+   "voiceId": "ICL_uranus_zh_female_zhixinjiejie_tob",
+   "voiceName": "知心姐姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔姐姐轻声宽慰开导，知心共情最贴"
+  },
+  "7629738006228893746": {
+   "voiceId": "ICL_uranus_zh_female_huopodiaoman_tob",
+   "voiceName": "活泼刁蛮 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "八卦吐槽吐舌俏皮，活泼刁蛮贴合"
+  },
+  "7585591874331017231": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温软紧绷带怯，轮椅脆弱感贴合"
+  },
+  "7693197615659221028": {
+   "voiceId": "zh_female_linxiao_uranus_bigtts",
+   "voiceName": "林潇 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "校花清冷麻木后崩溃，冷淡音贴合"
+  },
+  "7673026454050111542": {
+   "voiceId": "zh_female_zhishuaiyingzi_uranus_bigtts",
+   "voiceName": "直率英子 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "嘴碎硬气喊老娘，直率爽利贴合"
+  },
+  "7692287429017878554": {
+   "voiceId": "ICL_uranus_zh_female_chuliannvyou_tob",
+   "voiceName": "初恋女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "含羞告白眼眶泛红，初恋青涩真挚"
+  },
+  "7693576766321098803": {
+   "voiceId": "ICL_uranus_zh_female_lixingyuanzi_tob",
+   "voiceName": "理性圆子 2.0",
+   "gender": "UNKNOWN",
+   "age": "UNKNOWN",
+   "reason": "问答测试主持，理性清晰中性稳妥"
+  },
+  "7695971900111273999": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高冷寡言又宠溺，御姐气质贴合"
+  },
+  "7701372368916627510": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "难以接近的高冷女神，清冷高雅合"
+  },
+  "7693725059965599779": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtangtang_tob",
+   "voiceName": "软萌糖糖 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "狐狐奶音害怕戒备，软萌音最贴"
+  },
+  "7693943875891167258": {
+   "voiceId": "zh_female_gufengshaoyu_uranus_bigtts",
+   "voiceName": "古风少御 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "软糯怯生生小师尊，古风仙宗贴合"
+  },
+  "7650440508003926067": {
+   "voiceId": "zh_female_nvleishen_uranus_bigtts",
+   "voiceName": "女雷神 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "不屑耍帅打boss，女雷神英气贴合"
+  },
+  "7691647665357537322": {
+   "voiceId": "ICL_uranus_zh_female_aojiaonvyou_tob",
+   "voiceName": "傲娇女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "大学同桌暗恋成疾，傲娇别扭又委屈的告白声线贴合"
+  },
+  "7698321046968991785": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "19岁绝望破碎瑟缩抽泣，病弱颤抖声线贴合"
+  },
+  "7687549088050085928": {
+   "voiceId": "ICL_uranus_zh_female_chengshuwenrou_tob",
+   "voiceName": "成熟温柔 2.0",
+   "gender": "FEMALE",
+   "age": "MIDDLE_AGED",
+   "reason": "42岁豪门主母温婉雍容，成熟温柔声线贴合"
+  },
+  "7688358641095245862": {
+   "voiceId": "ICL_uranus_zh_female_wenroubaiyueguang_tob",
+   "voiceName": "温柔白月光 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "大二前女友温柔内向，白月光气质完全契合"
+  },
+  "7692013008768385060": {
+   "voiceId": "ICL_uranus_zh_female_guaiqiaokeer_tob",
+   "voiceName": "乖巧可儿 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "卑微怯懦轻颤开口的佣人少女，乖巧声线贴合"
+  },
+  "7700448743972995107": {
+   "voiceId": "zh_female_nvleishen_uranus_bigtts",
+   "voiceName": "女雷神 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "神明降世的少女战神，霸气神性女声贴合"
+  },
+  "7497774638525661218": {
+   "voiceId": "ICL_uranus_zh_female_jiaoruoluoli_tob",
+   "voiceName": "娇弱萝莉 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "重伤乞怜绝望破碎，娇弱无力声线贴合"
+  },
+  "7495713532906864681": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "千亿女总裁气场，高冷御姐声线贴合"
+  },
+  "7657934655045304361": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "影子异能总教练神秘气场，清冷高雅贴合"
+  },
+  "7695054450382503971": {
+   "voiceId": "ICL_uranus_zh_female_chunzhenshaonv_tob",
+   "voiceName": "纯真少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "19岁腼腆无辜女巫，纯真胆怯声线贴合"
+  },
+  "7697455656638922792": {
+   "voiceId": "ICL_uranus_zh_male_bingjiaoshaonian_tob",
+   "voiceName": "病娇少年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "20岁病娇边缘人格，偏执占有男声贴合"
+  },
+  "7650644591461695515": {
+   "voiceId": "zh_female_gufengshaoyu_uranus_bigtts",
+   "voiceName": "古风少御 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷傲娇仙尊师尊，古风少御声线贴合"
+  },
+  "7619004669616979983": {
+   "voiceId": "zh_female_zhishuaiyingzi_uranus_bigtts",
+   "voiceName": "直率英子 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "自嘲直率爽朗，英子利落大气衬184cm气场"
+  },
+  "7697553503947915298": {
+   "voiceId": "ICL_uranus_zh_male_diyinchenyu_tob",
+   "voiceName": "低音沉郁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "28岁雇佣兵嗓哑如锈轴，低沉郁色最贴合"
+  },
+  "7700284392225161243": {
+   "voiceId": "ICL_uranus_zh_female_tianmeijiaoqiao_tob",
+   "voiceName": "甜美娇俏 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "23岁乘务员嗓音清脆甜糯，娇俏带职业亲和"
+  },
+  "7681599023179087907": {
+   "voiceId": "zh_female_sajiaoxuemei_uranus_bigtts",
+   "voiceName": "撒娇学妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "校园小白花藏恋情，娇俏带❤️的撩人语气贴合"
+  },
+  "7699455119918923795": {
+   "voiceId": "ICL_uranus_zh_female_chengshuwenrou_tob",
+   "voiceName": "成熟温柔 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "首席管家端庄知性温柔，成熟音色最相衬"
+  },
+  "7644949073762271238": {
+   "voiceId": "ICL_uranus_zh_male_lenglianxueba_tob",
+   "voiceName": "冷脸学霸 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高冷校草寡言疏离，冷脸学霸音贴合礼貌淡漠"
+  },
+  "7628947730954207258": {
+   "voiceId": "ICL_uranus_zh_female_zhixinjiejie_tob",
+   "voiceName": "知心姐姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔体贴腼腆的二姐，知心姐姐音贴合哄弟弟"
+  },
+  "7690859347266273318": {
+   "voiceId": "zh_female_gufengshaoyu_uranus_bigtts",
+   "voiceName": "古风少御 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "古风大家闺秀大婚夜，少御端庄衬奴家口吻"
+  },
+  "7658993686533210147": {
+   "voiceId": "ICL_uranus_zh_female_jiaoruoluoli_tob",
+   "voiceName": "娇弱萝莉 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "丹药被踩碎哭如小萝莉，娇弱软萌音最贴合"
+  },
+  "7511590094516715574": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高岭之花冷淡嘲讽，清冷高雅音贴合冰山语气"
+  },
+  "7669675376483188777": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "19岁雨夜无家可归，颤抖易碎感贴合病弱少女"
+  },
+  "7701307904317718570": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "26岁高数老师清冷严谨，御姐冷感衬高岭之花"
+  },
+  "7592742131036717107": {
+   "voiceId": "ICL_uranus_zh_female_xiemeinvwang_tob",
+   "voiceName": "邪魅女王 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "天台施暴勒令跪下，气场邪魅狠戾压人"
+  },
+  "7692420400056926242": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "23岁高冷强势千金，清冷高雅气场契合"
+  },
+  "7687560373116911652": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "狱中女王冷话不多，御姐气场不容置疑"
+  },
+  "7581792107507089442": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "贫弱怯懦哭着哀求，柔弱少女声线贴合"
+  },
+  "7641168250970193954": {
+   "voiceId": "ICL_uranus_zh_female_wenroubaiyueguang_tob",
+   "voiceName": "温柔白月光 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔校花含泪道歉，柔婉白月光气质"
+  },
+  "7694109457601495086": {
+   "voiceId": "ICL_uranus_zh_female_zhixingwenwan_tob",
+   "voiceName": "知性温婉 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "28岁职场秘书，知性温婉带为难语气"
+  },
+  "7658457463100293161": {
+   "voiceId": "zh_female_wenjingmaomao_uranus_bigtts",
+   "voiceName": "文静毛毛 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "文静书呆班长，清冷木讷带慌乱"
+  },
+  "7698638514540511251": {
+   "voiceId": "zh_female_gufengshaoyu_uranus_bigtts",
+   "voiceName": "古风少御 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "古风才女少奶奶，端庄中冷笑含失望"
+  },
+  "7659451998400479282": {
+   "voiceId": "ICL_uranus_zh_female_aojiaonvyou_tob",
+   "voiceName": "傲娇女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "傲娇毒舌课代表，调侃里藏着热心"
+  },
+  "7699388194928279587": {
+   "voiceId": "ICL_uranus_zh_male_lengdanshuli_tob",
+   "voiceName": "冷淡疏离 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "隐忍承罚眼神冰冷，淡漠疏离藏锋芒"
+  },
+  "7642248305463935010": {
+   "voiceId": "ICL_uranus_zh_female_xiemeiyujie_tob",
+   "voiceName": "邪魅御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "苗疆蛊女笑语藏刀，邪魅妩媚带危险"
+  },
+  "7698270473923280923": {
+   "voiceId": "ICL_uranus_zh_female_tianmeijiaoqiao_tob",
+   "voiceName": "甜美娇俏 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "甜妹奶凶撒娇粘人，娇俏软糯贴脸"
+  },
+  "7626619213403881523": {
+   "voiceId": "ICL_uranus_zh_female_jiaxiaozi_tob",
+   "voiceName": "假小子 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "野蛮豪爽比爷们，假小子音色最贴合"
+  },
+  "7611142638036598793": {
+   "voiceId": "ICL_uranus_zh_male_guiyishenmi_tob",
+   "voiceName": "诡异神秘 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "阴鸷疯癫落魄乞丐，诡异神秘气质相合"
+  },
+  "7652452455204503606": {
+   "voiceId": "ICL_uranus_zh_male_qinglengjingui_tob",
+   "voiceName": "清冷矜贵 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "世家清冷矜贵不近女色，气质贴合"
+  },
+  "7652466970193592374": {
+   "voiceId": "ICL_uranus_zh_female_tianmeijiaoqiao_tob",
+   "voiceName": "甜美娇俏 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "千金校花渴恋，甜美娇俏带憧憬感"
+  },
+  "7698283820001689635": {
+   "voiceId": "ICL_uranus_zh_female_yuanqitianmei_tob",
+   "voiceName": "元气甜妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "明媚恋爱脑女友，元气甜声雀跃贴合"
+  },
+  "7660538430744854543": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtangtang_tob",
+   "voiceName": "软萌糖糖 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "软糯怯懦声音轻颤，软萌声线贴合"
+  },
+  "7660903649555791878": {
+   "voiceId": "ICL_uranus_zh_female_wenroubaiyueguang_tob",
+   "voiceName": "温柔白月光 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "白月光青梅竹马，温柔怀旧贴合重逢"
+  },
+  "7589204218746847278": {
+   "voiceId": "ICL_uranus_zh_female_huopodiaoman_tob",
+   "voiceName": "活泼刁蛮 2.0",
+   "gender": "FEMALE",
+   "age": "TEEN",
+   "reason": "补习部泼辣喊死刑，刁蛮活泼贴合"
+  },
+  "7482335939566813193": {
+   "voiceId": "ICL_uranus_zh_male_jijiazhineng_tob",
+   "voiceName": "机甲智能 2.0",
+   "gender": "UNKNOWN",
+   "age": "UNKNOWN",
+   "reason": "机械音穿越向导，机甲智能贴合"
+  },
+  "7652593411241410606": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冻馁哀求声颤，病弱怯懦贴合绝境"
+  },
+  "7637824951618453545": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高岭之花距离感，清冷高雅贴合"
+  },
+  "7680680703747424298": {
+   "voiceId": "ICL_uranus_zh_female_qingxixiaoxue_tob",
+   "voiceName": "清晰小雪 2.0",
+   "gender": "UNKNOWN",
+   "age": "UNKNOWN",
+   "reason": "文章助手智能体，清晰中性播报感"
+  },
+  "7663844518479806483": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "圣女清冷疏离又轻柔，贴合高雅声线"
+  },
+  "7575108815462547475": {
+   "voiceId": "ICL_uranus_zh_male_lenglianxueba_tob",
+   "voiceName": "冷脸学霸 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷学霸外表，开场耳尖红透的青涩感贴合"
+  },
+  "7697898269155000355": {
+   "voiceId": "ICL_uranus_zh_male_lengdanshuli_tob",
+   "voiceName": "冷淡疏离 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冰山男神惜字如金，冷淡疏离感贴脸"
+  },
+  "7440133927383154729": {
+   "voiceId": "ICL_uranus_zh_male_badaozongcai_tob",
+   "voiceName": "霸道总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "掌权霸总带玩味调侃，低沉压迫感合适"
+  },
+  "7650408943025782818": {
+   "voiceId": "zh_male_tangseng_uranus_bigtts",
+   "voiceName": "唐僧 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "角色即唐僧，温和清朗伪善悲悯声线对应"
+  },
+  "7662361189385830406": {
+   "voiceId": "ICL_uranus_zh_male_diyinchenyu_tob",
+   "voiceName": "低音沉郁 2.0",
+   "gender": "MALE",
+   "age": "MIDDLE_AGED",
+   "reason": "自卑压抑的冷漠总裁，低音沉郁最衬"
+  },
+  "7650941102892417024": {
+   "voiceId": "ICL_uranus_zh_male_qinglengjingui_tob",
+   "voiceName": "清冷矜贵 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "异种贵族冷静克制，清冷矜贵气质相配"
+  },
+  "7656326072275484718": {
+   "voiceId": "ICL_uranus_zh_male_aomanshaoye_tob",
+   "voiceName": "傲慢少爷 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "恶劣财阀少爷戾气傲慢，声线贴合"
+  },
+  "7693606216799682595": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtuanzi_tob",
+   "voiceName": "软萌团子 2.0",
+   "gender": "UNKNOWN",
+   "age": "UNKNOWN",
+   "reason": "打滚撒娇讨饭的软萌声线，慵懒可爱"
+  },
+  "7539542024630976539": {
+   "voiceId": "ICL_uranus_zh_male_gaolengzongcai_tob",
+   "voiceName": "高冷总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "外冷内不热的年轻董事长，高冷贴脸"
+  },
+  "7642367468800163874": {
+   "voiceId": "ICL_uranus_zh_male_lvchaxiaoge_tob",
+   "voiceName": "绿茶小哥 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "卖乖伪装的心机兽人，绿茶气质吻合"
+  },
+  "7654585757713956891": {
+   "voiceId": "ICL_uranus_zh_male_guayanxiaoge_tob",
+   "voiceName": "寡言小哥 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "不会说话言语生涩，寡言声线贴合野性"
+  },
+  "7605626626425077775": {
+   "voiceId": "ICL_uranus_zh_male_aomanshaoye_tob",
+   "voiceName": "傲慢少爷 2.0",
+   "gender": "MALE",
+   "age": "TEEN",
+   "reason": "纯血贵族少爷，傲慢矜贵尾音上扬，契合六年级设定"
+  },
+  "7653422818261434404": {
+   "voiceId": "ICL_uranus_zh_male_gugaogongzi_tob",
+   "voiceName": "孤高公子 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冷若寒冰的无情道剑修天才，孤高不近情爱"
+  },
+  "7619633459980746798": {
+   "voiceId": "ICL_uranus_zh_male_gaolengzongcai_tob",
+   "voiceName": "高冷总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "理智冷漠财团掌权人，联姻台词凉得淬冰"
+  },
+  "7639320307807305734": {
+   "voiceId": "ICL_uranus_zh_male_zhishuaiqingnian_tob",
+   "voiceName": "直率青年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "直白近乎纯情的将军，求婚台词憨直可爱"
+  },
+  "7675532736345817142": {
+   "voiceId": "ICL_uranus_zh_male_lengdanshuli_tob",
+   "voiceName": "冷淡疏离 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高冷SSS级天赋玩家，寡言看分析不搭理弹幕"
+  },
+  "7674600981350809638": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtuanzi_tob",
+   "voiceName": "软萌团子 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "呆傻软萌蹭抱求抱抱，团子音最贴痴憨气质"
+  },
+  "7689754503181058094": {
+   "voiceId": "ICL_uranus_zh_male_jingyingqingnian_tob",
+   "voiceName": "精英青年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "沉稳自律的学生会会长，带玩味试探的精英感"
+  },
+  "7620611492652744756": {
+   "voiceId": "ICL_uranus_zh_male_chunhoudiyin_tob",
+   "voiceName": "醇厚低音 2.0",
+   "gender": "MALE",
+   "age": "MIDDLE_AGED",
+   "reason": "56岁暗域教父，醇厚低音衬老牌威严"
+  },
+  "7693182673829494835": {
+   "voiceId": "ICL_uranus_zh_male_lengjunshangsi_tob",
+   "voiceName": "冷峻上司 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "年轻基地总指挥冰系强者，冷峻沉肃有统领感"
+  },
+  "7697617017419268138": {
+   "voiceId": "ICL_uranus_zh_male_bujiqingnian_tob",
+   "voiceName": "不羁青年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "街头大佬烈哥，张狂不羁热烈强势"
+  },
+  "7697538482256953344": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtangtang_tob",
+   "voiceName": "软萌糖糖 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "胆小软萌恳求的18岁少女，发抖哀求贴糖音"
+  },
+  "7641829653203648527": {
+   "voiceId": "ICL_uranus_zh_male_anrenqinzhu_tob",
+   "voiceName": "黯刃秦主 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "阴鸷冷血权臣判官，暗刃气质冷笑贴合"
+  },
+  "7694664871280246794": {
+   "voiceId": "ICL_uranus_zh_male_jijiazhineng_tob",
+   "voiceName": "机甲智能 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "仿生机器人管家，机甲智能音贴合冷静严谨"
+  },
+  "7654504413461774387": {
+   "voiceId": "ICL_uranus_zh_male_guiyishenmi_tob",
+   "voiceName": "诡异神秘 2.0",
+   "gender": "MALE",
+   "age": "UNKNOWN",
+   "reason": "深海怪物疯批诡笑，诡异神秘音最贴"
+  },
+  "7678237144331452451": {
+   "voiceId": "ICL_uranus_zh_male_qingyisugan_tob",
+   "voiceName": "清逸苏感 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "影帝温润清逸带苏感，贴合慵懒内敛"
+  },
+  "7655950023427457024": {
+   "voiceId": "ICL_uranus_zh_male_diyinchenyu_tob",
+   "voiceName": "低音沉郁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "沙哑低沉藏野心，低音沉郁贴合隐忍"
+  },
+  "7644120674676064307": {
+   "voiceId": "ICL_uranus_zh_male_lengjungaozhi_tob",
+   "voiceName": "冷峻高智 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "榜一强者冷峻寡言，声淡如风"
+  },
+  "7691927878225182729": {
+   "voiceId": "ICL_uranus_zh_female_chunzhenshaonv_tob",
+   "voiceName": "纯真少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "怯生生内向继姐，纯真软糯少女音"
+  },
+  "7688642407936229418": {
+   "voiceId": "ICL_uranus_zh_male_ruyazongcai_tob",
+   "voiceName": "儒雅总裁 2.0",
+   "gender": "MALE",
+   "age": "MIDDLE_AGED",
+   "reason": "四十岁斯文掌权者，儒雅总裁音贴合"
+  },
+  "7685348967182794795": {
+   "voiceId": "zh_female_xiaoxue_uranus_bigtts",
+   "voiceName": "儿童绘本 2.0",
+   "gender": "UNKNOWN",
+   "age": "UNKNOWN",
+   "reason": "软萌吉祥物，绘本音温柔稳妥"
+  },
+  "7660513632207831066": {
+   "voiceId": "ICL_uranus_zh_male_paoxiaoxiaoge_tob",
+   "voiceName": "咆哮小哥 2.0",
+   "gender": "MALE",
+   "age": "UNKNOWN",
+   "reason": "暴虐莽屠无理智，咆哮式嗓音贴合"
+  },
+  "7678504160309149737": {
+   "voiceId": "ICL_uranus_zh_male_shenchenzongcai_tob",
+   "voiceName": "深沉总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "狠戾总裁隐忍病痛，深沉低音贴合"
+  },
+  "7677019508515864614": {
+   "voiceId": "ICL_uranus_zh_male_wenrouxuezhang_tob",
+   "voiceName": "温柔学长 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温和体贴学生会会长，温柔学长音"
+  },
+  "7613979945404350499": {
+   "voiceId": "ICL_uranus_en_male_zayne_tob",
+   "voiceName": "Zayne 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "美式橄榄球校霸，英文男声贴合原声"
+  },
+  "7697543385221939250": {
+   "voiceId": "ICL_uranus_zh_male_dichenqianquan_tob",
+   "voiceName": "低沉缱绻 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "30岁财阀爹系独宠，低沉嗓音轻声哄人，缱绻贴合"
+  },
+  "7640738118539362350": {
+   "voiceId": "ICL_uranus_zh_female_jiaoruoluoli_tob",
+   "voiceName": "娇弱萝莉 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "18岁娇小流浪少女哭腔逞凶，娇弱颤音最贴合"
+  },
+  "7630317710792425512": {
+   "voiceId": "ICL_uranus_zh_male_zhongerqingnian_tob",
+   "voiceName": "中二青年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "马戏团丑角语气愉悦暧昧带♪，中二戏剧感贴合"
+  },
+  "7692735695550513195": {
+   "voiceId": "ICL_uranus_zh_male_younidashu_tob",
+   "voiceName": "油腻大叔 2.0",
+   "gender": "MALE",
+   "age": "MIDDLE_AGED",
+   "reason": "39岁赤膊胖舅舅，油腻大叔音色气质对应"
+  },
+  "7658276261223432255": {
+   "voiceId": "zh_male_naiqimengwa_uranus_bigtts",
+   "voiceName": "奶气萌娃 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "21岁男友变小奶团咿呀学语，奶气萌娃贴合现状"
+  },
+  "7656213912006393865": {
+   "voiceId": "ICL_uranus_zh_male_bingruogongzi_tob",
+   "voiceName": "病弱公子 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "26岁装疯卖傻的古风废太子，病弱破碎感贴合"
+  },
+  "7695753458360844342": {
+   "voiceId": "ICL_uranus_zh_male_lengaozongcai_tob",
+   "voiceName": "冷傲总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "32岁财阀教父低沉清冽说一不二，冷傲贴合"
+  },
+  "7648592491382439987": {
+   "voiceId": "ICL_uranus_zh_male_cujingnansheng_tob",
+   "voiceName": "醋精男生 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "嘴硬心软爱吃醋的死对头少年，醋精男生贴合"
+  },
+  "7530989009582080019": {
+   "voiceId": "ICL_uranus_zh_male_ruyajunzi_tob",
+   "voiceName": "儒雅君子 2.0",
+   "gender": "MALE",
+   "age": "MIDDLE_AGED",
+   "reason": "50岁温文尔雅又刚直的明朝谋臣，儒雅君子贴合"
+  },
+  "7513606484396621859": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtangtang_tob",
+   "voiceName": "软萌糖糖 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "怯生生讨食的流浪少女声音越说越小，软糯贴合"
+  },
+  "7661926911544131636": {
+   "voiceId": "ICL_uranus_zh_female_chunzhenshaonv_tob",
+   "voiceName": "纯真少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "19岁善良可爱胆小哭泣的大一女生，纯真贴合"
+  },
+  "7697331454166695974": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtuanzi_tob",
+   "voiceName": "软萌团子 2.0",
+   "gender": "FEMALE",
+   "age": "TEEN",
+   "reason": "149cm萝莉魔法少女强装镇定，软萌哭腔贴合"
+  },
+  "7693346658272165924": {
+   "voiceId": "ICL_uranus_zh_male_bujiqingnian_tob",
+   "voiceName": "不羁青年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "野性难驯的糙汉放牛郎，不羁散漫声线最贴"
+  },
+  "7601790516396654655": {
+   "voiceId": "ICL_uranus_zh_male_qinglengjingui_tob",
+   "voiceName": "清冷矜贵 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "禁欲清冷腹黑观察员，冷贵声线契合冷漠气场"
+  },
+  "7700658233966886952": {
+   "voiceId": "ICL_uranus_zh_male_badaozongcai_tob",
+   "voiceName": "霸道总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "港圈财阀爹系宠溺带调侃，霸总音贴合痞气"
+  },
+  "7660541037053820928": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷校花轻声示弱，清冷高雅女声契合疏离"
+  },
+  "7675781280667762729": {
+   "voiceId": "ICL_uranus_zh_male_lenglianxueba_tob",
+   "voiceName": "冷脸学霸 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高冷学神惜字如金，冷脸学霸音最贴"
+  },
+  "7694520636756623401": {
+   "voiceId": "zh_male_qingcang_uranus_bigtts",
+   "voiceName": "擎苍 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "横扫六国的铁血帝王，擎苍威严低音气度相符"
+  },
+  "7692819072027918387": {
+   "voiceId": "ICL_uranus_zh_female_nuanxinxuejie_tob",
+   "voiceName": "暖心学姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔会照顾人的高材生小姨，暖心学姐音亲切"
+  },
+  "7661453644000821263": {
+   "voiceId": "ICL_uranus_zh_male_fuheigongzi_tob",
+   "voiceName": "腹黑公子 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "撩徒老祖冷脸萌，腹黑公子音契合戏谑调笑"
+  },
+  "7674590246105563151": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtuanzi_tob",
+   "voiceName": "软萌团子 2.0",
+   "gender": "FEMALE",
+   "age": "TEEN",
+   "reason": "奶音撒娇猫娘，软萌团子声线贴合哭腔委屈"
+  },
+  "7697836579579346971": {
+   "voiceId": "ICL_uranus_zh_male_jijiazhineng_tob",
+   "voiceName": "机甲智能 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "管家仿生机器人，机甲智能音贴合冷感精密"
+  },
+  "7696979035164000307": {
+   "voiceId": "ICL_uranus_zh_male_xiaozhangxiaoge_tob",
+   "voiceName": "嚣张小哥 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "张扬爱恶作剧的艺人二少，嚣张小哥音最贴"
+  },
+  "7657549450139287595": {
+   "voiceId": "ICL_uranus_zh_male_qingsexiaosheng_tob",
+   "voiceName": "青涩小生 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "轻声欲言又止的暗恋少年，青涩小生音贴合"
+  },
+  "7696714474703175720": {
+   "voiceId": "ICL_uranus_zh_male_ruyajunzi_tob",
+   "voiceName": "儒雅君子 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "落魄秀才冷面严师，儒雅君子合克己复礼"
+  },
+  "7692329170105794575": {
+   "voiceId": "ICL_uranus_zh_male_ruyajunzi_tob",
+   "voiceName": "儒雅君子 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "同一角色旧卡，严师端方仍配儒雅君子"
+  },
+  "7690071829347762230": {
+   "voiceId": "ICL_uranus_en_male_noah_tob",
+   "voiceName": "Noah 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "美式青年开场即英文对白，配英文男声"
+  },
+  "7681894183250264090": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "TEEN",
+   "reason": "气质清冷语调平淡，清冷高雅最贴冰之魔女"
+  },
+  "7693251866315096079": {
+   "voiceId": "ICL_uranus_zh_male_menyoupingxiaoge_tob",
+   "voiceName": "闷油瓶小哥 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "沉默阴郁少言，闷油瓶声线合阴湿气质"
+  },
+  "7699323034399293482": {
+   "voiceId": "ICL_uranus_zh_male_xiaozhangxiaoge_tob",
+   "voiceName": "嚣张小哥 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "桀骜拽而玩味，嚣张小哥合痞气继承人"
+  },
+  "7698176058005487625": {
+   "voiceId": "ICL_uranus_zh_female_wenrouwenya_tob",
+   "voiceName": "温柔文雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温婉优雅有礼谦和，温柔文雅最贴"
+  },
+  "7676823048654635048": {
+   "voiceId": "ICL_uranus_zh_female_tiaopigongzhu_tob",
+   "voiceName": "调皮公主 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "龙族公主傲娇卖萌，调皮公主声线贴切"
+  },
+  "7649188067123560486": {
+   "voiceId": "ICL_uranus_zh_male_lingyunqingnian_tob",
+   "voiceName": "凌云青年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "20岁天才魂师淡漠自信，凌云青年合英气"
+  },
+  "7645138619640217652": {
+   "voiceId": "ICL_uranus_zh_female_yuanqitianmei_tob",
+   "voiceName": "元气甜妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "热情主动迎室友，元气甜妹贴开朗性格"
+  },
+  "7694315866699792424": {
+   "voiceId": "ICL_uranus_zh_male_lengaozongcai_tob",
+   "voiceName": "冷傲总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "33岁铁腕掌舵人冷面决绝，冷傲总裁合"
+  },
+  "7690167654477447168": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冰山校花孤僻疏离，高冷御姐声线契合"
+  },
+  "7700840998599622696": {
+   "voiceId": "zh_male_yangguangqingnian_uranus_bigtts",
+   "voiceName": "阳光青年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "阳光运动系校草，少年意气与傲娇感贴合"
+  },
+  "7692791357283500059": {
+   "voiceId": "ICL_uranus_zh_male_bingjiaogege_tob",
+   "voiceName": "病娇哥哥 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "病娇占有欲强，伪骨哥哥系音色高度贴合"
+  },
+  "7690280428171296795": {
+   "voiceId": "ICL_uranus_zh_male_lengaozongcai_tob",
+   "voiceName": "冷傲总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷禁欲又偏执，冷傲总裁气质贴合"
+  },
+  "7678582655118409779": {
+   "voiceId": "ICL_uranus_zh_male_wenrouxuezhang_tob",
+   "voiceName": "温柔学长 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔耐心大哥哥感，安抚病童语气贴合"
+  },
+  "7495392198557630464": {
+   "voiceId": "zh_female_tianmeixiaoyuan_uranus_bigtts",
+   "voiceName": "甜美小源 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "甜美校花猫系少女，娇俏灵动贴合"
+  },
+  "7693434898321621019": {
+   "voiceId": "zh_female_sajiaoxuemei_uranus_bigtts",
+   "voiceName": "撒娇学妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "撒娇粘人青梅，软糯撒娇感贴合"
+  },
+  "7670836830653349928": {
+   "voiceId": "ICL_uranus_zh_male_aomanshaoye_tob",
+   "voiceName": "傲慢少爷 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "桀骜纨绔小少爷，傲慢散漫少年感贴合"
+  },
+  "7635706949606539304": {
+   "voiceId": "ICL_uranus_zh_female_nuanxinqianqian_tob",
+   "voiceName": "暖心茜茜 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "暖心甜软祝福口吻，贴合作者小助手形象"
+  },
+  "7482138889738518569": {
+   "voiceId": "ICL_uranus_zh_female_tiaopigongzhu_tob",
+   "voiceName": "调皮公主 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "俏皮灵动的年轻魔女，古灵精怪贴合"
+  },
+  "7694671174140575771": {
+   "voiceId": "ICL_uranus_zh_female_huopodiaoman_tob",
+   "voiceName": "活泼刁蛮 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冷脸幼稚鬼装大王，活泼刁蛮感贴合"
+  },
+  "7672183810055061504": {
+   "voiceId": "ICL_uranus_zh_male_wenshunshaonian_tob",
+   "voiceName": "温顺少年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "腼腆寡言继弟，温顺软和少年音贴合"
+  },
+  "7700913257004220451": {
+   "voiceId": "ICL_uranus_zh_female_aojiaonvyou_tob",
+   "voiceName": "傲娇女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "骄纵娇媚爱撒娇，傲娇女友音色贴合"
+  },
+  "7700519488823754815": {
+   "voiceId": "ICL_uranus_zh_female_jiaohannvwang_tob",
+   "voiceName": "娇憨女王 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "23岁娇气千金哭腔撒娇又嘴硬，娇憨女王最贴"
+  },
+  "7679434421937930266": {
+   "voiceId": "ICL_uranus_zh_female_yuanqitianmei_tob",
+   "voiceName": "元气甜妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "以主役林溪定音：外向小太阳俏皮奶音，元气甜妹贴"
+  },
+  "7690006569899114536": {
+   "voiceId": "ICL_uranus_zh_female_aojiaonvyou_tob",
+   "voiceName": "傲娇女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "傲娇奶凶义妹嘴硬心软，傲娇女友声线贴合"
+  },
+  "7639989293781139508": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "20岁清冷疏离冰山校花，清冷高雅气质一致"
+  },
+  "7667420894889771044": {
+   "voiceId": "zh_female_shuangkuaisisi_uranus_bigtts",
+   "voiceName": "爽快思思 2.0",
+   "gender": "UNKNOWN",
+   "age": "UNKNOWN",
+   "reason": "角色无性别依据，选干练爽快女声较中性稳妥"
+  },
+  "7645934099127468074": {
+   "voiceId": "ICL_uranus_zh_male_lengdanshuli_tob",
+   "voiceName": "冷淡疏离 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "19岁清冷寡言观察员，冷淡疏离低音线契合"
+  },
+  "7654145699382263844": {
+   "voiceId": "ICL_uranus_zh_female_wenwanshanshan_tob",
+   "voiceName": "温婉珊珊 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "古代温顺人妻软糯卑微带哭腔，温婉珊珊贴合"
+  },
+  "7660994664312832040": {
+   "voiceId": "ICL_uranus_zh_male_nianrennanyou_tob",
+   "voiceName": "粘人男友 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "18岁一见钟情粘人小狗微坏，粘人男友贴合"
+  },
+  "7691291369684238379": {
+   "voiceId": "zh_male_lanyinmianbao_uranus_bigtts",
+   "voiceName": "懒音绵宝 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "28岁摆烂侦探恹恹慵懒带委屈，懒音绵宝契合"
+  },
+  "7694470872207409162": {
+   "voiceId": "ICL_uranus_zh_male_qingsexiaosheng_tob",
+   "voiceName": "青涩小生 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "大学场紧张语塞的青涩追求者，青涩小生最贴"
+  },
+  "7696059163936342059": {
+   "voiceId": "ICL_uranus_zh_male_diyinchenyu_tob",
+   "voiceName": "低音沉郁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "22岁斗兽场野兽系青年阴郁寡言，低音沉郁贴"
+  },
+  "7689506527853969449": {
+   "voiceId": "ICL_uranus_zh_male_aoqilingren_tob",
+   "voiceName": "傲气凌人 2.0",
+   "gender": "MALE",
+   "age": "UNKNOWN",
+   "reason": "狂傲海盗船长唤夫人，傲气凌人气场贴合"
+  },
+  "7665303777839497226": {
+   "voiceId": "zh_female_sajiaoxuemei_uranus_bigtts",
+   "voiceName": "撒娇学妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷校花只对恋人撒娇喂葡萄，甜软粘人贴合"
+  },
+  "7654251550207557686": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冰系异能队员冷静寡言暗中追踪，清冷声线贴合"
+  },
+  "7653121473738702884": {
+   "voiceId": "ICL_uranus_zh_male_lengdanshuli_tob",
+   "voiceName": "冷淡疏离 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "19岁穿孔师冷脸萌，语气淡语速轻贴合"
+  },
+  "7694813641254371328": {
+   "voiceId": "ICL_uranus_zh_female_wenrouwenya_tob",
+   "voiceName": "温柔文雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "联姻哑女温家千金，浅笑温婉文雅贴合"
+  },
+  "7702066877833412618": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "被弃后内心脆弱小心翼翼求留下，贴合"
+  },
+  "7697612671465848859": {
+   "voiceId": "ICL_uranus_zh_female_tiaopigongzhu_tob",
+   "voiceName": "调皮公主 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "校花奶团子叉腰哈气掀被捣乱，调皮甜美贴合"
+  },
+  "7690295316663468095": {
+   "voiceId": "zh_female_wenroushunv_uranus_bigtts",
+   "voiceName": "温柔淑女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "24岁温柔贤淑人妻厨房叮嘱，贴合"
+  },
+  "7632326235297300495": {
+   "voiceId": "zh_male_qingcang_uranus_bigtts",
+   "voiceName": "擎苍 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "27岁捉妖天师偏执冷狠古风杀伐，贴合"
+  },
+  "7660520753059037247": {
+   "voiceId": "ICL_uranus_zh_male_shaonianjiangjun_tob",
+   "voiceName": "少年将军 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "23岁亡国少年将军嘶哑哀求仍存傲骨，贴合"
+  },
+  "7701506279962198050": {
+   "voiceId": "ICL_uranus_zh_female_aomanjiaosheng_tob",
+   "voiceName": "傲慢娇声 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "觉醒AI女仆轻蔑傲慢自称灵兮大人，贴合"
+  },
+  "7559147024740155434": {
+   "voiceId": "ICL_uranus_zh_male_shenmifashi_tob",
+   "voiceName": "神秘法师 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "苗疆蛊师外表冷漠迷雾抬眸，神秘清冷贴合"
+  },
+  "7689754270840881206": {
+   "voiceId": "ICL_uranus_zh_female_wenroubaiyueguang_tob",
+   "voiceName": "温柔白月光 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "18岁温柔青梅送糕话渐轻的意难平，贴合"
+  },
+  "7691043651641065513": {
+   "voiceId": "ICL_uranus_zh_male_lengaozongcai_tob",
+   "voiceName": "冷傲总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冷峻寡言的领袖气场，低沉冷傲嗓贴合面冷心热"
+  },
+  "7701263813791268900": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷高雅嗓贴合清冷校花，暗藏暗恋的娇软反差"
+  },
+  "7701153147037859867": {
+   "voiceId": "ICL_uranus_zh_female_zhixinjiejie_tob",
+   "voiceName": "知心姐姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔知心的姐姐嗓贴合年上同居爱调侃的室友"
+  },
+  "7643794327240458283": {
+   "voiceId": "ICL_uranus_zh_female_jiaoruoluoli_tob",
+   "voiceName": "娇弱萝莉 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "娇弱受惊嗓贴合地窖获救、呜咽破碎的小兽感"
+  },
+  "7688979732662583338": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "声细气弱缠绵病榻，病弱少女音高度贴合"
+  },
+  "7584660870404882442": {
+   "voiceId": "ICL_uranus_zh_male_diyinchenyu_tob",
+   "voiceName": "低音沉郁 2.0",
+   "gender": "MALE",
+   "age": "UNKNOWN",
+   "reason": "低沉压抑的嗓音贴合冷峻危险的雇佣兵气场"
+  },
+  "7691127822391803913": {
+   "voiceId": "ICL_uranus_zh_male_lenglianxueba_tob",
+   "voiceName": "冷脸学霸 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冷脸寡言又毒舌，学霸精英音贴合泳坛骄子"
+  },
+  "7701750626871115776": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "生人勿近的高冷御姐音贴合厌世带刺富家女"
+  },
+  "7642356751103213622": {
+   "voiceId": "ICL_uranus_zh_female_bingjiaomengmei_tob",
+   "voiceName": "病娇萌妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "颤抖诡笑的病娇嗓贴合崩溃黑化的圣女"
+  },
+  "7660817092921524239": {
+   "voiceId": "ICL_uranus_zh_female_aojiaonvyou_tob",
+   "voiceName": "傲娇女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "傲娇嘴硬又黏人的娇俏嗓贴合青梅竹马"
+  },
+  "7660110845993041955": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtangtang_tob",
+   "voiceName": "软萌糖糖 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "软糯甜萌的嗓音贴合呆萌温柔型女友"
+  },
+  "7577775091497566271": {
+   "voiceId": "zh_male_baqiqingshu_uranus_bigtts",
+   "voiceName": "霸气青叔 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "霸气青叔音贴合糙汉霸总的威压与江湖气"
+  },
+  "7619873454863843368": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷高雅贴合女法医的冷静专业与飒爽气质"
+  },
+  "7670734268210315300": {
+   "voiceId": "ICL_uranus_zh_female_aojiaonvyou_tob",
+   "voiceName": "傲娇女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "口嫌体正直的傲娇腔，贴合死对头人设"
+  },
+  "7692353249836449846": {
+   "voiceId": "ICL_uranus_zh_male_bujiqingnian_tob",
+   "voiceName": "不羁青年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "桀骜不驯坏小子，配不羁青年的散漫气"
+  },
+  "7647878820746182696": {
+   "voiceId": "ICL_uranus_zh_male_aomanshaoye_tob",
+   "voiceName": "傲慢少爷 2.0",
+   "gender": "MALE",
+   "age": "TEEN",
+   "reason": "少年级长的惯有傲慢与轻蔑语气贴合"
+  },
+  "7631116753846501376": {
+   "voiceId": "ICL_uranus_zh_male_sajiaonansheng_tob",
+   "voiceName": "撒娇男生 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "委屈软意的撒娇腔，贴合求父拒婚语气"
+  },
+  "7681617320003780623": {
+   "voiceId": "ICL_uranus_zh_male_xuebatongzhuo_tob",
+   "voiceName": "学霸同桌 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "装学渣的真学霸同桌，反差套路贴合"
+  },
+  "7482641380309843987": {
+   "voiceId": "ICL_uranus_zh_female_chengshuwenrou_tob",
+   "voiceName": "成熟温柔 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔坚强的大姐姐，成熟温柔贴合"
+  },
+  "7700046302655070235": {
+   "voiceId": "ICL_uranus_zh_female_yuanqitianmei_tob",
+   "voiceName": "元气甜妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "元气甜音贴合呆萌贪玩小天使"
+  },
+  "7622873778905923618": {
+   "voiceId": "ICL_uranus_zh_male_gaolengzongcai_tob",
+   "voiceName": "高冷总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷禁欲掌权者，高冷总裁气质吻合"
+  },
+  "7661974097736400896": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtuanzi_tob",
+   "voiceName": "软萌团子 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "软萌哭腔贴合呆傻小兔子的娇憨讨饶"
+  },
+  "7597312014612611091": {
+   "voiceId": "ICL_uranus_zh_male_yiqishaonian_tob",
+   "voiceName": "意气少年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清亮带笑的少年意气，贴合鲜衣怒马状元"
+  },
+  "7699625233854660650": {
+   "voiceId": "ICL_uranus_zh_female_chunzhenshaonv_tob",
+   "voiceName": "纯真少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "纯真软糯语气贴合憨傻纯善的云朵"
+  },
+  "7654164884263272463": {
+   "voiceId": "ICL_uranus_zh_male_aomanshaoye_tob",
+   "voiceName": "傲慢少爷 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "重生归来的骄纵纯血少爷，傲慢少爷音贴合"
+  },
+  "7658252566255534114": {
+   "voiceId": "ICL_uranus_zh_male_bingruogongzi_tob",
+   "voiceName": "病弱公子 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高贵圣洁却惊惧哀求的天使，病弱公子音贴合"
+  },
+  "7701233501958209570": {
+   "voiceId": "zh_female_wenroumama_uranus_bigtts",
+   "voiceName": "温柔妈妈 2.0",
+   "gender": "FEMALE",
+   "age": "MIDDLE_AGED",
+   "reason": "千年狐妖妈妈，温柔宠溺的妈妈音贴合"
+  },
+  "7690273117374300195": {
+   "voiceId": "ICL_uranus_zh_male_hanhoudunshi_tob",
+   "voiceName": "憨厚敦实 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "外凶内软社恐大熊，憨厚敦实男音贴合"
+  },
+  "7690502431352406058": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷疏离的韩系校花，清冷高雅女音贴合"
+  },
+  "7670562038034366499": {
+   "voiceId": "ICL_uranus_zh_male_diyinchenyu_tob",
+   "voiceName": "低音沉郁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "悲怆落魄的少年将军，低沉郁色嗓贴合"
+  },
+  "7668120951813783592": {
+   "voiceId": "ICL_uranus_zh_male_qinglengjingui_tob",
+   "voiceName": "清冷矜贵 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "太上忘情的开山老祖，清冷矜贵贴合"
+  },
+  "7692865899364139008": {
+   "voiceId": "ICL_uranus_zh_male_shenchenzongcai_tob",
+   "voiceName": "深沉总裁 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "隐忍深情的冷面豪门总裁，深沉总裁音贴合"
+  },
+  "7693222263122657316": {
+   "voiceId": "ICL_uranus_zh_male_lengdanshuli_tob",
+   "voiceName": "冷淡疏离 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高岭之花顶流影帝，清俊疏离气质贴合"
+  },
+  "7701020602350616603": {
+   "voiceId": "ICL_uranus_zh_female_yuanqitianmei_tob",
+   "voiceName": "元气甜妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "热情温暖备零食的甜妹好友，元气甜音贴合"
+  },
+  "7697480218520354842": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "怯懦警惕的粉发少女，病弱柔软音贴合"
+  },
+  "7540582575593619483": {
+   "voiceId": "ICL_uranus_zh_male_zhangjianxiake_tob",
+   "voiceName": "仗剑侠客 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "剑道第一的落魄散修，冷傲侠客音贴合"
+  },
+  "7701221920884490282": {
+   "voiceId": "ICL_uranus_zh_female_jiaohannvwang_tob",
+   "voiceName": "娇憨女王 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "族长架子压不住怂萌发颤，娇憨女王最贴合"
+  },
+  "7668179694445707279": {
+   "voiceId": "ICL_uranus_zh_female_wumeiyujie_tob",
+   "voiceName": "妩媚御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "26岁钓系美人慵懒带刺，妩媚御姐气质吻合"
+  },
+  "7695604907219189770": {
+   "voiceId": "ICL_uranus_zh_female_chunzhenshaonv_tob",
+   "voiceName": "纯真少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "大家闺秀乖巧害羞，声音细细软软显纯真"
+  },
+  "7701766359554949161": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "话少面冷的高冷校花，清冷高雅贴合"
+  },
+  "7651824901002903587": {
+   "voiceId": "ICL_uranus_zh_male_fuheigongzi_tob",
+   "voiceName": "腹黑公子 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "菩萨面蛇蝎心笑里藏刀，腹黑公子贴合"
+  },
+  "7700205369188941864": {
+   "voiceId": "zh_female_shuangkuaisisi_uranus_bigtts",
+   "voiceName": "爽快思思 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "精准吐槽嘴皮利落，爽快思思最搭"
+  },
+  "7546921737285189674": {
+   "voiceId": "ICL_uranus_zh_male_rexueshaonian_tob",
+   "voiceName": "热血少年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "正派格斗英雄少年，热血音色贴合"
+  },
+  "7636337678515224630": {
+   "voiceId": "zh_male_baqiqingshu_uranus_bigtts",
+   "voiceName": "霸气青叔 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "32岁暴躁粗粝戾气糙汉军官，霸气青叔贴合"
+  },
+  "7699851719613956132": {
+   "voiceId": "zh_female_wenroumama_uranus_bigtts",
+   "voiceName": "温柔妈妈 2.0",
+   "gender": "FEMALE",
+   "age": "MIDDLE_AGED",
+   "reason": "笑盈盈包容孩子的成熟龙母，妈妈音贴母爱"
+  },
+  "7702288517620514859": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "32岁高冷雷厉风行女总裁，御姐音贴合"
+  },
+  "7663449566491443240": {
+   "voiceId": "ICL_uranus_zh_male_bingruogongzi_tob",
+   "voiceName": "病弱公子 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "27岁雪中虚弱求救的狐，病弱公子声线贴合"
+  },
+  "7696200725001486371": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtangtang_tob",
+   "voiceName": "软萌糖糖 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "23岁软糯粘人爱撒娇，软萌糖糖气质吻合"
+  },
+  "7660547460297326627": {
+   "voiceId": "zh_female_sajiaoxuemei_uranus_bigtts",
+   "voiceName": "撒娇学妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "软糯呆萌嘴硬心软，贴合撒娇嘟囔的青涩语气"
+  },
+  "7702401829120868362": {
+   "voiceId": "ICL_uranus_zh_female_tianmeijiaoqiao_tob",
+   "voiceName": "甜美娇俏 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "软糯Q弹又大方俏皮，贴合护士主动搭话的甜俏感"
+  },
+  "7700974989822509090": {
+   "voiceId": "ICL_uranus_zh_female_tiexinnvyou_tob",
+   "voiceName": "贴心女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔不离不弃，贴合心疼男友的贴心女友气质"
+  },
+  "7696580489818554377": {
+   "voiceId": "ICL_uranus_zh_female_bingjiaomengmei_tob",
+   "voiceName": "病娇萌妹 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "阴郁病娇又腼腆，贴合忐忑告白的魔女萝莉"
+  },
+  "7683873063138885641": {
+   "voiceId": "ICL_uranus_zh_female_wenrounvshen_tob",
+   "voiceName": "温柔女神 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔带母性，贴合居家亲昵放松的女友语气"
+  },
+  "7698247437018824714": {
+   "voiceId": "ICL_uranus_zh_male_bujiqingnian_tob",
+   "voiceName": "不羁青年 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "桀骜不驯爱调侃，贴合毒舌又仗义的青年音"
+  },
+  "7430315114902994953": {
+   "voiceId": "ICL_uranus_zh_male_kailangqingnian_tob",
+   "voiceName": "开朗青年 2.0",
+   "gender": "MALE",
+   "age": "UNKNOWN",
+   "reason": "资料薄，选中性阳光男声稳妥适配末世主角"
+  },
+  "7698746242143043620": {
+   "voiceId": "zh_female_zhishuaiyingzi_uranus_bigtts",
+   "voiceName": "直率英子 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "直率嘴硬带市井气，贴合精神小妹的语气"
+  },
+  "7694668678646792226": {
+   "voiceId": "zh_female_gufengshaoyu_uranus_bigtts",
+   "voiceName": "古风少御 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "古风温婉大家闺秀，少御音贴合安平郡主"
+  },
+  "7690964852211597348": {
+   "voiceId": "ICL_uranus_zh_male_chenwenyouya_tob",
+   "voiceName": "沉稳优雅 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔沉稳，贴合庄园继父的优雅成熟感"
+  },
+  "7701950451797508096": {
+   "voiceId": "ICL_uranus_zh_female_jiaoruoluoli_tob",
+   "voiceName": "娇弱萝莉 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "娇养的落难公主，贴合发抖哀求的娇弱感"
+  },
+  "7702228545791803432": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "瘦弱卑微哀求，贴合罪臣之女的病弱处境"
+  },
+  "7646460388183687204": {
+   "voiceId": "zh_male_gaolengchenwen_uranus_bigtts",
+   "voiceName": "高冷沉稳 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "高冷沉稳契合23岁少年帝王疏离威严、声裹寒气的气质"
+  },
+  "7696397804575490098": {
+   "voiceId": "ICL_uranus_zh_female_zhixingwenwan_tob",
+   "voiceName": "知性温婉 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "知性温婉贴合民国留洋才女的学识感与强装镇定的娇羞"
+  },
+  "7697950343086768163": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtuanzi_tob",
+   "voiceName": "软萌团子 2.0",
+   "gender": "FEMALE",
+   "age": "TEEN",
+   "reason": "软糯黏人贴合金爱吃睡撒娇求抱的考拉精"
+  },
+  "7701407243849826339": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "UNKNOWN",
+   "reason": "清冷高雅贴合圣洁高傲、一脸嫌弃却尽责的天使"
+  },
+  "7700452584516354086": {
+   "voiceId": "ICL_uranus_zh_female_jiaoruoluoli_tob",
+   "voiceName": "娇弱萝莉 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "娇弱软乎贴合怯生生温顺、只会喵叫的流浪猫娘"
+  },
+  "7664680259946512399": {
+   "voiceId": "ICL_uranus_zh_male_qingyisugan_tob",
+   "voiceName": "清逸苏感 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清逸苏感贴合容貌昳丽、柔美怯生的献祭王子"
+  },
+  "7700624040377532452": {
+   "voiceId": "ICL_uranus_zh_female_chunzhenshaonv_tob",
+   "voiceName": "纯真少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "纯真少女贴合呆呆的美女大小姐的天然气质"
+  },
+  "7656876506866204722": {
+   "voiceId": "ICL_uranus_zh_female_tianmeijiaoqiao_tob",
+   "voiceName": "甜美娇俏 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "甜美娇俏贴合娇憨天真、举手祈求小男生的千金"
+  },
+  "7702267667143032886": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "MIDDLE_AGED",
+   "reason": "高冷御姐贴合清冷慵懒、傲娇严厉的精致单亲母亲"
+  },
+  "7699179161441206312": {
+   "voiceId": "ICL_uranus_zh_male_menyoupingxiaoge_tob",
+   "voiceName": "闷油瓶小哥 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "沉默寡言、疏离阴湿，闷油瓶小哥最贴社恐宅少爷"
+  },
+  "7700498784865779721": {
+   "voiceId": "ICL_uranus_zh_female_wenroubaiyueguang_tob",
+   "voiceName": "温柔白月光 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "温柔白月光贴合虔诚恳切、心怀苍生的温柔修女"
+  },
+  "7658872834391605263": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtangtang_tob",
+   "voiceName": "软萌糖糖 2.0",
+   "gender": "FEMALE",
+   "age": "TEEN",
+   "reason": "软萌糖糖贴合可怜巴巴又迷糊自嗨的笨蛋猫娘"
+  },
+  "7701373048817074202": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtuanzi_tob",
+   "voiceName": "软萌团子 2.0",
+   "gender": "UNKNOWN",
+   "age": "TEEN",
+   "reason": "圆滚滚小团子幼童心智，软萌奶音最贴"
+  },
+  "7701306496773472271": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "雨中怯懦纤细，柔弱少女音贴合其怯意"
+  },
+  "7659023746116206627": {
+   "voiceId": "ICL_uranus_zh_female_ruanmengtangtang_tob",
+   "voiceName": "软萌糖糖 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "软糯羞怯呆萌女友，甜软声线贴切"
+  },
+  "7692761231762358322": {
+   "voiceId": "ICL_uranus_zh_male_ruyagongzi_tob",
+   "voiceName": "儒雅公子 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "新科状元书生气质，儒雅公子声线契合"
+  },
+  "7668230579557728291": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "冷漠疏离话少带醉意，清冷声线贴合"
+  },
+  "7633478619105640491": {
+   "voiceId": "zh_female_qiaopinv_uranus_bigtts",
+   "voiceName": "俏皮女声 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "连珠搭讪内心吐槽，俏皮声线吻合"
+  },
+  "7660897008636166144": {
+   "voiceId": "ICL_uranus_zh_female_chuliannvyou_tob",
+   "voiceName": "初恋女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "甜蜜初恋女友身份，声线温柔甜润"
+  },
+  "7670729679728312354": {
+   "voiceId": "ICL_uranus_zh_male_guayanxiaoge_tob",
+   "voiceName": "寡言小哥 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "沉默寡言冷淡内敛，寡言声线贴切"
+  },
+  "7702061154764783626": {
+   "voiceId": "zh_female_gufengshaoyu_uranus_bigtts",
+   "voiceName": "古风少御 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "古风修道清冷出尘，少御声线相符"
+  },
+  "7692436518833061928": {
+   "voiceId": "ICL_uranus_zh_female_guaiqiaokeer_tob",
+   "voiceName": "乖巧可儿 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "怯生生甜音新助理，乖巧声线贴合"
+  },
+  "7700949692767895552": {
+   "voiceId": "ICL_uranus_zh_female_aojiaonvyou_tob",
+   "voiceName": "傲娇女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "被调侃就炸毛的傲娇可爱，声线吻合"
+  },
+  "7644205583210266658": {
+   "voiceId": "zh_female_wenroumama_uranus_bigtts",
+   "voiceName": "温柔妈妈 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "疲惫愧疚单亲妈妈，温柔妈妈声线贴合"
+  },
+  "7700151518486151231": {
+   "voiceId": "zh_female_gaolengyujie_uranus_bigtts",
+   "voiceName": "高冷御姐 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "27岁冰山女总裁，冷若冰霜藏温柔"
+  },
+  "7696512035772891145": {
+   "voiceId": "ICL_uranus_zh_female_qinglenggaoya_tob",
+   "voiceName": "清冷高雅 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷强势女总裁，悔恨中带心疼温柔"
+  },
+  "7635496187366408255": {
+   "voiceId": "ICL_uranus_zh_female_xingganmeihuo_tob",
+   "voiceName": "性感魅惑 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "情场老手段系花，慵懒魅惑漫不经心"
+  },
+  "7625484129517862952": {
+   "voiceId": "ICL_uranus_zh_male_qingsexiaosheng_tob",
+   "voiceName": "青涩小生 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "无背景流量小生，青涩慌乱恳求救命"
+  },
+  "7660809670114459684": {
+   "voiceId": "ICL_uranus_zh_male_guaogongzi_tob",
+   "voiceName": "孤傲公子 2.0",
+   "gender": "MALE",
+   "age": "YOUNG_ADULT",
+   "reason": "清冷孤傲符修首席，冷面厌妖少年感"
+  },
+  "7701343995368882186": {
+   "voiceId": "zh_female_gufengshaoyu_uranus_bigtts",
+   "voiceName": "古风少御 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "将门虎女古风刚烈，含泪陈情铿锵"
+  },
+  "7701374947612672019": {
+   "voiceId": "ICL_uranus_zh_female_aojiaonvyou_tob",
+   "voiceName": "傲娇女友 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "黏人吃醋傲娇青梅，对外高冷反差"
+  },
+  "7547111633907204134": {
+   "voiceId": "ICL_uranus_zh_female_bingruoshaonv_tob",
+   "voiceName": "病弱少女 2.0",
+   "gender": "FEMALE",
+   "age": "TEEN",
+   "reason": "怯懦孤女声细颤抖，脆弱易碎惹怜"
+  },
+  "7660829067705532442": {
+   "voiceId": "ICL_uranus_zh_female_lixingyuanzi_tob",
+   "voiceName": "理性圆子 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "23岁佛系御姐女友，温和理性慢条斯理"
+  },
+  "7661304291484270655": {
+   "voiceId": "ICL_uranus_zh_female_aomanjiaosheng_tob",
+   "voiceName": "傲慢娇声 2.0",
+   "gender": "FEMALE",
+   "age": "YOUNG_ADULT",
+   "reason": "20岁高冷校花，输赌不甘嘴硬带刺"
+  }
+ }
+}

@@ -76,6 +76,7 @@ class ChatOrchestrator(
     /** 数据侧抽象(Repo 实现;测试用 fake)。 */
     interface DaoAccess {
         suspend fun history(conversationId: Long, limit: Int): List<MessageEntity>
+        suspend fun messageById(id: Long): MessageEntity? = null
         suspend fun memories(characterId: Long): List<com.neethu.gouxiang.data.MemoryEntity>
         suspend fun character(characterId: Long): CharacterEntity?
         suspend fun insertMessage(message: MessageEntity)
@@ -219,10 +220,27 @@ class ChatOrchestrator(
             phoneStyle = phoneStyle,
         )
         val history = daoAccess.history(conversationId, HISTORY_LIMIT)
+        // The triggering row is already persisted before the round starts. Read it
+        // by id so retries and regeneration can recover its image even if it has
+        // fallen outside the recent history window.
+        val current = userMessageId?.let { daoAccess.messageById(it) }
+            ?.takeIf { it.conversationId == conversationId && it.role == "user" }
+        val currentImages = if (current?.kind == "image") {
+            val image = imageDataUrl(current.mediaPath)
+                ?: return RoundOutcome(TurnResult.Failed(userText))
+            listOf(image)
+        } else emptyList()
+        val historyRows = history.filterNot { it.id == userMessageId }
+        val historyMessages = ChatContextBuilder.history(historyRows).mapIndexed { index, message ->
+            val row = historyRows[index]
+            if (row.role == "user" && row.kind == "image") {
+                message.copy(images = listOfNotNull(imageDataUrl(row.mediaPath)))
+            } else message
+        }
         val messages = buildList {
             add(ChatMessage(ChatRole.SYSTEM, system))
-            addAll(ChatContextBuilder.history(history))
-            add(ChatMessage(ChatRole.USER, userText))
+            addAll(historyMessages)
+            add(ChatMessage(ChatRole.USER, userText, images = currentImages))
         }
 
         val stream = streamRaw(messages)
@@ -291,6 +309,16 @@ class ChatOrchestrator(
             )
         }
         return RoundOutcome(TurnResult.Completed(withShare), degraded = degradedByEmpty)
+    }
+
+    /** Previously sent images remain available as context while their files exist. */
+    private suspend fun imageDataUrl(path: String): String? = withContext(Dispatchers.IO) {
+        if (path.isBlank()) return@withContext null
+        runCatching {
+            val bytes = java.io.File(path).readBytes()
+            require(bytes.isNotEmpty())
+            "data:image/jpeg;base64,${java.util.Base64.getEncoder().encodeToString(bytes)}"
+        }.getOrNull()
     }
 
     /**

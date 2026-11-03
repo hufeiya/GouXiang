@@ -24,6 +24,44 @@ import org.junit.Test
  */
 class ChatOrchestratorTest {
 
+    @Test
+    fun `image round and retry send current image once and replay available history`() = runTest {
+        val image = java.nio.file.Files.createTempFile("chat-image", ".jpg").toFile()
+        image.writeBytes(byteArrayOf(1, 2, 3))
+        try {
+            val store = FakeStore(char, memories)
+            val old = MessageEntity(id = 1, conversationId = 1, turnId = "old", role = "user", kind = "image", content = "旧图片", mediaPath = image.path)
+            val missing = old.copy(id = 2, content = "缺失图片", mediaPath = image.path + ".missing")
+            val current = old.copy(id = 3, content = "当前图片")
+            store.inserted.addAll(listOf(old, missing, current))
+            val requests = mutableListOf<List<ChatMessage>>()
+            val llm = ChatOrchestrator.Llm { messages, _ ->
+                requests.add(messages)
+                flow {
+                    emit(LlmStreamEvent.TextDelta("看到了"))
+                    emit(LlmStreamEvent.Finish("stop"))
+                }
+            }
+            val orchestrator = ChatOrchestrator(store, llm, bubbleGapMs = 0)
+            repeat(2) { // The same persisted id is used on retry/regeneration.
+                orchestrator.respondTo(1, 1, current.content, {}, userMessageId = current.id)
+            }
+            requests.forEach { messages ->
+                assertEquals(1, messages.count { it.content == current.content })
+                assertEquals(listOf("data:image/jpeg;base64,AQID"), messages.last().images)
+                assertEquals(listOf("data:image/jpeg;base64,AQID"), messages.first { it.content == old.content }.images)
+                assertTrue(messages.first { it.content == missing.content }.images.isEmpty())
+            }
+            val missingCurrent = missing.copy(id = 4)
+            store.inserted.add(missingCurrent)
+            val result = orchestrator.respondTo(1, 1, missingCurrent.content, {}, userMessageId = missingCurrent.id)
+            assertTrue(result is TurnResult.Failed)
+            assertEquals(2, requests.size)
+        } finally {
+            image.delete()
+        }
+    }
+
     // ── 上下文组装 ──────────────────────────────────────────────────
 
     @Test
@@ -479,6 +517,8 @@ class ChatOrchestratorTest {
 
         override suspend fun history(conversationId: Long, limit: Int): List<MessageEntity> =
             inserted.takeLast(limit)
+
+        override suspend fun messageById(id: Long): MessageEntity? = inserted.firstOrNull { it.id == id }
 
         override suspend fun memories(characterId: Long): List<MemoryEntity> = memories
 

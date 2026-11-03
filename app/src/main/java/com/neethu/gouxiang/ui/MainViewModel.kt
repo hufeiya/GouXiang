@@ -635,8 +635,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * 普通聊天页「+」面板「发送图片」:相册选图 → 压缩拷贝进 app 私有目录 →
-     * kind=image 消息落库(真实文件路径存 mediaPath,正文=括号提示行,模型可
-     * 感知「发来一张图片」)→ 照常跑一个回复回合。回合链路/失败显式化与
+     * kind=image 消息落库(真实文件路径存 mediaPath,正文=括号提示行)→
+     * 图片随请求发送给模型。回合链路/失败显式化与
      * [sendChatMessage] 完全同构(02 文档 §3.5),仅用户侧落库行构造不同。
      */
     fun sendImageMessage(uri: android.net.Uri) {
@@ -645,18 +645,18 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val character = state.character ?: return
         if (state.sending) return
         val phoneMode = _isPhoneChat.value
-        viewModelScope.launch {
-            // 选图 URI 是一次性读权限,先在 IO 线程压缩拷贝为持久文件再走回合
-            val path = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                copyPickedImage(uri)
-            }
-            if (path == null) {
-                android.widget.Toast.makeText(getApplication(), "图片读取失败", android.widget.Toast.LENGTH_SHORT).show()
-                return@launch
-            }
-            _chatUi.value = _chatUi.value.copy(sending = true)
+        _chatUi.value = state.copy(sending = true)
+        roundJob = viewModelScope.launch {
             var userMessageId: Long? = null
             try {
+                // 选图 URI 是一次性读权限,先在 IO 线程压缩拷贝为持久文件再走回合。
+                val path = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    copyPickedImage(uri)
+                }
+                if (path == null) {
+                    android.widget.Toast.makeText(getApplication(), "图片读取失败", android.widget.Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
                 val at = System.currentTimeMillis()
                 val userMsg = MessageEntity(
                     conversationId = conversationId,
@@ -702,7 +702,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /**
      * 选图落盘:contentResolver 读流,按最长边粗降采样(>1600px 按 2 的幂缩)
      * 后转 JPEG(~85)写 `filesDir/chat_images/`,返回绝对路径;读图/写盘任一
-     * 失败返回 null 由调用方提示。本地无多模态管线,模型侧只见提示行文本。
+     * 失败返回 null 由调用方提示。
      */
     private fun copyPickedImage(uri: android.net.Uri): String? = runCatching {
         val app = getApplication<Application>()
@@ -716,8 +716,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         } ?: return null
         val dir = java.io.File(app.filesDir, "chat_images").apply { mkdirs() }
         val out = java.io.File(dir, "img-${System.currentTimeMillis()}.jpg")
-        out.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }
-        bitmap.recycle()
+        try {
+            val saved = out.outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it) }
+            if (!saved) {
+                out.delete()
+                return null
+            }
+        } finally {
+            bitmap.recycle()
+        }
         out.absolutePath
     }.getOrNull()
 

@@ -15,6 +15,8 @@ class ChatDaoAccess(private val db: GouXiangDatabase, private val context: andro
     override suspend fun history(conversationId: Long, limit: Int): List<MessageEntity> =
         db.messageDao().recentForConversation(conversationId, limit)
 
+    override suspend fun messageById(id: Long): MessageEntity? = db.messageDao().byId(id)
+
     override suspend fun memories(characterId: Long): List<MemoryEntity> =
         db.memoryDao().forCharacter(characterId)
 
