@@ -255,6 +255,15 @@ enum class AiProvider(
 /** 语音合成引擎(GouXiang 只消费 OpenAI 兼容一条链路,枚举为目录完整性保留)。 */
 enum class TtsEngine { OPENAI_COMPATIBLE, EDGE }
 
+/** ASR 与大模型独立配置；本地服务使用 OpenAI 兼容转写端点。 */
+enum class AsrProvider(val label: String, val cloudProvider: AiProvider? = null) {
+    AUTO("自动（本地优先）"),
+    LOCAL("本地服务"),
+    SILICONFLOW("硅基流动", AiProvider.SILICONFLOW),
+    OPENROUTER("OpenRouter", AiProvider.OPENROUTER),
+    CUSTOM("自定义端点", AiProvider.CUSTOM),
+}
+
 /** ASR 引擎:云端(OpenAI 兼容 multipart)或系统内置(语音通话暂未接系统识别)。 */
 enum class AsrEngine { CLOUD, SYSTEM }
 
@@ -334,14 +343,12 @@ fun llmExtraBody(provider: AiProvider, model: String): JsonObject? {
 }
 
 /**
- * 语音识别(ASR)实际生效的服务商:OpenRouter 的 /audio/transcriptions 与硅基
- * 流动同构(共用 key);百炼走自家 chat+input_audio 形态(GouXiang 语音通话未接,
- * 按同商直连展示);火山、DeepSeek 官方与 Grok 无云端 ASR 端点(Grok 的
- * /audio/transcriptions 实测 404),回落硅基流动。
+ * 自动模式的云端回退：仅选择已接入 multipart 转写协议的服务商。
+ * 百炼语音采用不同协议，火山、DeepSeek 与 Grok 也尚未接入云端 ASR。
  */
 fun asrProviderFor(llmProvider: AiProvider): AiProvider =
     if (llmProvider == AiProvider.VOLCANO || llmProvider == AiProvider.DEEPSEEK ||
-        llmProvider == AiProvider.GROK
+        llmProvider == AiProvider.GROK || llmProvider == AiProvider.BAILIAN
     ) {
         AiProvider.SILICONFLOW
     } else {

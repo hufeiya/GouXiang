@@ -60,12 +60,11 @@ import androidx.compose.ui.unit.sp
 import com.neethu.gouxiang.ai.config.AiConfig
 import com.neethu.gouxiang.ai.config.AiConfigStore
 import com.neethu.gouxiang.ai.config.AiProvider
-import com.neethu.gouxiang.ai.config.AsrEngine
+import com.neethu.gouxiang.ai.config.AsrProvider
 import com.neethu.gouxiang.ai.config.ModelCatalogCache
 import com.neethu.gouxiang.ai.config.ModelOption
 import com.neethu.gouxiang.ai.config.OpenAiCompatibleModelCatalog
 import com.neethu.gouxiang.ai.config.asrExplicitAsrModels
-import com.neethu.gouxiang.ai.config.asrProviderFor
 import com.neethu.gouxiang.ai.config.chatModelOptions
 import com.neethu.gouxiang.ai.config.resolveAsrModel
 import com.neethu.gouxiang.ai.config.volcanoVoiceName
@@ -75,11 +74,10 @@ import kotlinx.coroutines.launch
 /**
  * AI 服务配置页(「我的 → AI 服务配置」,移植自 AIAvatar-SDK MainActivity 设置的
  * AI 配置子区块,独立成 Activity):大模型(服务商/Key/模型/自定义端点)、
- * 语音通话的合成与识别(豆包语音 Key/硅基流动兜底 Key/ASR 模型)。
+ * 语音合成与识别的服务商、密钥和模型。
  *
  * 与 AIAvatar 设置页的差异(GouXiang 消费面裁剪,详见 AiConfigStore KDoc):
- * - TTS 服务普通聊天朗读与语音通话,不做 Edge-TTS 多引擎矩阵与「同服务商」勾选
- *   (通话内置「火山优先、硅基兜底」双链);系统识别与「语音直接发送」无消费面;
+ * - TTS 服务普通聊天朗读与语音通话，独立选择服务商；
  * - 每项改动即存即生效(编排器每回合现读),无需重启。
  */
 class AiConfigActivity : ComponentActivity() {
@@ -190,7 +188,8 @@ private fun LlmSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
         ) { value ->
             // 切服务商:模型名保留会跨服务商泄漏(校验落默认,显示也归位),
             // 这里直接清空让下拉显示新服务商默认
-            onUpdate(config.copy(provider = AiProvider.valueOf(value), llmModel = ""))
+            onUpdate(config.copy(provider = AiProvider.valueOf(value), llmModel = "",
+                asrModel = if (config.asrProvider == AsrProvider.AUTO) "" else config.asrModel))
         }
         SettingsTextFieldRow(
             title = config.provider.llmKeyLabel +
@@ -247,6 +246,27 @@ private fun withApiKey(config: AiConfig, provider: AiProvider, key: String): AiC
 @Composable
 private fun TtsSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
     CollapsibleSection(title = "语音合成(TTS · 聊天朗读和语音通话)") {
+        SettingsDropdownRow(
+            title = "TTS 服务商",
+            options = listOf(AiProvider.VOLCANO, AiProvider.SILICONFLOW)
+                .map { DropdownOption(it.name, it.label) },
+            selectedValue = config.ttsProvider.name,
+        ) { onUpdate(config.copy(ttsProvider = AiProvider.valueOf(it))) }
+        if (config.ttsProvider == AiProvider.SILICONFLOW) {
+            SettingsGroupLabel("硅基流动使用独立的全局音色；人物音色仅适用于火山。")
+            SettingsTextFieldRow(
+                title = AiProvider.SILICONFLOW.ttsKeyLabel +
+                    if (config.apiKeySiliconflow.isBlank()) "(未填写,用内置默认)" else "",
+                value = config.apiKeySiliconflow,
+                placeholder = AiProvider.SILICONFLOW.ttsKeyHint,
+                password = true,
+            ) { onUpdate(config.copy(apiKeySiliconflow = it)) }
+            SettingsDropdownRow(
+                title = "全局音色(硅基流动)",
+                options = AiProvider.SILICONFLOW.voices.map { DropdownOption(it, it) },
+                selectedValue = config.siliconflowTtsVoice,
+            ) { onUpdate(config.copy(siliconflowTtsVoice = it)) }
+        } else {
         SettingsGroupLabel(
             "聊天朗读和通话优先使用角色音色；角色音色未知时使用下方全局音色，" +
                 "未选择则不播放。火山的大模型与语音是两把互不通用的 Key,各填各的。"
@@ -279,41 +299,65 @@ private fun TtsSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
             Switch(checked = config.ttsQuoteContext, onCheckedChange = { onUpdate(config.copy(ttsQuoteContext = it)) })
         }
         SettingsGroupLabel("开启后，聊天和通话会将本轮用户发言发给火山作为语境，不会朗读。存在上文时优先引用上文；没有上文时使用语音指令。仅标有「支持指令」的音色生效。")
+        }
     }
 }
 
-// ── 语音识别(语音通话 F6:云端识别跟随大模型服务商)───────────────────
+// ── 语音识别（聊天语音输入及语音通话）─────────────────────────────
 
 @Composable
 private fun AsrSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
-    CollapsibleSection(title = "语音识别(ASR · 语音通话)") {
-        val asrProvider = asrProviderFor(config.provider)
-        SettingsGroupLabel(
-            "语音通话的云端识别走${asrProvider.label}" +
-                (if (asrProvider != config.provider) "(${config.provider.label} 回落)" else "") +
-                ",Key 与大模型共用一份。"
-        )
-        if (asrProvider == AiProvider.SILICONFLOW && config.provider != AiProvider.SILICONFLOW) {
-            // 火山/DeepSeek 无云端 ASR 端点回落硅基流动:硅基 Key 在 LLM 区没露过
-            // 面时在这里单独填一份(与 TTS 兜底共用)
-            SettingsTextFieldRow(
-                title = "硅基流动 API Key(语音识别用)" +
-                    if (config.apiKeySiliconflow.isBlank()) "(未填写,用内置默认)" else "",
-                value = config.apiKeySiliconflow,
-                placeholder = "sk-...",
-                password = true,
-            ) { onUpdate(withApiKey(config, AiProvider.SILICONFLOW, it)) }
-        }
+    CollapsibleSection(title = "语音识别(ASR · 聊天和通话)") {
+        val cloudProvider = config.resolvedAsrCloudProvider()
         SettingsDropdownRow(
-            title = "ASR 模型",
-            options = listOf(DropdownOption("", "自动(推荐)")) +
-                asrExplicitAsrModels(asrProvider).map { DropdownOption(it, it) },
-            selectedValue = config.asrModel,
-        ) { value -> onUpdate(config.copy(asrModel = value)) }
-        SettingsGroupLabel(
-            "当前生效:" + resolveAsrModel(asrProvider.baseUrl, config.asrModel) +
-                "(引擎 ${AsrEngine.CLOUD.name})"
-        )
+            title = "ASR 服务商",
+            options = AsrProvider.entries.map { DropdownOption(it.name, it.label) },
+            selectedValue = config.asrProvider.name,
+        ) { value -> onUpdate(config.copy(asrProvider = AsrProvider.valueOf(value), asrModel = "")) }
+        if (config.asrProvider == AsrProvider.AUTO || config.asrProvider == AsrProvider.LOCAL) {
+            SettingsGroupLabel("支持运行在本机的 OpenAI 兼容 ASR 服务（无需密钥），请求 /audio/transcriptions。" +
+                if (config.asrProvider == AsrProvider.AUTO) "优先使用本地服务；未填写或连接失败时使用${cloudProvider.label}。"
+                else "本地服务不可用时识别失败。")
+            SettingsTextFieldRow(
+                title = "本地 ASR Base URL",
+                value = config.asrLocalBaseUrl,
+                placeholder = "http://127.0.0.1:端口/v1",
+            ) { onUpdate(config.copy(asrLocalBaseUrl = it)) }
+            SettingsTextFieldRow(
+                title = "本地 ASR 模型名（留空使用 whisper-1）",
+                value = config.asrLocalModel,
+                placeholder = "whisper-1",
+            ) { onUpdate(config.copy(asrLocalModel = it)) }
+        }
+        if (config.asrProvider != AsrProvider.LOCAL) {
+            SettingsGroupLabel("云端识别：${cloudProvider.label}。支持的同厂商优先；不支持时回退硅基流动。")
+            SettingsTextFieldRow(
+                title = cloudProvider.llmKeyLabel + if (config.apiKeyFor(cloudProvider).isBlank()) "(未填写,用内置默认)" else "",
+                value = config.apiKeyFor(cloudProvider),
+                placeholder = cloudProvider.llmKeyHint,
+                password = true,
+            ) { onUpdate(withApiKey(config, cloudProvider, it)) }
+            if (cloudProvider == AiProvider.CUSTOM) {
+                SettingsTextFieldRow(
+                    title = "自定义端点 Base URL（与大模型共用）",
+                    value = config.customBaseUrl,
+                    placeholder = "https://your-server.example.com/v1",
+                ) { onUpdate(config.copy(customBaseUrl = it)) }
+                SettingsTextFieldRow(
+                    title = "ASR 模型名（留空使用 whisper-1）",
+                    value = config.asrModel,
+                    placeholder = "whisper-1",
+                ) { onUpdate(config.copy(asrModel = it)) }
+            } else {
+                SettingsDropdownRow(
+                    title = "ASR 模型",
+                    options = listOf(DropdownOption("", "自动(推荐)")) +
+                        asrExplicitAsrModels(cloudProvider).map { DropdownOption(it, it) },
+                    selectedValue = config.asrModel,
+                ) { onUpdate(config.copy(asrModel = it)) }
+                SettingsGroupLabel("当前云端模型：" + resolveAsrModel(config.asrBaseUrl(cloudProvider), config.asrModel))
+            }
+        }
     }
 }
 

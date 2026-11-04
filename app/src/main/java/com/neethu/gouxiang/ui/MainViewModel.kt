@@ -1393,15 +1393,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun transcribeVoiceInput(wav: ByteArray): String =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val cfg = com.neethu.gouxiang.ai.config.AiConfigStore.load(getApplication())
-                val key = cfg.effectiveAsrKey()
-                val model = com.neethu.gouxiang.ai.config.resolveAsrModel(
-                    com.neethu.gouxiang.BuildConfig.SILICONFLOW_BASE_URL, cfg.asrModel,
+                com.neethu.gouxiang.ai.speech.ConfiguredAsr.transcribe(
+                    wav, com.neethu.gouxiang.ai.config.AiConfigStore.load(getApplication()),
                 )
-                com.neethu.gouxiang.ai.speech.OpenAiCompatibleAsrAdapter(
-                    com.neethu.gouxiang.BuildConfig.SILICONFLOW_BASE_URL,
-                    key,
-                ).transcribe(wav, "audio/wav", com.neethu.gouxiang.ai.speech.AsrConfig(model = model, language = "zh"))
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {

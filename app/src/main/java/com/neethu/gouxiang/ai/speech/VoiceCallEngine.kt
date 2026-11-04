@@ -374,14 +374,9 @@ class VoiceCallEngine(
     /** 识别:WAV → 文本;失败返回空串(上层走「没听清」),页面永不崩。 */
     private suspend fun transcribe(wav: ByteArray): String = withContext(Dispatchers.IO) {
         try {
-            // 模型留空按端点推断(硅基 → Qwen3-ASR-1.7B,与历史行为一致);
-            // Key = 配置页硅基流动生效值(留空回落 BuildConfig)
-            val cfg = aiConfigSource()
-            val key = cfg.effectiveAsrKey()
-            val model = com.neethu.gouxiang.ai.config.resolveAsrModel(
-                BuildConfig.SILICONFLOW_BASE_URL, cfg.asrModel,
-            )
-            asr(key, model).transcribe(wav, "audio/wav", AsrConfig(model = model, language = "zh"))
+            ConfiguredAsr.transcribe(wav, aiConfigSource())
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "ASR failed", e)
             ""
@@ -398,19 +393,8 @@ class VoiceCallEngine(
 
     // 适配器按 (Key[, 模型]) 缓存:配置页改 Key 后下次回合用新适配器,
     // 不用杀通话页(旧适配器随重建被替换)
-    private var asrAdapter: AsrAdapter? = null
-    private var asrCacheKey: Pair<String, String>? = null
     private var volcanoAdapter: TtsAdapter? = null
     private var volcanoCacheKey: String? = null
-
-    private fun asr(key: String, model: String): AsrAdapter {
-        val cached = asrCacheKey
-        if (asrAdapter != null && cached == key to model) return asrAdapter!!
-        return OpenAiCompatibleAsrAdapter(
-            BuildConfig.SILICONFLOW_BASE_URL,
-            key,
-        ).also { asrAdapter = it; asrCacheKey = key to model }
-    }
 
     private fun volcanoTts(key: String): TtsAdapter {
         if (volcanoAdapter != null && volcanoCacheKey == key) return volcanoAdapter!!

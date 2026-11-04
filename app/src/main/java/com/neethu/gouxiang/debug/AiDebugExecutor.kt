@@ -252,8 +252,9 @@ private suspend fun cmdAiConfig(context: Context): String {
         "provider=${provider.name.lowercase()}",
         "llmModel=${cfg.resolvedLlmModel()}",
         "baseUrl=${cfg.effectiveBaseUrl()}",
-        "ttsModel=${cfg.ttsModel.ifBlank { "(默认)" }} voice=${cfg.ttsVoice.ifBlank { "(默认)" }}",
-        "asrModel=${cfg.asrModel.ifBlank { "(自动)" }}",
+        "ttsProvider=${cfg.ttsProvider.name.lowercase()} ttsModel=${cfg.ttsProvider.defaultTtsModel} " +
+            "voice=${(if (cfg.ttsProvider == com.neethu.gouxiang.ai.config.AiProvider.SILICONFLOW) cfg.siliconflowTtsVoice else cfg.ttsVoice).ifBlank { "(默认)" }}",
+        "asrProvider=${cfg.asrProvider.name.lowercase()} asrModel=${cfg.asrModel.ifBlank { "(自动)" }}",
         "siliconflow=${keyMask(cfg.apiKeySiliconflow)}",
         "volcano=${keyMask(cfg.apiKeyVolcano)}",
         "volcanoTts=${keyMask(cfg.apiKeyVolcanoTts)}",

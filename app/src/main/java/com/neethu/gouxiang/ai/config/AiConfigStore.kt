@@ -23,12 +23,10 @@ data class LlmEndpoint(
  *
  * - **大模型**:服务商/Key/模型/自定义端点全量跟随(聊天/记忆/心声/朋友圈生文
  *   同路,见 [llmEndpoint]);
- * - **语音合成(TTS)**:存聊天朗读与语音通话使用的火山豆包语音 Key 与硅基流动 Key
- *   (引擎内置「火山 seed-tts-2.0 优先、硅基 CosyVoice 兜底」双链,不做
- *   AIAvatar 的多引擎矩阵——Edge-TTS/百炼原生协议适配器未移植);
- * - **语音识别(ASR)**:云端识别的模型名跟随大模型服务商(回落规则见
- *   [asrProviderFor]),Key 共用对应服务商那份;AIAvatar 的系统识别引擎与
- *   「语音直接发送」在 GouXiang 无消费面(通话是按住说话、松手即发),不移植。
+ * - **语音合成(TTS)**:聊天朗读和语音通话可独立选择火山豆包语音或硅基流动；
+ *   两家分别使用各自的密钥和音色。
+ * - **语音识别(ASR)**:自动模式优先使用已配置的本地兼容服务，失败时
+ *   使用支持的同厂商云端或硅基流动；也可独立选择服务商。
  *
  * **Key 兜底语义(与现状兼容的关键)**:每把 key 的生效值 = 用户在本页填写的值,
  * 留空回落仓库 secrets.properties 经 BuildConfig 注入的同名默认(见
@@ -55,13 +53,21 @@ data class AiConfig(
     val customBaseUrl: String = "",
     /** 自定义端点的 API Key(中转站需要;本地模型随意占位)。 */
     val apiKeyCustom: String = "",
+    /** 语音合成独立选择服务商；沿用原有火山默认。 */
+    val ttsProvider: AiProvider = AiProvider.VOLCANO,
     val ttsModel: String = "",
     /** 未匹配人物的全局火山音色；留空表示不指定回退音色。 */
     val ttsVoice: String = "",
+    /** 硅基流动使用自己的全局音色，不能传入火山人物音色。 */
+    val siliconflowTtsVoice: String = "anna",
     /** 火山语音合成 2.0 的自然语言表达指令，留空不附加指令。 */
     val ttsInstruction: String = "",
     /** 使用本轮用户消息作为语音合成的上文。 */
     val ttsQuoteContext: Boolean = false,
+    /** ASR 独立选择；AUTO 先尝试已配置的本地服务，再使用同厂商或兼容回退。 */
+    val asrProvider: AsrProvider = AsrProvider.AUTO,
+    val asrLocalBaseUrl: String = "",
+    val asrLocalModel: String = "",
     /** 云端识别模型名;留空 = 按端点自动推断(见 [resolveAsrModel])。 */
     val asrModel: String = "",
     /** 语音通话·断句停顿(秒):说完话安静多久送识别,0=说完立刻(内置 400ms 滞回)。 */
@@ -88,12 +94,19 @@ data class AiConfig(
     fun effectiveApiKey(p: AiProvider): String =
         apiKeyFor(p).ifBlank { defaultKeyFor(p) }
 
-    /** 语音合成的生效 key:豆包语音那把优先,留空回落 BuildConfig 默认。 */
-    fun effectiveTtsKey(): String =
-        apiKeyVolcanoTts.ifBlank { BuildConfig.VOLCANO_TTS_API_KEY }
+    /** 语音合成的生效 key；火山语音使用独立的豆包语音密钥。 */
+    fun effectiveTtsKey(): String = when (ttsProvider) {
+        AiProvider.SILICONFLOW -> effectiveApiKey(AiProvider.SILICONFLOW)
+        else -> apiKeyVolcanoTts.ifBlank { BuildConfig.VOLCANO_TTS_API_KEY }
+    }
 
     /** 语音通话识别的生效 key:跟随 ASR 服务商(回落规则同 AIAvatar)。 */
-    fun effectiveAsrKey(): String = effectiveApiKey(asrProviderFor(provider))
+    fun effectiveAsrKey(): String = effectiveApiKey(resolvedAsrCloudProvider())
+
+    fun resolvedAsrCloudProvider(): AiProvider = asrProvider.cloudProvider ?: asrProviderFor(provider)
+
+    fun asrBaseUrl(p: AiProvider = resolvedAsrCloudProvider()): String =
+        if (p == AiProvider.CUSTOM) customBaseUrl.trim() else p.baseUrl
 
     /** 大模型解析后的模型名(自定义端点透传;其余经目录校验落默认)。 */
     fun resolvedLlmModel(catalogExtra: Set<String> = emptySet()): String =
@@ -154,9 +167,14 @@ private const val KEY_API_KEY_GROK = "ai_api_key_grok"
 private const val KEY_CUSTOM_BASE_URL = "ai_custom_base_url"
 private const val KEY_API_KEY_CUSTOM = "ai_api_key_custom"
 private const val KEY_TTS_MODEL = "ai_tts_model"
+private const val KEY_TTS_PROVIDER = "ai_tts_provider"
 private const val KEY_TTS_VOICE = "ai_tts_voice"
+private const val KEY_SILICONFLOW_TTS_VOICE = "ai_siliconflow_tts_voice"
 private const val KEY_TTS_INSTRUCTION = "ai_tts_instruction"
 private const val KEY_TTS_QUOTE_CONTEXT = "ai_tts_quote_context"
+private const val KEY_ASR_PROVIDER = "ai_asr_provider"
+private const val KEY_ASR_LOCAL_BASE_URL = "ai_asr_local_base_url"
+private const val KEY_ASR_LOCAL_MODEL = "ai_asr_local_model"
 private const val KEY_ASR_MODEL = "ai_asr_model"
 private const val KEY_CALL_END_SILENCE_S = "ai_call_end_silence_s"
 private const val KEY_CALL_IDLE_SPEAK_S = "ai_call_idle_speak_s"
@@ -194,10 +212,16 @@ object AiConfigStore {
             apiKeyGrok = sp.getString(KEY_API_KEY_GROK, "").orEmpty(),
             customBaseUrl = sp.getString(KEY_CUSTOM_BASE_URL, "").orEmpty(),
             apiKeyCustom = sp.getString(KEY_API_KEY_CUSTOM, "").orEmpty(),
+            ttsProvider = prefsEnum<AiProvider>(sp, KEY_TTS_PROVIDER)
+                ?.takeIf { it == AiProvider.VOLCANO || it == AiProvider.SILICONFLOW } ?: AiProvider.VOLCANO,
             ttsModel = sp.getString(KEY_TTS_MODEL, "").orEmpty(),
             ttsVoice = sp.getString(KEY_TTS_VOICE, "").orEmpty(),
+            siliconflowTtsVoice = sp.getString(KEY_SILICONFLOW_TTS_VOICE, "anna").orEmpty(),
             ttsInstruction = sp.getString(KEY_TTS_INSTRUCTION, "").orEmpty(),
             ttsQuoteContext = sp.getBoolean(KEY_TTS_QUOTE_CONTEXT, false),
+            asrProvider = prefsEnum<AsrProvider>(sp, KEY_ASR_PROVIDER) ?: AsrProvider.AUTO,
+            asrLocalBaseUrl = sp.getString(KEY_ASR_LOCAL_BASE_URL, "").orEmpty(),
+            asrLocalModel = sp.getString(KEY_ASR_LOCAL_MODEL, "").orEmpty(),
             asrModel = sp.getString(KEY_ASR_MODEL, "").orEmpty(),
             callEndSilenceS = prefsClampedInt(sp, KEY_CALL_END_SILENCE_S, 2),
             callIdleSpeakS = prefsClampedInt(sp, KEY_CALL_IDLE_SPEAK_S, 5),
@@ -217,10 +241,15 @@ object AiConfigStore {
             .putString(KEY_API_KEY_GROK, c.apiKeyGrok.trim())
             .putString(KEY_CUSTOM_BASE_URL, c.customBaseUrl.trim())
             .putString(KEY_API_KEY_CUSTOM, c.apiKeyCustom.trim())
+            .putString(KEY_TTS_PROVIDER, c.ttsProvider.name)
             .putString(KEY_TTS_MODEL, c.ttsModel.trim())
             .putString(KEY_TTS_VOICE, c.ttsVoice.trim())
+            .putString(KEY_SILICONFLOW_TTS_VOICE, c.siliconflowTtsVoice.trim())
             .putString(KEY_TTS_INSTRUCTION, c.ttsInstruction.trim())
             .putBoolean(KEY_TTS_QUOTE_CONTEXT, c.ttsQuoteContext)
+            .putString(KEY_ASR_PROVIDER, c.asrProvider.name)
+            .putString(KEY_ASR_LOCAL_BASE_URL, c.asrLocalBaseUrl.trim())
+            .putString(KEY_ASR_LOCAL_MODEL, c.asrLocalModel.trim())
             .putString(KEY_ASR_MODEL, c.asrModel.trim())
             .putInt(KEY_CALL_END_SILENCE_S, c.callEndSilenceS.coerceIn(0, 10))
             .putInt(KEY_CALL_IDLE_SPEAK_S, c.callIdleSpeakS.coerceIn(0, 10))

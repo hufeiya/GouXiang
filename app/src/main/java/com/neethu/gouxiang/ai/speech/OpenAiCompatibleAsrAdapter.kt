@@ -45,7 +45,7 @@ class OpenAiCompatibleAsrAdapter(
 
             val request = Request.Builder()
                 .url(endpoint)
-                .header("Authorization", "Bearer $apiKey")
+                .apply { if (apiKey.isNotBlank()) header("Authorization", "Bearer $apiKey") }
                 .post(body)
                 .build()
 
