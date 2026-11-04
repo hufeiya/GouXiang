@@ -8,22 +8,14 @@
 
 ## 界面预览
 
-<!-- 上传截图后，可将下方占位文字替换为 <img src="图片地址" width="240" alt="界面名称" />。 -->
-
 | 人物大厅 | 陪伴聊天 | 语音通话 |
 | :---: | :---: | :---: |
-| <img width="898" height="1986" alt="image" src="https://github.com/user-attachments/assets/66626c1a-de39-4f74-8f84-a08c139607a3" />
- | <img width="898" height="1986" alt="image" src="https://github.com/user-attachments/assets/0fa868fc-c99c-4044-b6e1-e6740c061e31" />
- | <img width="898" height="1986" alt="image" src="https://github.com/user-attachments/assets/bacbc9af-e512-425b-bd5a-61a56be14b07" />
- |
+| <img src="https://github.com/user-attachments/assets/66626c1a-de39-4f74-8f84-a08c139607a3" width="240" alt="人物大厅" /> | <img src="https://github.com/user-attachments/assets/0fa868fc-c99c-4044-b6e1-e6740c061e31" width="240" alt="陪伴聊天" /> | <img src="https://github.com/user-attachments/assets/bacbc9af-e512-425b-bd5a-61a56be14b07" width="240" alt="语音通话" /> |
 | 发现角色，查看介绍与开场白 | 用文字或语音开启一段对话 | 听见角色的声音 |
 
 | 朋友圈 | 角色记忆 | 对话故事 |
 | :---: | :---: | :---: |
-| <img width="898" height="1986" alt="image" src="https://github.com/user-attachments/assets/e8d2f3c1-4615-4280-a385-e75afb61397d" />
- | <img width="898" height="1986" alt="image" src="https://github.com/user-attachments/assets/1ef9472c-dcfc-4cae-b188-3495f1b520fa" />
- | <img width="898" height="1986" alt="image" src="https://github.com/user-attachments/assets/bb813e8f-18b6-4202-be7c-f301e9cff5f7" />
- |
+| <img src="https://github.com/user-attachments/assets/e8d2f3c1-4615-4280-a385-e75afb61397d" width="240" alt="朋友圈" /> | <img src="https://github.com/user-attachments/assets/1ef9472c-dcfc-4cae-b188-3495f1b520fa" width="240" alt="角色记忆" /> | <img src="https://github.com/user-attachments/assets/bb813e8f-18b6-4202-be7c-f301e9cff5f7" width="240" alt="对话故事" /> |
 | 分享动态，发现角色的日常 | 留下对话中的重要片段 | 将聊天延伸成手账、小说等内容 |
 
 ## 功能一览
