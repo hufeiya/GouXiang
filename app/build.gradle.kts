@@ -31,8 +31,8 @@ android {
         applicationId = "com.neethu.gouxiang"
         minSdk = 29
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // 公开发行包不能包含本地服务密钥；用户可在应用内配置。
