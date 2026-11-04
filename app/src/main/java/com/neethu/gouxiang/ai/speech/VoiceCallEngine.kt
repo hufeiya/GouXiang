@@ -103,9 +103,13 @@ class VoiceCallEngine(
         _state.value = UiState()
     }
 
-    /** 按住说话:按下开录(麦克风被占用时给提示,不崩)。 */
+    /** 按住说话:按下开录(麦克风被占用时给提示,不崩);朗读中按下先打断再开录。 */
     fun holdStart() {
-        if (turnJob?.isActive == true) return
+        // 按键按下即打断朗读(2026-11-04 口径):停播回聆听,别让 TTS 盖住说话;
+        // 刚打断的回合在收尾,麦克风此刻空闲照常开录;识别/思考中的回合不抢录
+        val wasSpeaking = _state.value.phase == Phase.SPEAKING
+        if (wasSpeaking) interrupt()
+        if (turnJob?.isActive == true && !wasSpeaking) return
         try {
             recorder.start()
             _state.update { it.copy(holdActive = true, notice = "") }
@@ -160,7 +164,14 @@ class VoiceCallEngine(
 
     /** 回合公共体:[audioSource] 产出用户口语文本(ASR 或调试直填)。 */
     private fun runTurn(userTextSource: suspend () -> String) {
-        if (turnJob?.isActive == true) return
+        val ongoing = turnJob
+        if (ongoing?.isActive == true) {
+            // 朗读被打断后的收尾窗口(超快点按才撞上):接力跑,松手录的音不丢;
+            // 识别/思考中的回合照旧不接受新回合
+            if (_state.value.phase != Phase.LISTENING) return
+            scope.launch { ongoing.join(); runTurn(userTextSource) }
+            return
+        }
         interruptRequested = false
         turnJob = scope.launch {
             try {

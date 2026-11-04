@@ -1248,8 +1248,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var voiceInputRecognitionJob: Job? = null
     private var voiceRecorderStopping = false
 
-    /** 按住说话·按下开录(麦克风被占用/无权限给 notice,不崩)。 */
+    /**
+     * 按住说话·按下开录(麦克风被占用/无权限给 notice,不崩)。
+     * 按下即中断正在朗读的 TTS(2026-11-04 口径:回复自动朗读/语音条共路,
+     * 说话前先停,别让播音盖住录音)。
+     */
     fun voiceInputStart() {
+        chatSpeechPlayer.stop()
+        voicePlayer.stop()
         if (_voiceInputActive.value || _voiceInputRecognizing.value) return
         val conversationId = _chatConversationId.value ?: return
         _voiceInputNotice.value = ""
