@@ -9,15 +9,17 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
-// ── 密钥注入(惯例同 AIAvatar-SDK:仓库根 secrets.properties,已 gitignore)──
-// BuildConfig.VOLCANO_ARK_API_KEY / BuildConfig.SILICONFLOW_API_KEY 供
-// com.neethu.gouxiang.smoke.ArkSmokeTest 与运行时 AI 底座读取。
-// 文件缺失时回落空串:代码侧把空 Key 视为"未配置",冒烟测试显式 AssumptionFail。
+// 仅调试构建从本地 secrets.properties 注入服务密钥；发布包始终使用空值。
 val secretsPropsFile = rootProject.file("secrets.properties")
 val secretsProps = Properties().apply {
     if (secretsPropsFile.exists()) secretsPropsFile.inputStream().use { load(it) }
 }
 fun secret(key: String): String = secretsProps.getProperty(key)?.trim().orEmpty()
+val serviceApiKeys = listOf(
+    "VOLCANO_ARK_API_KEY", "SILICONFLOW_API_KEY", "VOLCANO_TTS_API_KEY",
+    "OPENROUTER_API_KEY", "DEEPSEEK_OFFICIAL_API_KEY", "ALIYUNBAILIAN_API_KEY",
+    "GROK_API_KEY",
+)
 
 android {
     namespace = "com.neethu.gouxiang"
@@ -33,23 +35,17 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        buildConfigField("String", "VOLCANO_ARK_API_KEY", "\"${secret("VOLCANO_ARK_API_KEY")}\"")
-        buildConfigField("String", "SILICONFLOW_API_KEY", "\"${secret("SILICONFLOW_API_KEY")}\"")
-        // 语音通话 F6:豆包语音合成大模型(seed-tts-2.0)的 API Key,鉴权域独立于
-        // Ark(两个控制台各发各的);缺省空串 = 硅基 TTS 兜底(与既有"空 Key 视为
-        // 未配置"约定一致)
-        buildConfigField("String", "VOLCANO_TTS_API_KEY", "\"${secret("VOLCANO_TTS_API_KEY")}\"")
-        // 多厂商目录(我的→AI 服务配置,AiConfigStore.defaultKeyFor 的留空回落值):
-        // 全量密钥见仓库根 secrets.properties;GitHub Token 仅存文件不进 APK
-        buildConfigField("String", "OPENROUTER_API_KEY", "\"${secret("OPENROUTER_API_KEY")}\"")
-        buildConfigField("String", "DEEPSEEK_OFFICIAL_API_KEY", "\"${secret("DEEPSEEK_OFFICIAL_API_KEY")}\"")
-        buildConfigField("String", "ALIYUNBAILIAN_API_KEY", "\"${secret("ALIYUNBAILIAN_API_KEY")}\"")
-        buildConfigField("String", "GROK_API_KEY", "\"${secret("GROK_API_KEY")}\"")
+        // 公开发行包不能包含本地服务密钥；用户可在应用内配置。
+        serviceApiKeys.forEach { buildConfigField("String", it, "\"\"") }
         buildConfigField("String", "VOLCANO_ARK_BASE_URL", "\"https://ark.cn-beijing.volces.com/api/v3\"")
         buildConfigField("String", "SILICONFLOW_BASE_URL", "\"https://api.siliconflow.cn/v1\"")
     }
 
     buildTypes {
+        debug {
+            // 本地调试仍可从 secrets.properties 使用服务密钥。
+            serviceApiKeys.forEach { buildConfigField("String", it, "\"${secret(it)}\"") }
+        }
         release {
             optimization {
                 enable = false

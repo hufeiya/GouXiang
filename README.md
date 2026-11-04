@@ -62,7 +62,7 @@ VOLCANO_TTS_API_KEY=你的豆包语音Key
 SILICONFLOW_API_KEY=你的硅基流动Key
 ```
 
-该文件已被 Git 忽略，但构建时填写的 Key 会写入 APK，仅适合本地调试，请勿公开分发含有密钥的 APK。
+该文件已被 Git 忽略。调试构建会将其中的服务 Key 写入 APK，仅适合本地调试，请勿公开分发；发布构建不会注入这些 Key，需要在应用内配置服务。
 
 ## 技术栈
 
