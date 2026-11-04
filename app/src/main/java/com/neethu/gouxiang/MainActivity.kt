@@ -59,6 +59,8 @@ import com.neethu.gouxiang.ui.phone.PhoneChatGuideScreen
 import com.neethu.gouxiang.ui.phone.PhoneChatScreen
 import com.neethu.gouxiang.ui.profile.ProfileScreen
 import com.neethu.gouxiang.ui.aiconfig.AiConfigActivity
+import com.neethu.gouxiang.ui.onboarding.OnboardingActivity
+import com.neethu.gouxiang.ui.onboarding.OnboardingStore
 import com.neethu.gouxiang.ui.theme.GouXiangTheme
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.Dispatchers
@@ -88,6 +90,9 @@ class MainActivity : ComponentActivity() {
         }
         enqueueAiCommands(intent, via = "onCreate")
         handleNavigationExtras(intent)
+        if (savedInstanceState == null && !OnboardingStore.isCompleted(this)) {
+            startActivity(OnboardingActivity.intent(this))
+        }
     }
 
     override fun onStart() {
@@ -275,8 +280,15 @@ class MainActivity : ComponentActivity() {
         // 首次授权后重新按住开始录音；被系统永久拒绝时引导用户去设置。
         val requestMicrophonePermission =
             com.neethu.gouxiang.ui.permission.rememberMicrophonePermissionRequest()
+        var llmSetupPromptOpen by remember { mutableStateOf(false) }
+        val canChat: () -> Boolean = {
+            if (AiConfigStore.load(toastContext).isConfigured) true else {
+                llmSetupPromptOpen = true
+                false
+            }
+        }
         val holdStartWithPermission: () -> Unit = {
-            if (requestMicrophonePermission()) vm.voiceInputStart()
+            if (canChat() && requestMicrophonePermission()) vm.voiceInputStart()
         }
 
         // 角色头像:一次生成缓存本地(火山→硅基→占位兜底在 provider 内)
@@ -524,19 +536,21 @@ class MainActivity : ComponentActivity() {
                     }
                     vm.closeChat()
                 },
-                onSend = { vm.sendChatMessage(it) },
+                onSend = { text ->
+                    if (canChat()) { vm.sendChatMessage(text); true } else false
+                },
                 streamDraft = streamDraft,
                 onOpenMemory = { chatId?.let { vm.openMemory(it) } },
                 onOpenCharacterHome = { chatId?.let { vm.openCharacterHome(it) } },
-                onOpenVoiceCall = { chatId?.let { vm.openVoiceCall(it) } },
+                onOpenVoiceCall = { if (canChat()) chatId?.let { vm.openVoiceCall(it) } },
                 onOpenHistory = { chatId?.let { vm.openHistory(it) } },
                 onOpenStatusPanel = { chatId?.let { vm.openStatusPanel(it) } },
-                onRetryFailedTurn = { vm.retryFailedTurn() },
+                onRetryFailedTurn = { if (canChat()) vm.retryFailedTurn() },
                 onRewind = { vm.rewindToMessage(it) },
-                onRegenerate = { vm.regenerateTurn(it) },
+                onRegenerate = { if (canChat()) vm.regenerateTurn(it) },
                 // 「+」扩展面板(对照猫箱):复用既有页面/VM 出口
                 onRewindLastTurn = { vm.rewindLastTurn() },
-                onSendImage = { uri -> vm.sendImageMessage(uri) },
+                onSendImage = { uri -> if (canChat()) vm.sendImageMessage(uri) },
                 onOpenHeartCommands = { chatId?.let { vm.openSidestory(it) } },
                 onOpenNovel = { chatId?.let { vm.openNovel(it) } },
                 onOpenPhoneChat = { vm.switchChatSkin(phoneMode = true) },
@@ -711,19 +725,21 @@ class MainActivity : ComponentActivity() {
                         }
                         vm.closeChat()
                     },
-                    onSend = { vm.sendChatMessage(it, phoneMode = true) },
-                    onSendCard = { vm.sendCard(it) },
+                    onSend = { text ->
+                        if (canChat()) { vm.sendChatMessage(text, phoneMode = true); true } else false
+                    },
+                    onSendCard = { if (canChat()) vm.sendCard(it) },
                     onOpenGuide = { vm.openPhoneGuide() },
                     onSimulateOfflineReturn = { vm.simulateOfflineReturn() },
                     onOpenMemory = {
                         chatId?.let { vm.openMemory(it) }
                     },
                     onRewind = { vm.rewindToMessage(it) },
-                    onRegenerate = { vm.regenerateTurn(it) },
+                    onRegenerate = { if (canChat()) vm.regenerateTurn(it) },
                     onPlayVoice = { id, text -> vm.playVoice(id, text) },
                     playingVoiceId = playingVoiceId,
                     streamDraft = streamDraft,
-                    onRetryFailedTurn = { vm.retryFailedTurn() },
+                    onRetryFailedTurn = { if (canChat()) vm.retryFailedTurn() },
                     onHoldStart = holdStartWithPermission,
                     onHoldRelease = { vm.voiceInputRelease(it) },
                     voiceLevel = voiceInputLevel,
@@ -1089,6 +1105,25 @@ class MainActivity : ComponentActivity() {
                     onRefreshGallery = { vm.refreshEditorGallery(it) },
                 )
             }
+        }
+
+        if (llmSetupPromptOpen) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { llmSetupPromptOpen = false },
+                title = { androidx.compose.material3.Text("先配置大模型") },
+                text = { androidx.compose.material3.Text("配置大模型后，人物才能回复你。跟着引导复制密钥即可开始聊天。") },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        llmSetupPromptOpen = false
+                        startActivity(OnboardingActivity.intent(this@MainActivity))
+                    }) { androidx.compose.material3.Text("前往配置") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { llmSetupPromptOpen = false }) {
+                        androidx.compose.material3.Text("稍后再说")
+                    }
+                },
+            )
         }
 
         // 用户标签弹层(2026-10-31):渲染序置底最末(最后声明者在上),首启

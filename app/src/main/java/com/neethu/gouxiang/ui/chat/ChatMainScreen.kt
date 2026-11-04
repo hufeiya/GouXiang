@@ -115,7 +115,7 @@ fun ChatMainScreen(
     /** 合照设为聊天背景(G3/G4):非空时优先于角色立绘展示。 */
     backgroundFile: String? = null,
     onBack: () -> Unit,
-    onSend: (String) -> Unit,
+    onSend: (String) -> Boolean,
     /** 回合进行中的流式草稿(逐字累积;空串=无草稿)。 */
     streamDraft: String = "",
     /** 顶栏「记忆」入口(F3,临时入口;角色主页宫格后续功能再接)。 */
@@ -863,7 +863,7 @@ private fun VoiceContent(text: String, fromUser: Boolean) {
 @Composable
 internal fun InputBar(
     sending: Boolean,
-    onSend: (String) -> Unit,
+    onSend: (String) -> Boolean,
     onOpenVoiceCall: () -> Unit = {},
     /** 「+」扩展面板开关(猫箱加号面板:功能宫格悬于输入条上方)。 */
     onTogglePanel: () -> Unit = {},
@@ -998,8 +998,7 @@ internal fun InputBar(
                     )
                     .clickable(enabled = !sending) {
                         if (draft.isNotBlank()) {
-                            onSend(draft)
-                            draft = ""
+                            if (onSend(draft)) draft = ""
                         }
                     },
                 contentAlignment = Alignment.Center,

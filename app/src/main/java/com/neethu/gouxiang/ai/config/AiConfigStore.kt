@@ -36,6 +36,8 @@ data class LlmEndpoint(
 data class AiConfig(
     val provider: AiProvider = DEFAULT_PROVIDER,
     val llmModel: String = "",
+    /** 首次引导跳过时不使用构建时注入的密钥。 */
+    val disableBuiltInKeys: Boolean = false,
     val apiKeySiliconflow: String = "",
     /** 火山方舟(Ark)API Key——火山大模型链路。 */
     val apiKeyVolcano: String = "",
@@ -55,6 +57,8 @@ data class AiConfig(
     val apiKeyCustom: String = "",
     /** 语音合成独立选择服务商；沿用原有火山默认。 */
     val ttsProvider: AiProvider = AiProvider.VOLCANO,
+    /** 免 Key 的 Edge 与现有云端语音服务独立选择。 */
+    val ttsEngine: TtsEngine = TtsEngine.OPENAI_COMPATIBLE,
     val ttsModel: String = "",
     /** 未匹配人物的全局火山音色；留空表示不指定回退音色。 */
     val ttsVoice: String = "",
@@ -92,12 +96,12 @@ data class AiConfig(
      * 火山默认即方舟那把(豆包语音 key 是 TTS 专用,见 [effectiveTtsKey])。
      */
     fun effectiveApiKey(p: AiProvider): String =
-        apiKeyFor(p).ifBlank { defaultKeyFor(p) }
+        apiKeyFor(p).ifBlank { if (disableBuiltInKeys) "" else defaultKeyFor(p) }
 
     /** 语音合成的生效 key；火山语音使用独立的豆包语音密钥。 */
     fun effectiveTtsKey(): String = when (ttsProvider) {
         AiProvider.SILICONFLOW -> effectiveApiKey(AiProvider.SILICONFLOW)
-        else -> apiKeyVolcanoTts.ifBlank { BuildConfig.VOLCANO_TTS_API_KEY }
+        else -> apiKeyVolcanoTts.ifBlank { if (disableBuiltInKeys) "" else BuildConfig.VOLCANO_TTS_API_KEY }
     }
 
     /** 语音通话识别的生效 key:跟随 ASR 服务商(回落规则同 AIAvatar)。 */
@@ -157,6 +161,7 @@ data class AiConfig(
 //    排查与脚本对账;.agents/skills/push-api-keys 的 MAPPING 与这里一一对应)──
 private const val KEY_PROVIDER = "ai_provider"
 private const val KEY_LLM_MODEL = "ai_llm_model"
+private const val KEY_DISABLE_BUILT_IN_KEYS = "ai_disable_built_in_keys"
 private const val KEY_API_KEY_SILICONFLOW = "ai_api_key_siliconflow"
 private const val KEY_API_KEY_VOLCANO = "ai_api_key_volcano"
 private const val KEY_API_KEY_VOLCANO_TTS = "ai_api_key_volcano_tts"
@@ -168,6 +173,7 @@ private const val KEY_CUSTOM_BASE_URL = "ai_custom_base_url"
 private const val KEY_API_KEY_CUSTOM = "ai_api_key_custom"
 private const val KEY_TTS_MODEL = "ai_tts_model"
 private const val KEY_TTS_PROVIDER = "ai_tts_provider"
+private const val KEY_TTS_ENGINE = "ai_tts_engine"
 private const val KEY_TTS_VOICE = "ai_tts_voice"
 private const val KEY_SILICONFLOW_TTS_VOICE = "ai_siliconflow_tts_voice"
 private const val KEY_TTS_INSTRUCTION = "ai_tts_instruction"
@@ -203,6 +209,7 @@ object AiConfigStore {
         return AiConfig(
             provider = prefsEnum<AiProvider>(sp, KEY_PROVIDER) ?: AiConfig.DEFAULT_PROVIDER,
             llmModel = sp.getString(KEY_LLM_MODEL, "").orEmpty(),
+            disableBuiltInKeys = sp.getBoolean(KEY_DISABLE_BUILT_IN_KEYS, false),
             apiKeySiliconflow = sp.getString(KEY_API_KEY_SILICONFLOW, "").orEmpty(),
             apiKeyVolcano = sp.getString(KEY_API_KEY_VOLCANO, "").orEmpty(),
             apiKeyVolcanoTts = sp.getString(KEY_API_KEY_VOLCANO_TTS, "").orEmpty(),
@@ -214,6 +221,7 @@ object AiConfigStore {
             apiKeyCustom = sp.getString(KEY_API_KEY_CUSTOM, "").orEmpty(),
             ttsProvider = prefsEnum<AiProvider>(sp, KEY_TTS_PROVIDER)
                 ?.takeIf { it == AiProvider.VOLCANO || it == AiProvider.SILICONFLOW } ?: AiProvider.VOLCANO,
+            ttsEngine = prefsEnum<TtsEngine>(sp, KEY_TTS_ENGINE) ?: TtsEngine.OPENAI_COMPATIBLE,
             ttsModel = sp.getString(KEY_TTS_MODEL, "").orEmpty(),
             ttsVoice = sp.getString(KEY_TTS_VOICE, "").orEmpty(),
             siliconflowTtsVoice = sp.getString(KEY_SILICONFLOW_TTS_VOICE, "anna").orEmpty(),
@@ -232,6 +240,7 @@ object AiConfigStore {
         prefs(context).edit()
             .putString(KEY_PROVIDER, c.provider.name)
             .putString(KEY_LLM_MODEL, c.llmModel.trim())
+            .putBoolean(KEY_DISABLE_BUILT_IN_KEYS, c.disableBuiltInKeys)
             .putString(KEY_API_KEY_SILICONFLOW, c.apiKeySiliconflow.trim())
             .putString(KEY_API_KEY_VOLCANO, c.apiKeyVolcano.trim())
             .putString(KEY_API_KEY_VOLCANO_TTS, c.apiKeyVolcanoTts.trim())
@@ -242,6 +251,7 @@ object AiConfigStore {
             .putString(KEY_CUSTOM_BASE_URL, c.customBaseUrl.trim())
             .putString(KEY_API_KEY_CUSTOM, c.apiKeyCustom.trim())
             .putString(KEY_TTS_PROVIDER, c.ttsProvider.name)
+            .putString(KEY_TTS_ENGINE, c.ttsEngine.name)
             .putString(KEY_TTS_MODEL, c.ttsModel.trim())
             .putString(KEY_TTS_VOICE, c.ttsVoice.trim())
             .putString(KEY_SILICONFLOW_TTS_VOICE, c.siliconflowTtsVoice.trim())

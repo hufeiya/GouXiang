@@ -46,7 +46,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  *   (页面永不崩)。
  */
 class VoiceCallEngine(
-    @Suppress("unused") private val app: Application,
+    private val app: Application,
     private val scope: CoroutineScope,
     /** 聊天回合接线(MainViewModel 注入:用户消息落库 + 编排器整回合)。 */
     private val runChatRound: suspend (userText: String) -> List<Bubble>,
@@ -98,6 +98,9 @@ class VoiceCallEngine(
 
     private val speaker = TtsSpeaker()
     private val mic = CallMicStreamer()
+    private val deviceRecognizer by lazy { DeviceSpeechRecognizer(app) }
+    private var deviceRecognition = false
+    private var callActive = false
 
     /** 播放完成信号(正常播完 / 打断都会 complete,回合协程在此收口)。 */
     private var playDone = CompletableDeferred<Unit>()
@@ -132,6 +135,8 @@ class VoiceCallEngine(
 
     /** 进入通话页:重置状态、开麦(幂等)、武装主动接话计时。 */
     fun start() {
+        callActive = true
+        deviceRecognition = aiConfigSource().asrProvider == com.neethu.gouxiang.ai.config.AsrProvider.SYSTEM
         turnJob?.cancel()
         proactiveJob?.cancel()
         idleJob?.cancel()
@@ -147,17 +152,23 @@ class VoiceCallEngine(
                 micEvents.receiveAsFlow().collect { onMicEvent(it) }
             }
         }
-        try {
-            mic.start()
-        } catch (e: Exception) {
-            Log.w(TAG, "mic start failed", e)
-            _state.update { it.copy(notice = "麦克风不可用,检查录音权限") }
+        if (deviceRecognition) {
+            startDeviceRecognition()
+        } else {
+            try {
+                mic.start()
+            } catch (e: Exception) {
+                Log.w(TAG, "mic start failed", e)
+                _state.update { it.copy(notice = "麦克风不可用,检查录音权限") }
+            }
         }
         armIdle()
     }
 
     /** 挂断/退出页面:停播放、停麦、取消回合与计时(已落库消息保留)。 */
     fun close() {
+        callActive = false
+        deviceRecognizer.cancel()
         turnJob?.cancel()
         proactiveJob?.cancel()
         idleJob?.cancel()
@@ -364,6 +375,31 @@ class VoiceCallEngine(
     private fun setPhase(phase: Phase) {
         mic.endpointer.ttsPlaying = phase == Phase.SPEAKING
         _state.update { it.copy(phase = phase) }
+        if (deviceRecognition && callActive) {
+            if (phase == Phase.LISTENING) startDeviceRecognition() else deviceRecognizer.cancel()
+        }
+    }
+
+    private fun startDeviceRecognition() {
+        if (!callActive || !deviceRecognition || _state.value.phase != Phase.LISTENING) return
+        deviceRecognizer.start(onResult = { text ->
+            if (callActive && _state.value.phase == Phase.LISTENING) {
+                if (text.isBlank()) startDeviceRecognition() else {
+                    proactiveStreak = 0
+                    idleJob?.cancel()
+                    runTurn { text }
+                }
+            }
+        }, onError = { message ->
+            if (callActive) {
+                if (message == "没听清，再试一次") {
+                    scope.launch {
+                        delay(500)
+                        startDeviceRecognition()
+                    }
+                } else _state.update { it.copy(notice = message) }
+            }
+        }, onLevel = { _micLevel.value = it })
     }
 
     /** fireProactive 的静默跳过记录(诊断用,不进 UI)。 */

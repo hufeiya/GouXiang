@@ -427,7 +427,7 @@ private fun FeedCard(
             Spacer(Modifier.height(18.dp))
             NameAndActionsRow(name = name, source = source, onNameClick = onOpen, onOpenHistory = onHistory, showDecorativeActions = false)
             Spacer(Modifier.height(12.dp))
-            InputBar(sending = false, onSend = {}, embeddedInHome = true, enabled = false)
+            InputBar(sending = false, onSend = { false }, embeddedInHome = true, enabled = false)
         }
     }
 }

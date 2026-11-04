@@ -94,7 +94,7 @@ fun PhoneChatScreen(
     state: com.neethu.gouxiang.ui.ChatUiState,
     avatarFile: String?,
     onBack: () -> Unit,
-    onSend: (String) -> Unit,
+    onSend: (String) -> Boolean,
     onSendCard: (CardPayload) -> Unit,
     onOpenGuide: () -> Unit,
     onSimulateOfflineReturn: () -> Unit,
@@ -657,7 +657,7 @@ private fun String.takeLastCodePoints(n: Int): String {
 @Composable
 private fun InputBar(
     sending: Boolean,
-    onSend: (String) -> Unit,
+    onSend: (String) -> Boolean,
     onTogglePanel: () -> Unit,
     onHoldStart: () -> Unit = {},
     onHoldRelease: (MainViewModel.VoiceInputAction) -> Unit = {},
@@ -754,8 +754,7 @@ private fun InputBar(
                             CircleShape,
                         )
                         .clickable(enabled = !sending) {
-                            onSend(draft)
-                            draft = ""
+                            if (onSend(draft)) draft = ""
                         },
                     contentAlignment = Alignment.Center,
                 ) {

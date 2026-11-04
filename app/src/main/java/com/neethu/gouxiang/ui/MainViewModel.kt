@@ -1268,6 +1268,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var voiceInputToken: VoiceInputSession.Token? = null
     private var voiceInputRecognitionJob: Job? = null
     private var voiceRecorderStopping = false
+    private val deviceRecognizer by lazy { com.neethu.gouxiang.ai.speech.DeviceSpeechRecognizer(getApplication()) }
+    private var deviceVoiceInput = false
+    private var deviceVoiceResult: String? = null
+
+    private fun finishDeviceVoiceInput(text: String, token: VoiceInputSession.Token?) {
+        _voiceInputRecognizing.value = false
+        if (token == null || !voiceInputSession.isCurrent(token, _chatConversationId.value)) return
+        val result = if (voiceInputCurrentIsAction && text.isNotBlank()) "（$text）" else text
+        if (result.isBlank()) _voiceInputNotice.value = "没听清，再试一次?"
+        else if (_chatUi.value.sending) {
+            _voiceInputTranscribed.value = result
+            _voiceInputNotice.value = "对方正在回复，已转入输入框"
+        } else sendChatMessage(result, phoneMode = _isPhoneChat.value)
+    }
 
     /**
      * 按住说话·按下开录(麦克风被占用/无权限给 notice,不崩)。
@@ -1283,6 +1297,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _voiceInputLevel.value = 0f
         voiceInputSegments.clear()
         voiceInputCurrentIsAction = false
+        if (com.neethu.gouxiang.ai.config.AiConfigStore.load(getApplication()).asrProvider ==
+            com.neethu.gouxiang.ai.config.AsrProvider.SYSTEM) {
+            deviceVoiceInput = true
+            deviceVoiceResult = null
+            val token = voiceInputSession.begin(conversationId)
+            voiceInputToken = token
+            _voiceInputActive.value = true
+            deviceRecognizer.start(onResult = { text ->
+                if (_voiceInputActive.value) deviceVoiceResult = text
+                else finishDeviceVoiceInput(text, token)
+            }, onError = { message ->
+                if (_voiceInputActive.value) deviceVoiceResult = ""
+                else _voiceInputRecognizing.value = false
+                _voiceInputNotice.value = message
+            }, onLevel = { _voiceInputLevel.value = it })
+            return
+        }
         try {
             recorder.start()
             voiceInputToken = voiceInputSession.begin(conversationId)
@@ -1300,6 +1331,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
      */
     fun voiceInputModeSwitch(isAction: Boolean) {
         if (_voiceInputActive.value.not() || isAction == voiceInputCurrentIsAction) return
+        if (deviceVoiceInput) {
+            voiceInputCurrentIsAction = isAction
+            return
+        }
         val wav = recorder.sealSegment()
         if (wav != null) voiceInputSegments += (voiceInputCurrentIsAction to wav)
         voiceInputCurrentIsAction = isAction
@@ -1320,6 +1355,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         voiceInputToken = null
         _voiceInputActive.value = false
         _voiceInputLevel.value = 0f
+        if (deviceVoiceInput) {
+            deviceVoiceInput = false
+            if (action == VoiceInputAction.CANCEL) {
+                voiceInputSession.invalidate()
+                deviceRecognizer.cancel()
+            } else {
+                _voiceInputRecognizing.value = true
+                val result = deviceVoiceResult
+                if (result != null) finishDeviceVoiceInput(result, token) else deviceRecognizer.stop()
+            }
+            deviceVoiceResult = null
+            return
+        }
         if (action == VoiceInputAction.CANCEL) {
             voiceInputSession.invalidate()
             _voiceInputRecognizing.value = true
@@ -1415,9 +1463,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 离开聊天页/切后台:若按住态未松手,同步停录丢弃(防录音器悬挂)。 */
     fun cancelVoiceInput() {
+        deviceRecognizer.cancel()
+        deviceVoiceInput = false
         voiceInputSession.invalidate()
         voiceInputToken = null
         voiceInputRecognitionJob?.cancel()
+        if (voiceInputRecognitionJob == null) _voiceInputRecognizing.value = false
         if (voiceInputRecognitionJob != null && !voiceRecorderStopping) {
             voiceInputRecognitionJob = null
             _voiceInputRecognizing.value = false

@@ -248,11 +248,16 @@ private fun TtsSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
     CollapsibleSection(title = "语音合成(TTS · 聊天朗读和语音通话)") {
         SettingsDropdownRow(
             title = "TTS 服务商",
-            options = listOf(AiProvider.VOLCANO, AiProvider.SILICONFLOW)
-                .map { DropdownOption(it.name, it.label) },
-            selectedValue = config.ttsProvider.name,
-        ) { onUpdate(config.copy(ttsProvider = AiProvider.valueOf(it))) }
-        if (config.ttsProvider == AiProvider.SILICONFLOW) {
+            options = listOf(DropdownOption("EDGE", "Edge TTS（免 Key）")) +
+                listOf(AiProvider.VOLCANO, AiProvider.SILICONFLOW).map { DropdownOption(it.name, it.label) },
+            selectedValue = if (config.ttsEngine == com.neethu.gouxiang.ai.config.TtsEngine.EDGE) "EDGE" else config.ttsProvider.name,
+        ) {
+            onUpdate(if (it == "EDGE") config.copy(ttsEngine = com.neethu.gouxiang.ai.config.TtsEngine.EDGE)
+                else config.copy(ttsEngine = com.neethu.gouxiang.ai.config.TtsEngine.OPENAI_COMPATIBLE, ttsProvider = AiProvider.valueOf(it)))
+        }
+        if (config.ttsEngine == com.neethu.gouxiang.ai.config.TtsEngine.EDGE) {
+            SettingsGroupLabel("Edge TTS 无需 Key，使用默认中文音色，需要联网。")
+        } else if (config.ttsProvider == AiProvider.SILICONFLOW) {
             SettingsGroupLabel("硅基流动使用独立的全局音色；人物音色仅适用于火山。")
             SettingsTextFieldRow(
                 title = AiProvider.SILICONFLOW.ttsKeyLabel +
@@ -329,7 +334,10 @@ private fun AsrSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
                 placeholder = "whisper-1",
             ) { onUpdate(config.copy(asrLocalModel = it)) }
         }
-        if (config.asrProvider != AsrProvider.LOCAL) {
+        if (config.asrProvider == AsrProvider.SYSTEM) {
+            SettingsGroupLabel("使用设备提供的语音识别服务，无需密钥；可用性和离线识别能力取决于设备。")
+        }
+        if (config.asrProvider != AsrProvider.LOCAL && config.asrProvider != AsrProvider.SYSTEM) {
             SettingsGroupLabel("云端识别：${cloudProvider.label}。支持的同厂商优先；不支持时回退硅基流动。")
             SettingsTextFieldRow(
                 title = cloudProvider.llmKeyLabel + if (config.apiKeyFor(cloudProvider).isBlank()) "(未填写,用内置默认)" else "",

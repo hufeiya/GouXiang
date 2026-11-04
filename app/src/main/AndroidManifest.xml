@@ -16,6 +16,9 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
     </queries>
 
     <application
@@ -42,6 +45,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".ui.onboarding.OnboardingActivity"
+            android:exported="false"
+            android:label="配置 AI 服务"
+            android:theme="@style/Theme.GouXiang"
+            android:windowSoftInputMode="adjustResize" />
         <!-- 我的页 → AI 服务配置(LLM/TTS/ASR,移植自 AIAvatar-SDK) -->
         <activity
             android:name=".ui.aiconfig.AiConfigActivity"
