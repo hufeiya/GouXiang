@@ -335,7 +335,7 @@ private fun AsrSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
             ) { onUpdate(config.copy(asrLocalModel = it)) }
         }
         if (config.asrProvider == AsrProvider.SYSTEM) {
-            SettingsGroupLabel("使用设备提供的语音识别服务，无需密钥；可用性和离线识别能力取决于设备。")
+            SettingsGroupLabel("使用设备提供的语音识别服务，无需密钥。优先使用设备端识别；不可用时使用系统默认服务，可能联网并向服务商发送语音。")
         }
         if (config.asrProvider != AsrProvider.LOCAL && config.asrProvider != AsrProvider.SYSTEM) {
             SettingsGroupLabel("云端识别：${cloudProvider.label}。支持的同厂商优先；不支持时回退硅基流动。")

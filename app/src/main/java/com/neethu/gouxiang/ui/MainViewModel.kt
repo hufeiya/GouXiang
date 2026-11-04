@@ -1268,9 +1268,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var voiceInputToken: VoiceInputSession.Token? = null
     private var voiceInputRecognitionJob: Job? = null
     private var voiceRecorderStopping = false
-    private val deviceRecognizer by lazy { com.neethu.gouxiang.ai.speech.DeviceSpeechRecognizer(getApplication()) }
+    private val deviceRecognizer by lazy { com.neethu.gouxiang.ai.speech.DeviceSpeechRecognizer(getApplication<android.app.Application>()) }
     private var deviceVoiceInput = false
     private var deviceVoiceResult: String? = null
+    private var deviceVoiceError: String? = null
 
     private fun finishDeviceVoiceInput(text: String, token: VoiceInputSession.Token?) {
         _voiceInputRecognizing.value = false
@@ -1301,6 +1302,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             com.neethu.gouxiang.ai.config.AsrProvider.SYSTEM) {
             deviceVoiceInput = true
             deviceVoiceResult = null
+            deviceVoiceError = null
             val token = voiceInputSession.begin(conversationId)
             voiceInputToken = token
             _voiceInputActive.value = true
@@ -1308,10 +1310,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 if (_voiceInputActive.value) deviceVoiceResult = text
                 else finishDeviceVoiceInput(text, token)
             }, onError = { message ->
-                if (_voiceInputActive.value) deviceVoiceResult = ""
-                else _voiceInputRecognizing.value = false
-                _voiceInputNotice.value = message
-            }, onLevel = { _voiceInputLevel.value = it })
+                if (voiceInputSession.isCurrent(token, _chatConversationId.value)) {
+                    if (_voiceInputActive.value) deviceVoiceError = message
+                    else _voiceInputRecognizing.value = false
+                    _voiceInputNotice.value = message
+                }
+            }, onLevel = { _voiceInputLevel.value = it }, continuous = true)
             return
         }
         try {
@@ -1361,11 +1365,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 voiceInputSession.invalidate()
                 deviceRecognizer.cancel()
             } else {
-                _voiceInputRecognizing.value = true
-                val result = deviceVoiceResult
-                if (result != null) finishDeviceVoiceInput(result, token) else deviceRecognizer.stop()
+                val error = deviceVoiceError
+                if (error != null) {
+                    _voiceInputRecognizing.value = false
+                    _voiceInputNotice.value = error
+                    voiceInputSession.invalidate()
+                } else {
+                    _voiceInputRecognizing.value = true
+                    val result = deviceVoiceResult
+                    if (result != null) finishDeviceVoiceInput(result, token) else deviceRecognizer.stop()
+                }
             }
             deviceVoiceResult = null
+            deviceVoiceError = null
             return
         }
         if (action == VoiceInputAction.CANCEL) {
@@ -1465,6 +1477,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun cancelVoiceInput() {
         deviceRecognizer.cancel()
         deviceVoiceInput = false
+        deviceVoiceError = null
         voiceInputSession.invalidate()
         voiceInputToken = null
         voiceInputRecognitionJob?.cancel()

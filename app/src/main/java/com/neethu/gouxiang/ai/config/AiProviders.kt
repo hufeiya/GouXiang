@@ -258,7 +258,7 @@ enum class TtsEngine { OPENAI_COMPATIBLE, EDGE }
 /** ASR 与大模型独立配置；本地服务使用 OpenAI 兼容转写端点。 */
 enum class AsrProvider(val label: String, val cloudProvider: AiProvider? = null) {
     AUTO("自动（本地优先）"),
-    SYSTEM("设备语音识别（无需密钥）"),
+    SYSTEM("设备语音识别（可能联网）"),
     LOCAL("本地服务"),
     SILICONFLOW("硅基流动", AiProvider.SILICONFLOW),
     OPENROUTER("OpenRouter", AiProvider.OPENROUTER),
