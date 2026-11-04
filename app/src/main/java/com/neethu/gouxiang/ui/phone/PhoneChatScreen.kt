@@ -1,20 +1,11 @@
 package com.neethu.gouxiang.ui.phone
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,7 +16,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -44,6 +34,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Paid
 import androidx.compose.material.icons.outlined.AccountBalanceWallet
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Psychology
@@ -54,10 +45,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,8 +71,7 @@ import com.neethu.gouxiang.protocol.voiceDurationLabel
 import com.neethu.gouxiang.ui.BubbleItem
 import com.neethu.gouxiang.ui.ChatBubble
 import com.neethu.gouxiang.ui.MainViewModel
-import kotlinx.coroutines.delay
-import kotlin.math.abs
+import com.neethu.gouxiang.ui.chat.HoldToTalkPill
 
 /**
  * 手机聊天页 14(基准 14-phone-chat.png / 14-phone-chat.xml,iMessage 风):
@@ -94,7 +82,9 @@ import kotlin.math.abs
  *   播放(TTS 不可用保持占位);卡片按 13b 六型渲染;长按即时弹复制/回溯/重新生成
  *   (复制=04 §3.2.F 本地 v1 最小项;回溯=删除该条及之后消息回到该点,成功后
  *   Toast 提示记录已变化);新消息到达自动滚到底部;
- * - 输入条:自由输入 + 😊 + 🎤 + 「+」(扩展面板 13b 六宫格)。
+ * - 输入条(2026-11-04 与普通聊天页同构):语音态=整条「按住说话」胶囊
+ *   (ui.chat.HoldToTalkPill 无侧移版)/ 键盘小图标=语音↔文字切换 / 「+」;
+ *   文字态=自由输入 + 😊,草稿非空出 ↑ 发送钮(扩展面板 13b 六宫格)。
  * - dump 对照:new_tv_name(名字)/new_iv_ai_generated(「由 AI 生成」)/
  *   edit_view(hint=自由输入...)/entrance_sticker/voice_mode/ext_panel。
  */
@@ -657,45 +647,12 @@ private fun String.takeLastCodePoints(n: Int): String {
 
 // ── 输入条 + 扩展面板 ────────────────────────────────────────────────
 
-/** 手机页按住说话手势态(2026-10-31 口径):原位录音 / 上划出按钮取消;无侧移。 */
-private enum class PhoneHoldMode { None, Recording, Cancel }
-
 /**
- * 按住中的迷你波形(5 条滚动样本窗,同聊天页 HoldWaveform 口径缩小版)。
- */
-@Composable
-private fun MiniHoldWaveform(level: Float, barColor: Color, modifier: Modifier = Modifier) {
-    val currentLevel by rememberUpdatedState(level)
-    val samples = remember { mutableStateListOf<Float>() }
-    LaunchedEffect(Unit) {
-        while (true) {
-            samples.add(currentLevel)
-            while (samples.size > 5) samples.removeAt(0)
-            delay(60)
-        }
-    }
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        repeat(5) { i ->
-            val s = samples.getOrNull(i + samples.size - 5) ?: 0f
-            Box(
-                Modifier
-                    .width(3.dp)
-                    .height((4 + 14 * s.coerceIn(0f, 1f)).dp)
-                    .background(barColor, RoundedCornerShape(2.dp)),
-            )
-        }
-    }
-}
-
-/** 输入条:自由输入 + 😊 + 🎤 + 「+」(对齐 dump edit_view/entrance_* 三件)。
+ * 输入条(2026-11-04 与普通聊天页输入条同构):语音态=整条「按住说话」胶囊
+ * (复用 ui.chat.HoldToTalkPill,sideInputEnabled=false 手机页无侧滑:原地
+ * 松手 ASR 直发 / 上划出按钮取消),键盘小图标=语音↔文字切换(不是语音按钮
+ * 本身);文字态=输入框+😊,草稿非空出 ↑ 发送钮;「+」扩展面板不变。
  * [sending] = 回合进行中:发送钮禁用(不丢弃草稿;发送被接受才清空 draft)。
- * 🎤 按住说话(2026-10-31 口径,与普通聊天页一致但无侧移):原地松手 ASR
- * 转写直接发送;上划出按钮=取消(变红 +「松手取消」小字,松手丢弃);
- * 按住中显示迷你波形;识别中禁重入。
  */
 @Composable
 private fun InputBar(
@@ -709,34 +666,35 @@ private fun InputBar(
     voiceTranscribed: String = "",
     onVoiceTranscribedConsumed: () -> Unit = {},
 ) {
+    // 语音/文字形态(默认语音态,与普通聊天页输入条一致)
+    var textMode by remember { mutableStateOf(false) }
     var draft by remember { mutableStateOf("") }
-    // 转写落草稿(仅回合占用时的回落路径;填完即消费,再次按住不重复填)。
+    // 转写落草稿仅剩回合占用回落路径(与普通聊天页同语义:切文字态可见可改,
+    // 填完即消费事件,再次按住说话不重复填)。
     LaunchedEffect(voiceTranscribed) {
         if (voiceTranscribed.isNotBlank()) {
+            textMode = true
             draft = voiceTranscribed
             onVoiceTranscribedConsumed()
         }
     }
-    // 按住手势态(UI 局部实时;VM 只收松手时的最终去向)
-    var holdMode by remember { mutableStateOf(PhoneHoldMode.None) }
-
-    Box {
-        Column(
-            Modifier
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Color(0xFFF6F6F6))
+            .navigationBarsPadding()
+            .imePadding(),
+    ) {
+        Row(
+            modifier = Modifier
                 .fillMaxWidth()
-                .background(Color(0xFFF6F6F6))
-                .navigationBarsPadding()
-                .imePadding(),
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                .background(Color.White, RoundedCornerShape(24.dp))
+                .padding(horizontal = 14.dp, vertical = 8.dp)
+                .height(40.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                    .background(Color.White, RoundedCornerShape(24.dp))
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
-                    .height(38.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            if (textMode) {
                 BasicTextField(
                     value = draft,
                     onValueChange = { draft = it },
@@ -754,117 +712,61 @@ private fun InputBar(
                 )
                 Spacer(Modifier.width(10.dp))
                 Text("😊", fontSize = 20.sp)
+            } else {
+                // 语音态:普通聊天页同款「按住说话」整条胶囊(共享组件,无侧移)
+                HoldToTalkPill(
+                    modifier = Modifier.weight(1f),
+                    sideInputEnabled = false,
+                    onHoldStart = onHoldStart,
+                    onHoldRelease = onHoldRelease,
+                    voiceLevel = voiceLevel,
+                    recognizing = recognizing,
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            // 小按钮=语音/文字切换(普通聊天页键盘图标同款),不是语音按钮本身
+            Icon(
+                Icons.Outlined.Keyboard,
+                contentDescription = if (textMode) "语音输入" else "文字输入",
+                tint = Color(0xFF3A3A3A),
+                modifier = Modifier
+                    .size(26.dp)
+                    .clickable { textMode = !textMode },
+            )
+            Spacer(Modifier.width(12.dp))
+            Icon(
+                Icons.Filled.Add,
+                contentDescription = "更多",
+                tint = Color(0xFF1A1A1A),
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable { onTogglePanel() },
+            )
+            if (textMode && draft.isNotBlank()) {
                 Spacer(Modifier.width(10.dp))
-                // 🎤 = 按住说话:pointerInput 按压手势;按下开录,上划出按钮=取消
-                // (停录丢弃),原地松手=转写直接发送;识别中禁重入。
+                // 发送中不丢草稿:发送中禁用而非丢弃草稿;仅在点击被接受时清空
+                // (ViewModel 侧 sending 拦截保留为最后防线,UI 不再无条件清空)。
                 Box(
                     Modifier
-                        .height(30.dp)
-                        .clip(RoundedCornerShape(15.dp))
+                        .size(30.dp)
                         .background(
-                            when (holdMode) {
-                                PhoneHoldMode.None -> Color.Transparent
-                                PhoneHoldMode.Recording -> Color(0xFF1A1A1A)
-                                PhoneHoldMode.Cancel -> Color(0xFFFF3B30)
-                            },
+                            if (!sending) Color(0xFFFAE14C) else Color(0xFFE3E3E3),
+                            CircleShape,
                         )
-                        .pointerInput(Unit) {
-                            awaitEachGesture {
-                                val down = awaitFirstDown()
-                                down.consume()
-                                onHoldStart()
-                                holdMode = PhoneHoldMode.Recording
-                                val exitSlop = viewConfiguration.touchSlop
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull() ?: break
-                                    if (!change.pressed) {
-                                        change.consume()
-                                        // 松手:上划出按钮=取消,原位=直接发送
-                                        val action =
-                                            if (holdMode == PhoneHoldMode.Cancel) {
-                                                MainViewModel.VoiceInputAction.CANCEL
-                                            } else {
-                                                MainViewModel.VoiceInputAction.SEND
-                                            }
-                                        holdMode = PhoneHoldMode.None
-                                        onHoldRelease(action)
-                                        break
-                                    }
-                                    // 指针出按钮上方=取消,回到按钮内=恢复录音
-                                    holdMode = if (change.position.y < -exitSlop) {
-                                        PhoneHoldMode.Cancel
-                                    } else {
-                                        PhoneHoldMode.Recording
-                                    }
-                                    change.consume()
-                                }
-                            }
+                        .clickable(enabled = !sending) {
+                            onSend(draft)
+                            draft = ""
                         },
                     contentAlignment = Alignment.Center,
                 ) {
-                    when {
-                        recognizing -> Text("⏳", fontSize = 18.sp)
-                        holdMode != PhoneHoldMode.None -> MiniHoldWaveform(
-                            level = voiceLevel,
-                            barColor = Color.White,
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                        )
-                        else -> Text("🎤", fontSize = 20.sp)
-                    }
-                }
-                Spacer(Modifier.width(10.dp))
-                Icon(
-                    Icons.Filled.Add,
-                    contentDescription = "更多",
-                    tint = Color(0xFF1A1A1A),
-                    modifier = Modifier
-                        .size(24.dp)
-                        .clickable { onTogglePanel() },
-                )
-                if (draft.isNotBlank()) {
-                    Spacer(Modifier.width(10.dp))
-                    // 发送中不丢草稿:发送中禁用而非丢弃草稿;仅在点击被接受时清空
-                    // (ViewModel 侧 sending 拦截保留为最后防线,UI 不再无条件清空)。
-                    Box(
-                        Modifier
-                            .size(30.dp)
-                            .background(
-                                if (draft.isNotBlank() && !sending) Color(0xFFFAE14C) else Color(0xFFE3E3E3),
-                                CircleShape,
-                            )
-                            .clickable(enabled = !sending) {
-                                onSend(draft)
-                                draft = ""
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("↑", color = if (!sending) Color(0xFF1A1A1A) else Color(0xFFB9B9B9), fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    }
+                    Text(
+                        "↑",
+                        color = if (!sending) Color(0xFF1A1A1A) else Color(0xFFB9B9B9),
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
             }
-        }
-        // 按住中:按钮上方浮小字(上划提示/取消确认;Material 淡入+上滑动效)
-        AnimatedVisibility(
-            visible = holdMode != PhoneHoldMode.None,
-            enter = fadeIn(tween(150)) + slideInVertically(tween(180)) { it / 2 },
-            exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 2 },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .offset(y = (-30).dp),
-        ) {
-            Text(
-                if (holdMode == PhoneHoldMode.Cancel) "松手取消" else "上移取消",
-                color = if (holdMode == PhoneHoldMode.Cancel) Color(0xFFFF6B61) else Color(0xFF9A9A9A),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier
-                    .background(
-                        if (holdMode == PhoneHoldMode.Cancel) Color.Black.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.92f),
-                        RoundedCornerShape(10.dp),
-                    )
-                    .padding(horizontal = 10.dp, vertical = 4.dp),
-            )
         }
     }
 }
