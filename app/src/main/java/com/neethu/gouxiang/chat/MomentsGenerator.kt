@@ -209,7 +209,7 @@ object MomentsGenerator {
 
     /** 首个平衡 `{...}` 片段 → JsonObject(复用心声先例;null = 无 JSON)。 */
     internal fun jsonObject(raw: String): JsonObject? {
-        val fragment = InnerVoiceGenerator.firstJsonObject(raw) ?: return null
+        val fragment = InnerVoiceGenerator.firstJsonObject(InnerVoiceGenerator.escapeRawNewlines(raw)) ?: return null
         return try {
             json.parseToJsonElement(fragment).jsonObject
         } catch (_: Exception) {
@@ -242,6 +242,10 @@ class MomentsChannel(
     /** 评论回复要稳一点:temperature 折中。 */
     private val replyTemp = 0.8f
 
+    // Some reasoning models count their thinking against max_tokens. Leave room
+    // for a complete JSON response instead of truncating at the memory default.
+    private val maxTokensOverride = 2048
+
     /** @return 模型原始输出;请求失败/流错误/空输出返回 null(调用方提示失败)。 */
     suspend fun requestPost(system: String, user: String, strict: Boolean = false): String? =
         request(system, user, postTemp, strict)
@@ -258,7 +262,7 @@ class MomentsChannel(
                     ChatMessage(ChatRole.SYSTEM, system),
                     ChatMessage(ChatRole.USER, user),
                 ),
-                llmConfig().copy(temperature = temp),
+                llmConfig().copy(temperature = temp, maxTokens = maxTokensOverride),
             ).collect { event ->
                 when (event) {
                     is LlmStreamEvent.TextDelta -> sb.append(event.text)

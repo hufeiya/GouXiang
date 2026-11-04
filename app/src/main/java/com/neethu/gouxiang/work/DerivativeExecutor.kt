@@ -71,7 +71,7 @@ internal class DerivativeExecutor(private val app: Context) {
             val memories = source.memories
             val recent = source.messages
             val raw = innerVoiceChannel.request(
-                InnerVoiceGenerator.systemPrompt(character, memories) + if (candidate != null) "\n只写一条心声，标题固定为：${candidate.title}。" else "",
+                InnerVoiceGenerator.systemPrompt(character, memories, candidate?.title),
                 InnerVoiceGenerator.userPrompt(character, toMemoryTurns(recent)),
                 strict = true,
             )

@@ -113,6 +113,11 @@ internal suspend fun executeAiCommand(
             }
             "innervoice_switch" -> cmdInnerVoiceSwitch(vm, command)
             "innervoice_delete" -> cmdInnerVoiceDelete(vm, command)
+            "innervoice_list" -> cmdInnerVoiceList(context, vm)
+            "content_state" -> cmdContentState(context, vm)
+            "content_list" -> cmdContentList(context, vm)
+            "content_auto" -> cmdContentAuto(vm, command)
+            "content_open" -> cmdContentOpen(context, vm, command)
             "moments" -> cmdMoments(context, vm, command)
             "moments_list" -> cmdMomentsList(context)
             "moments_perm" -> cmdMomentsPerm(context, vm, command)
@@ -794,6 +799,77 @@ private fun cmdInnerVoiceDelete(vm: MainViewModel, command: AiDebugCommand): Str
 }
 
 // ── 5.6c 朋友圈扩展与发现(H 工作包)────────────────────────────
+
+private suspend fun cmdInnerVoiceList(context: Context, vm: MainViewModel): String {
+    val conversationId = vm.debugConversationId
+        ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+    val repo = com.neethu.gouxiang.data.GouXiangRepo.get(context)
+    val conversation = repo.db.conversationDao().byId(conversationId)
+        ?: throw IllegalStateException("conversation $conversationId no longer exists")
+    val voices = repo.innerVoices(conversation.characterId)
+    if (voices.isEmpty()) return "(no inner voices for character ${conversation.characterId})"
+    return voices.take(30).joinToString("\n") {
+        "${it.id} stale=${it.isStale} at=${it.at} 「${it.title}」 ${it.echo.take(80)}"
+    }
+}
+
+private suspend fun cmdContentState(context: Context, vm: MainViewModel): String {
+    val id = vm.debugConversationId
+        ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+    val db = com.neethu.gouxiang.data.GouXiangRepo.get(context).db
+    val conversation = db.conversationDao().byId(id) ?: error("conversation $id no longer exists")
+    val character = db.characterDao().byId(conversation.characterId) ?: error("character missing")
+    val dao = db.contentDiscoveryDao()
+    val state = dao.state(id) ?: com.neethu.gouxiang.data.ContentDiscoveryState(id)
+    val turns = dao.turnsAfter(id, state.consumedTurnId)
+    val prefs = com.neethu.gouxiang.ai.GenerationPrefs
+    return "conversation=$id turns=${turns.size} consumed=${state.consumedTurnId} " +
+        "evaluated=${state.lastEvaluatedTurnId} evaluatedCount=${state.lastEvaluatedCount} " +
+        "failures=${state.failures} retryAfter=${state.retryAfter} unseen=${dao.unseenCount(id)} " +
+        "voiceAuto=${prefs.innerVoiceAuto(context)}/${character.innerVoiceAuto} " +
+        "momentAuto=${prefs.momentsDaily(context)}/${character.momentsJoined}/${character.momentsDailyAuto}"
+}
+
+private suspend fun cmdContentList(context: Context, vm: MainViewModel): String {
+    val id = vm.debugConversationId
+        ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+    val candidates = com.neethu.gouxiang.data.GouXiangRepo.get(context).db.contentDiscoveryDao()
+        .observeForConversation(id).first()
+    if (candidates.isEmpty()) return "(no content candidates for conversation $id)"
+    return candidates.take(30).joinToString("\n") {
+        "${it.id} ${it.kind} body=${it.bodyStatus} image=${it.imageStatus} result=${it.resultId} " +
+            "auto=${it.autoEligible} reminder=${it.reminderStatus} stale=${it.sourceStale} 「${it.title}」"
+    }
+}
+
+private fun cmdContentAuto(vm: MainViewModel, command: AiDebugCommand): String {
+    val parts = requireArg(command).trim().split(Regex("\\s+"))
+    require(parts.size == 2) { "usage: content_auto <voice|moment> <on|off>" }
+    val key = when (parts[0].lowercase()) {
+        "voice" -> com.neethu.gouxiang.ai.GenerationPrefs.KEY_INNER_VOICE_AUTO
+        "moment" -> com.neethu.gouxiang.ai.GenerationPrefs.KEY_MOMENTS_DAILY
+        else -> throw IllegalArgumentException("kind must be voice|moment")
+    }
+    val enabled = when (parts[1].lowercase()) {
+        "on" -> true
+        "off" -> false
+        else -> throw IllegalArgumentException("value must be on|off")
+    }
+    vm.toggleGenerationSetting(key, enabled)
+    return "${parts[0].lowercase()} auto=$enabled"
+}
+
+private suspend fun cmdContentOpen(context: Context, vm: MainViewModel, command: AiDebugCommand): String {
+    val conversationId = vm.debugConversationId
+        ?: throw IllegalStateException("no open chat — send ai_cmd=open_chat <id|name> first")
+    val id = command.x?.toLong() ?: command.arg?.toLongOrNull()
+        ?: throw IllegalArgumentException("usage: content_open <candidateId>")
+    val candidate = com.neethu.gouxiang.data.GouXiangRepo.get(context).db.contentDiscoveryDao().byId(id)
+        ?: throw IllegalArgumentException("candidate $id not found")
+    require(candidate.conversationId == conversationId) { "candidate $id belongs to another conversation" }
+    vm.openContentCandidate(id)
+    return "candidate $id opened (poll content_list for body status)"
+}
 
 /**
  * 合并时间线清单(H1,真实计数,不伪造社交数据):

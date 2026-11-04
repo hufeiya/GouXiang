@@ -34,6 +34,28 @@ class MomentsTest {
     }
 
     @Test
+    fun `post and reply accept raw newlines inside json strings`() {
+        val post = MomentsGenerator.parsePost("{\"text\":\"今天的雨\n停了\",\"imagePrompt\":\"窗前\n的花\"}")
+        assertEquals("今天的雨\n停了", post?.text)
+        assertEquals("窗前\n的花", post?.imagePrompt)
+        assertEquals("明天\n见", MomentsGenerator.parseReply("{\"text\":\"明天\n见\"}"))
+    }
+
+    @Test
+    fun `channel leaves enough output budget for reasoning models`() = runTest {
+        var received: LlmConfig? = null
+        val llm = ChatOrchestrator.Llm { _, config ->
+            received = config
+            flow { emit(com.neethu.gouxiang.ai.adapter.LlmStreamEvent.TextDelta("{\"text\":\"好\"}")) }
+        }
+        val channel = MomentsChannel(llm) { config.copy(maxTokens = 512) }
+        channel.requestPost("s", "u")
+        assertEquals(2048, received?.maxTokens)
+        channel.requestReply("s", "u")
+        assertEquals(2048, received?.maxTokens)
+    }
+
+    @Test
     fun `parser clamps overlong text and image prompt`() {
         val raw = "{\"text\":\"" + "长".repeat(200) + "\",\"imagePrompt\":\"" + "图".repeat(200) + "\"}"
         val draft = MomentsGenerator.parsePost(raw)

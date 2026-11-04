@@ -273,6 +273,11 @@ F 工作包验收 SOP:`open_chat <角色>` → `sidestory_keys` → `sidestory_g
 | `derivative_delete` | `ai_x`=记录 id | 删除一条记录(列表与库一致;配图文件一并清理) |
 | `open_handbook` / `close_handbook`、`open_novel` / `close_novel`、`open_photo` / `close_photo` | — | 打开/关闭对应页(当前会话;uiautomator dump 验证「参数区/记录」两区与合照描述输入) |
 | `innervoice_switch` | `ai_arg`=on \| off | 当前角色的「自动生成心声」开关(G4 角色级,写 `characters.innerVoiceAuto`;需先 `open innervoice`)。关→自动批量扫描跳过该角色且执行期二次拦截;点击「生成心声」不受限 |
+| `innervoice_list` | — | 当前聊天角色的心声卡（含失效状态、时间和摘要） |
+| `content_state` | — | 当前聊天尚未消费的成功回合数、发现进度、失败与退避、未读数，以及心声/朋友圈全局和角色开关 |
+| `content_list` | — | 当前聊天的候选标题、正文和图片状态、结果 ID、自动生成与提醒状态 |
+| `content_open` | `ai_arg`=候选 ID | 打开当前聊天的候选，沿用界面的正文生成路径 |
+| `content_auto` | `ai_arg`=voice\|moment on\|off | 通过设置页同一方法设置心声或朋友圈全局正文自动生成开关 |
 | `innervoice_delete` | `ai_x`=心声 id | 删除一张心声卡(G4 内容管理;配图文件一并清理) |
 
 G 工作包验收 SOP:`open_chat <角色>` → `handbook_generate turn10`、`novel_generate medium`、`photo_generate 天台看晚霞` 各一条 → 轮询 `derivative_list`(状态转 succeeded)→ `derivative_delete <id>` 对拍;断网失败恢复 = 断网后 `photo_generate` → `derivative_list` 见 failed → 联网后 `derivative_retry`。心声开关验收 = `open innervoice` → `innervoice_switch off` → dump 心声页开关为关,且心声自动批量(若全局开关开)跳过该角色。

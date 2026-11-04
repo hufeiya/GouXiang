@@ -128,6 +128,17 @@ class InnerVoiceTest {
     }
 
     @Test
+    fun `candidate prompt asks for exactly one voice in the expected array`() {
+        val prompt = InnerVoiceGenerator.systemPrompt(char, memories, candidateTitle = "海边的约定")
+        assertTrue(prompt.contains("1 条心声，围绕标题「海边的约定」"))
+        assertTrue(prompt.contains("\"voices\""))
+        assertFalse(prompt.contains("2~4 条心声"))
+        assertFalse(prompt.contains("几条之间话题错开"))
+        val drafts = InnerVoiceGenerator.parse("""{"voices":[{"title":"海边的约定","echo":"我记得那天","content":"海风很温柔。"}]}""")
+        assertEquals(1, drafts.size)
+    }
+
+    @Test
     fun `user prompt replays recent turns`() {
         val u = InnerVoiceGenerator.userPrompt(
             char,

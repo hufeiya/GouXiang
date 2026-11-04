@@ -173,6 +173,11 @@ fun aiDebugHelp(): String = """
 |  open_photo / close_photo   打开/关闭对应页(dump 验证)
 |  innervoice_switch <arg>  当前角色「自动生成心声」开关(arg=on|off;需先 open innervoice)
 |  innervoice_delete <ai_x=id> 删除一张心声卡(内容管理)
+|  innervoice_list          当前聊天角色的心声卡及状态
+|  content_state            当前聊天的发现进度、失败次数、未读数、自动生成开关
+|  content_list             当前聊天的候选标题及正文、图片、结果状态
+|  content_open <arg>       打开候选 ID，按界面路径生成正文
+|  content_auto <arg>       voice|moment on|off，设置全局正文自动生成
 |Moments (朋友圈扩展与发现,H 工作包):
 |  moments_list             多角色合并时间线: id 作者(avatar/user) 赞N 评N 文本
 |  moments <arg>            gen|post <文本>|like <postId>|comment <postId> <文本>|

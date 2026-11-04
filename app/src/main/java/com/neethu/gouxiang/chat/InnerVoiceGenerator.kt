@@ -45,7 +45,11 @@ object InnerVoiceGenerator {
      * 组 system prompt(与 ChatContextBuilder 分层同构:人设/记忆/输出协议三段,
      * 无连发与 IM 协议——心声不是聊天消息)。
      */
-    fun systemPrompt(character: CharacterEntity, memories: List<com.neethu.gouxiang.data.MemoryEntity>): String {
+    fun systemPrompt(
+        character: CharacterEntity,
+        memories: List<com.neethu.gouxiang.data.MemoryEntity>,
+        candidateTitle: String? = null,
+    ): String {
         val s = StringBuilder()
         s.appendLine("你是「${character.name}」,正在给「用户」写一条只有自己知道的心声——不发给对方," +
             "是悄悄记下自己对 TA 的心思。")
@@ -54,14 +58,15 @@ object InnerVoiceGenerator {
         s.appendLine("[输出协议] 只输出一行 JSON,不要输出任何其他内容:")
         s.appendLine("{\"voices\":[{\"title\":\"6字以内的小标题\",\"echo\":\"20字以内的第一人称内心短句\",\"content\":\"150~250字的第一人称短文,分2~4段,段与段之间用\\n\\n分隔\"}]}")
         s.appendLine("规则:")
-        s.appendLine("1. 输出 $MIN_VOICES~$MAX_VOICES 条心声;每条 title 不超过 ${TITLE_MAX_CHARS}个字,echo 不超过 ${ECHO_MAX_CHARS}个字,content 不超过 ${CONTENT_MAX_CHARS}个字。")
+        val countRule = if (candidateTitle == null) "$MIN_VOICES~$MAX_VOICES 条心声" else "1 条心声，围绕标题「$candidateTitle」"
+        s.appendLine("1. 输出 $countRule;每条 title 不超过 ${TITLE_MAX_CHARS}个字,echo 不超过 ${ECHO_MAX_CHARS}个字,content 不超过 ${CONTENT_MAX_CHARS}个字。")
         s.appendLine("2. 全部第一人称「我」,写给用户,语气贴合人设与两人的关系;" +
             "可以引用你们之间具体的事(借用上面记忆里的细节),也可以是此刻的小情绪。")
         s.appendLine("3. content 是完整的心里话短文:像在纸上悄悄写给对方的一小段独白," +
             "有场景细节、有情绪起伏,可以展开讲一件事的经过和感受;echo 是这句话的一句话签名版," +
             "要与 content 呼应但不逐字重复。")
         s.appendLine("4. 只写心声本身:不写分析、计划、旁白,不出现「JSON」「字段」「输出」这类字眼。")
-        s.appendLine("5. 几条之间话题错开(一条贴最近发生的事,一条写日常小情绪),不要重复同一个意思。")
+        if (candidateTitle == null) s.appendLine("5. 几条之间话题错开(一条贴最近发生的事,一条写日常小情绪),不要重复同一个意思。")
         return s.toString().trim()
     }
 
