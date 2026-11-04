@@ -52,14 +52,15 @@ import coil3.compose.AsyncImage
 import java.io.File
 
 /**
- * 语音通话页 12(基准 12-voice-call.png / 12-voice-call.xml,全屏覆盖层):
+ * 语音通话页 12(基准 12-voice-call.png / 12-voice-call.xml,全屏覆盖层,
+ * 2026-11-04 全双工:去掉按住说话,麦克风全程常开):
  *
  * - 全屏角色照片(iv_pic)+ 顶部压暗遮罩(top_mask)+ 底部渐晕(iv_bg);
  * - 顶栏:左上 X(button_toolbar_navigation)+ 居中名字(tv_toolbar_title);
  * - 大字幕(astv_chat 区域):TTS 同步口语词,白字大号居中;
- * - 底部操作区(ll_audio_operation_wrapper):提示条(tv_tips:聆听中/识别中/
- *   思考中/点击打断)+ 「按住说话」条 + 红色挂断键(iv_end_call);
- * - SPEAKING 态整页可点 = 打断(停播放回聆听);
+ * - 底部操作区(ll_audio_operation_wrapper):提示条(tv_tips:聆听中…(说话高亮)/
+ *   识别中/思考中/说话即可打断)+ 用户说话波形 + 红色挂断键(iv_end_call);
+ * - SPEAKING 态说话即打断(VAD barge-in),整页点按仍是兜底打断;
  * - 小型调试输入条(验收用,不显眼):只有聆听态可输入回车/发送。
  */
 @Composable
@@ -75,9 +76,12 @@ fun VoiceCallScreen(
     BackHandler { onHangUp() }
     val requestMicrophonePermission =
         com.neethu.gouxiang.ui.permission.rememberMicrophonePermissionRequest()
-    LaunchedEffect(Unit) { requestMicrophonePermission() }
-    // 进页即「聆听中」/退页停一切(引擎由调用方按 conversationId 缓存复用)
-    LaunchedEffect(Unit) { engine.start() }
+    // 进页先拿麦克风权限再开麦(全双工常开;无权限时引擎给 notice 不崩)/
+    // 退页停一切(引擎由调用方按 conversationId 缓存复用)
+    LaunchedEffect(Unit) {
+        requestMicrophonePermission()
+        engine.start()
+    }
     DisposableEffect(Unit) { onDispose { engine.close() } }
 
     Box(
@@ -229,38 +233,14 @@ fun VoiceCallScreen(
                     )
                 }
                 Spacer(Modifier.height(14.dp))
-                // 按住说话条(语音输入;按住中高亮)
-                val hold = state.holdActive
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                        .height(46.dp)
-                        .background(
-                            if (hold) Color(0xFFE84D8A) else Color(0xFF3A3A44),
-                            RoundedCornerShape(23.dp),
-                        )
-                        .pointerInput(state.phase) {
-                            detectTapGestures(
-                                onPress = {
-                                    if (requestMicrophonePermission()) {
-                                        engine.holdStart()
-                                        try {
-                                            awaitRelease()
-                                        } finally {
-                                            engine.holdRelease()
-                                        }
-                                    }
-                                },
-                            )
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        if (hold) "松开 发送" else "按住 说话",
-                        color = Color.White,
-                        fontSize = 16.sp,
+                // 用户说话波形(全双工 VAD 收集态高亮;空闲时占位保持布局稳定)
+                if (state.userSpeaking) {
+                    CallWaveform(
+                        levelProvider = { engine.micLevel.value },
+                        modifier = Modifier.height(26.dp),
                     )
+                } else {
+                    Spacer(Modifier.height(26.dp))
                 }
                 Spacer(Modifier.height(22.dp))
                 // 红色挂断键(参考页 [440,1996][639,2195] ≈ 199dp 圆钮)
@@ -283,13 +263,44 @@ fun VoiceCallScreen(
 
         // ── 小型调试输入条(验收用,贴屏幕最底,不显眼)──────────────────
         DebugInput(
-            enabled = state.phase == VoiceCallEngine.Phase.LISTENING && state.holdActive.not(),
+            enabled = state.phase == VoiceCallEngine.Phase.LISTENING,
             onSend = { engine.sendDebugText(it) },
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .statusBarsPadding()
                 .navigationBarsPadding(),
         )
+    }
+}
+
+/**
+ * 用户说话的实时波形(16 格滚动窗,60ms 一拍采样 [levelProvider]):
+ * 与按住说话胶囊的 HoldWaveform 同口径,只是数据源换成通话引擎的 micLevel。
+ */
+@Composable
+private fun CallWaveform(levelProvider: () -> Float, modifier: Modifier = Modifier) {
+    val levels = remember {
+        androidx.compose.runtime.mutableStateListOf<Float>().apply { repeat(16) { add(0f) } }
+    }
+    LaunchedEffect(Unit) {
+        while (true) {
+            levels.removeAt(0)
+            levels.add(levelProvider())
+            kotlinx.coroutines.delay(60)
+        }
+    }
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        levels.forEach { l ->
+            Box(
+                Modifier
+                    .size(width = 3.dp, height = (4 + 18 * l).dp)
+                    .background(Color.White.copy(alpha = 0.85f), RoundedCornerShape(2.dp)),
+            )
+        }
     }
 }
 

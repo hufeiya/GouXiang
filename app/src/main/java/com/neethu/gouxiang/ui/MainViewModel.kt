@@ -810,6 +810,27 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     (result as? com.neethu.gouxiang.chat.TurnResult.Completed)?.bubbles
                         ?: emptyList()
                 },
+                // 主动接话(2026-11-04 通话全双工):用户持续沉默时人物先开口,复用
+                // F4 范围 5 的主动消息链路 —— sceneLine 不落库不进上下文只驱动本轮,
+                // 口语短连发;失败/模板降级返回空列表,引擎静默回聆听等下一轮计时
+                proactiveRound = {
+                    val conv = repo.db.conversationDao().byId(convId) ?: return@VoiceCallEngine emptyList()
+                    val character = repo.characterById(conv.characterId) ?: return@VoiceCallEngine emptyList()
+                    val outcome = orchestrator.respondProactively(
+                        conversationId = convId,
+                        characterId = character.id,
+                        sceneLine = "(语音通话中对方一直没说话,你主动找话题接一句,像打电话那样口语、简短)",
+                        onAssistantSaved = { },
+                        burst = BurstParams.resolve(ReplyLength.SHORTER, phone = true, ChatPrefs.dialogMode(getApplication())),
+                        mode = ChatPrefs.dialogMode(getApplication()),
+                        phoneStyle = true,
+                    )
+                    // 主动泡同样事务落库,聊天页兜底对账(同上方语音回合口径)
+                    refreshChatBubbles(convId)
+                    (outcome as? com.neethu.gouxiang.chat.ProactiveTurnResult.Completed)
+                        ?.takeIf { it.degraded.not() }?.bubbles
+                        ?: emptyList()
+                },
             )
         }
     }

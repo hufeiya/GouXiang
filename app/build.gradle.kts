@@ -96,6 +96,8 @@ dependencies {
     // 后台生成基建(docs/background-generation-plan-20261030.md):
     // DerivativeWorker 普通协程 Worker(不引入前台 Service,§6 红线)
     implementation(libs.androidx.work.runtime.ktx)
+    // 通话全双工:WebRTC VAD(GMM 分类,带极小 native so,各 ABI 共 <80K,JitPack)
+    implementation("com.github.gkonovalov.android-vad:webrtc:2.0.10")
     testImplementation(libs.junit)
     // GenerationPrefs/WorkManager 面的 JVM 单测(SharedPreferences 需要 Context)
     testImplementation(libs.robolectric)

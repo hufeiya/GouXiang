@@ -36,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -148,6 +149,7 @@ fun AiConfigScreen(
             item { LlmSection(config, onUpdate) }
             item { TtsSection(config, onUpdate) }
             item { AsrSection(config, onUpdate) }
+            item { VoiceCallSection(config, onUpdate) }
             // 底部说明(键前缀与仓库 secrets.properties 同名,一键推送技能可直写)
             item {
                 Text(
@@ -287,7 +289,7 @@ private fun AsrSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
     CollapsibleSection(title = "语音识别(ASR · 语音通话)") {
         val asrProvider = asrProviderFor(config.provider)
         SettingsGroupLabel(
-            "按住说话的云端识别走${asrProvider.label}" +
+            "语音通话的云端识别走${asrProvider.label}" +
                 (if (asrProvider != config.provider) "(${config.provider.label} 回落)" else "") +
                 ",Key 与大模型共用一份。"
         )
@@ -311,6 +313,33 @@ private fun AsrSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
         SettingsGroupLabel(
             "当前生效:" + resolveAsrModel(asrProvider.baseUrl, config.asrModel) +
                 "(引擎 ${AsrEngine.CLOUD.name})"
+        )
+    }
+}
+
+// ── 语音通话节奏(全双工:断句停顿 / 静默主动接话,2026-11-04)────────────
+
+@Composable
+private fun VoiceCallSection(config: AiConfig, onUpdate: (AiConfig) -> Unit) {
+    CollapsibleSection(title = "语音通话(节奏 · 断句与主动接话)") {
+        SettingsGroupLabel(
+            "通话是全双工:麦克风全程开着,说话即可打断朗读,不用按任何键。" +
+                "两个间隔每句现读,改完下一句立即生效。"
+        )
+        SettingsSliderRow(
+            title = "断句停顿(说完等多久回复)",
+            value = config.callEndSilenceS,
+        ) { onUpdate(config.copy(callEndSilenceS = it)) }
+        SettingsGroupLabel(
+            "0 秒 = 说完立刻送识别;默认 2 秒。设得太短容易把句子中间的停顿当成说完。"
+        )
+        SettingsSliderRow(
+            title = "静默主动接话(沉默多久人物先开口)",
+            value = config.callIdleSpeakS,
+        ) { onUpdate(config.copy(callIdleSpeakS = it)) }
+        SettingsGroupLabel(
+            "一轮回复说完后,你持续沉默这么久,人物会主动找话题继续聊" +
+                "(连续最多 3 次,你一开口即重置)。默认 5 秒,0 秒 = 人物不停地说。"
         )
     }
 }
@@ -415,6 +444,48 @@ private fun SettingsTextFieldRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 4.dp),
+        )
+    }
+}
+
+/**
+ * 带标签的 0..10 整数滑块行(语音通话节奏双滑块,项目首个 Slider 用例):
+ * 拖动只改本地值,松手([Slider.onValueChangeFinished])才持久化,避免中途写 prefs。
+ */
+@Composable
+private fun SettingsSliderRow(
+    title: String,
+    value: Int,
+    onValueChangeFinished: (Int) -> Unit,
+) {
+    var local by remember(value) { mutableStateOf(value.toFloat()) }
+    Column(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "${local.toInt()} 秒",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Slider(
+            value = local,
+            onValueChange = { local = it },
+            valueRange = 0f..10f,
+            steps = 9, // 端点间 9 个中间点 = 0..10 整数步进
+            onValueChangeFinished = { onValueChangeFinished(local.toInt()) },
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }

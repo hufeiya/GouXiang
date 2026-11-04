@@ -19,6 +19,7 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        maven("https://jitpack.io") // com.github.gkonovalov.android-vad(通话全双工 VAD)
     }
 }
 

@@ -64,6 +64,10 @@ data class AiConfig(
     val ttsQuoteContext: Boolean = false,
     /** 云端识别模型名;留空 = 按端点自动推断(见 [resolveAsrModel])。 */
     val asrModel: String = "",
+    /** 语音通话·断句停顿(秒):说完话安静多久送识别,0=说完立刻(内置 400ms 滞回)。 */
+    val callEndSilenceS: Int = 2,
+    /** 语音通话·静默主动接话(秒):一轮结束后用户沉默多久人物主动找话题。 */
+    val callIdleSpeakS: Int = 5,
 ) {
 
     /** 大模型服务的 API Key(用户填写值;调用方要用生效值走 [effectiveApiKey])。 */
@@ -154,6 +158,12 @@ private const val KEY_TTS_VOICE = "ai_tts_voice"
 private const val KEY_TTS_INSTRUCTION = "ai_tts_instruction"
 private const val KEY_TTS_QUOTE_CONTEXT = "ai_tts_quote_context"
 private const val KEY_ASR_MODEL = "ai_asr_model"
+private const val KEY_CALL_END_SILENCE_S = "ai_call_end_silence_s"
+private const val KEY_CALL_IDLE_SPEAK_S = "ai_call_idle_speak_s"
+
+/** 读滑块整型(0..10 秒,越界钳制;未存过回落默认)。 */
+private fun prefsClampedInt(sp: SharedPreferences, key: String, def: Int): Int =
+    sp.getInt(key, def).coerceIn(0, 10)
 
 /** 读枚举偏好;名字失效(改过枚举名)或未存过返回 null。 */
 private inline fun <reified T : Enum<T>> prefsEnum(sp: SharedPreferences, key: String): T? =
@@ -189,6 +199,8 @@ object AiConfigStore {
             ttsInstruction = sp.getString(KEY_TTS_INSTRUCTION, "").orEmpty(),
             ttsQuoteContext = sp.getBoolean(KEY_TTS_QUOTE_CONTEXT, false),
             asrModel = sp.getString(KEY_ASR_MODEL, "").orEmpty(),
+            callEndSilenceS = prefsClampedInt(sp, KEY_CALL_END_SILENCE_S, 2),
+            callIdleSpeakS = prefsClampedInt(sp, KEY_CALL_IDLE_SPEAK_S, 5),
         )
     }
 
@@ -210,6 +222,8 @@ object AiConfigStore {
             .putString(KEY_TTS_INSTRUCTION, c.ttsInstruction.trim())
             .putBoolean(KEY_TTS_QUOTE_CONTEXT, c.ttsQuoteContext)
             .putString(KEY_ASR_MODEL, c.asrModel.trim())
+            .putInt(KEY_CALL_END_SILENCE_S, c.callEndSilenceS.coerceIn(0, 10))
+            .putInt(KEY_CALL_IDLE_SPEAK_S, c.callIdleSpeakS.coerceIn(0, 10))
             .apply()
     }
 }
