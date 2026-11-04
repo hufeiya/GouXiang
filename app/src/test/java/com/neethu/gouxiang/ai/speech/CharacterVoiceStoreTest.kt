@@ -86,4 +86,22 @@ class CharacterVoiceStoreTest {
         store.setManual(chat, "zh_female_popo_uranus_bigtts")
         assertEquals("ICL_uranus_zh_female_heainainai_tob", store.getOrAssign(chat).fallbackVoiceId)
     }
+
+    @Test fun observationTracksOnlyThisCharacterAndCanBeStopped() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("character_voice_v1", Context.MODE_PRIVATE).edit().clear().commit()
+        val store = CharacterVoiceStore(context)
+        val person = character()
+        store.getOrAssign(person)
+        var observedVoice: String? = null
+        val stop = store.observe(person) { observedVoice = store.getOrAssign(person).voiceId }
+
+        CharacterVoiceStore(context).setManual(person.copy(id = 92), "other_voice")
+        assertNull(observedVoice)
+        CharacterVoiceStore(context).setManual(person, "new_voice")
+        assertEquals("new_voice", observedVoice)
+        stop()
+        CharacterVoiceStore(context).setManual(person, "later_voice")
+        assertEquals("new_voice", observedVoice)
+    }
 }

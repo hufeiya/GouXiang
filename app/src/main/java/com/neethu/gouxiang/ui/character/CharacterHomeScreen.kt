@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +32,7 @@ import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +43,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,6 +53,9 @@ import com.neethu.gouxiang.chat.DialogMode
 import com.neethu.gouxiang.chat.ReplyLength
 import com.neethu.gouxiang.chat.StatusLine
 import com.neethu.gouxiang.data.CharacterEntity
+import com.neethu.gouxiang.ai.config.volcanoVoiceName
+import com.neethu.gouxiang.ai.speech.CharacterVoiceStore
+import com.neethu.gouxiang.ui.aiconfig.VolcanoVoicePickerDialog
 
 /**
  * 角色主页 04(基准 04-character-home.png / 04c-scroll2 / dump 同名 xml):
@@ -103,6 +109,16 @@ fun CharacterHomeScreen(
 ) {
     var modeSheet by remember { mutableStateOf(false) }
     var styleSheet by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val voiceStore = remember(context) { CharacterVoiceStore(context.applicationContext) }
+    var voiceAssignment by remember(character) { mutableStateOf(character?.let(voiceStore::getOrAssign)) }
+    var voicePicker by remember(character?.id) { mutableStateOf(false) }
+    DisposableEffect(character, voiceStore) {
+        val stopObserving = character?.let { current ->
+            voiceStore.observe(current) { voiceAssignment = voiceStore.getOrAssign(current) }
+        }
+        onDispose { stopObserving?.invoke() }
+    }
     BackHandler { onClose() }
 
     Box(
@@ -337,6 +353,14 @@ fun CharacterHomeScreen(
                 ) { onOpenMemory() }
             }
             Spacer(Modifier.height(16.dp))
+            if (character != null) {
+                PlaceholderCard(
+                    "当前音色",
+                    tail = voiceAssignment?.voiceId?.let(::volcanoVoiceName) ?: "未设置（使用全局设置）",
+                    onClick = { voicePicker = true },
+                )
+                Spacer(Modifier.height(12.dp))
+            }
             // ── 占位卡(后续功能,范围 1 明示)─────────────────────────
             // Ta 的装扮(参考图带三张假图条 + 「全部 N 套 ›」)
             Column(
@@ -409,6 +433,16 @@ fun CharacterHomeScreen(
         }
     }
 
+    if (voicePicker && character != null) {
+        VolcanoVoicePickerDialog(
+            selectedValue = voiceAssignment?.voiceId.orEmpty(),
+            onSelect = { voiceStore.setManual(character, it) },
+            onDismiss = { voicePicker = false },
+            showUnselectedOption = false,
+            onResetAutomatic = { voiceAssignment = voiceStore.reset(character) },
+        )
+    }
+
     // ── 弹层 09:对话模式(五选一,选择即时生效并回写宫格副标题)────────
     if (modeSheet) {
         DialogModeSheet(
@@ -468,7 +502,8 @@ private fun PlaceholderCardHeader(title: String, tail: String? = null) {
         Text(title, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.weight(1f))
         if (tail != null) {
-            Text(tail, color = Color.White.copy(alpha = 0.65f), fontSize = 13.sp)
+            Text(tail, color = Color.White.copy(alpha = 0.65f), fontSize = 13.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 200.dp))
             Spacer(Modifier.width(4.dp))
             Text("›", color = Color.White.copy(alpha = 0.65f), fontSize = 14.sp)
         }

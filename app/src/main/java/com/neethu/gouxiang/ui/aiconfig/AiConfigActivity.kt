@@ -19,13 +19,11 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,7 +31,6 @@ import androidx.compose.material.icons.filled.ArrowBackIosNew
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -42,7 +39,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,7 +68,6 @@ import com.neethu.gouxiang.ai.config.asrProviderFor
 import com.neethu.gouxiang.ai.config.chatModelOptions
 import com.neethu.gouxiang.ai.config.resolveAsrModel
 import com.neethu.gouxiang.ai.config.volcanoVoiceName
-import com.neethu.gouxiang.ai.speech.VolcanoEngineTtsAdapter
 import com.neethu.gouxiang.ui.theme.GouXiangTheme
 import kotlinx.coroutines.launch
 
@@ -428,13 +423,11 @@ private fun SettingsTextFieldRow(
 @Composable
 private fun VolcanoVoiceDropdownRow(title: String, selectedValue: String, onSelect: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
-    var query by remember { mutableStateOf("") }
-    val voices = remember { AiProvider.VOLCANO.voices }
     val selectedLabel = if (selectedValue.isBlank()) "未选择（不播放）" else volcanoVoiceName(selectedValue)
     Column(
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .clickable { query = ""; expanded = true }
+            .clickable { expanded = true }
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         Text(title, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -444,33 +437,10 @@ private fun VolcanoVoiceDropdownRow(title: String, selectedValue: String, onSele
         }
     }
     if (expanded) {
-        val filtered = remember(query, voices) {
-            voices.filter { volcanoVoiceName(it).contains(query.trim(), ignoreCase = true) || it.contains(query.trim(), ignoreCase = true) }
-        }
-        AlertDialog(
-            onDismissRequest = { expanded = false },
-            title = { Text("选择火山音色") },
-            text = {
-                Column {
-                    OutlinedTextField(value = query, onValueChange = { query = it }, singleLine = true,
-                        label = { Text("搜索音色名称或 ID") }, modifier = Modifier.fillMaxWidth())
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 400.dp)) {
-                        if (query.isBlank()) item {
-                            Text("未选择（不播放）", modifier = Modifier.fillMaxWidth().clickable {
-                                expanded = false; onSelect("")
-                            }.padding(vertical = 12.dp))
-                        }
-                        items(filtered, key = { it }) { id ->
-                            val marker = if (VolcanoEngineTtsAdapter.supportsInstruction(id)) " · 支持指令" else ""
-                            Text((if (id == selectedValue) "✓ " else "") + volcanoVoiceName(id) + marker,
-                                modifier = Modifier.fillMaxWidth().clickable { expanded = false; onSelect(id) }
-                                    .padding(vertical = 12.dp))
-                        }
-                        if (filtered.isEmpty()) item { Text("没有找到音色", modifier = Modifier.padding(vertical = 12.dp)) }
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { expanded = false }) { Text("关闭") } },
+        VolcanoVoicePickerDialog(
+            selectedValue = selectedValue,
+            onSelect = onSelect,
+            onDismiss = { expanded = false },
         )
     }
 }

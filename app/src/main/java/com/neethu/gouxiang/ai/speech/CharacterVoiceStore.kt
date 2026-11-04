@@ -137,6 +137,16 @@ object VoiceCandidates {
 class CharacterVoiceStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("character_voice_v1", Context.MODE_PRIVATE)
 
+    /** Notify visible screens when another entry point changes this character's assignment. */
+    fun observe(character: CharacterEntity, onChange: () -> Unit): () -> Unit {
+        val prefix = "${key(character)}."
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, changedKey ->
+            if (changedKey?.startsWith(prefix) == true) onChange()
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
     fun getOrAssign(character: CharacterEntity): CharacterVoiceAssignment = getOrAssign(
         key(character), character.name, character.profile, character.intro,
     )
